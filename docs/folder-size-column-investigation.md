@@ -2162,3 +2162,9 @@ SettingsSmoke 的跨进程 INI 用例现分别保存并核对 Shell sort/display
 ### 2026-11-01：递归列身份的标签快照与 INI 往返核对
 
 生产 `OnNavigationPending` 在当前已导航标签上调用 `CaptureViewState`；捕获流程使用同一 Browser 与 view generation 读取模式、列布局、排序和分组，只有完整且仍当前的结果才替换缓存。`PaneControl`/`SessionStore` 以每标签 `ViewState` 保存这些字段。现有跨进程 `ColumnLayoutProcessSmoke` 使用与 NativeProbe provider 完全相同的递归列 PropertyKey（`7E1F84B7-C052-4E51-8A3C-869254A6B910:1`），核对列宽、排序方向、分组方向和路径从 INI 子进程读回；SettingsSmoke 全量运行 exit 0，view-state restore smoke 通过。此项是既有通用快照/INI代码对该 key 的持久化证据，不代表产品物理目录能生成此属性，或该 key 已在用户配置中提供列菜单入口。
+
+### 2026-11-01：QDR 递归列状态恢复到隔离 IShellView
+
+将已核实的 QDR 递归列状态形状（Shell sort/display key `{9e5e05ac-1936-4a75-94f7-4704b8b01923}:1`、provider 数据/分组 key `{7e1f84b7-c052-4e51-8a3c-869254a6b910}:1`、三列自定义顺序与宽度）构造成 `ViewState`，经生产 `ShellViewStateRestore` 恢复到 synthetic `IShellView`。`IColumnManager` 读回三列顺序/宽度，`IFolderView2::GetSortColumns` 读回自定义列及升序；原生行读取确认目录值 10、文件值 4，点击该列标题后方向在 `-1/+1` 间切换且行序反转。NativeProbe Release 构建 0 警告/错误；Private Desktop watchdog exit 0，前台窗口、最后输入和隔离清理守卫均通过；探针输出由本轮命令直接采集。
+
+这是“QDR 字段语义/状态恢复”与“隔离 Shell 实际消费值及排序”的拼接验证：NativeProbe 未直接调用 App 内部 QDR importer/exporter，也没有把真实 `.qdr` 文件解析后恢复到该视图。因此不能称为端到端导入；真实 Q-Dir 文件互操作、产品 ExplorerBrowser 的列提供、跨窗格、多视图刷新和可见交互仍未验证，产品架构未改变。

@@ -288,6 +288,25 @@ public static class SyntheticShellSortProbe
             expectedFileSizeText: "4 B");
     }
 
+    internal static int RunRecursiveSizeViewStateRestoreProbe()
+    {
+        var basicFormat = new Guid("B725F130-47EF-101A-A5F1-02608C9EEBAC");
+        var dataKey = new PropertyKeyState(RecursiveSizeFormatId, 1);
+        var shellSortKey = new PropertyKeyState(Guid.Parse("9E5E05AC-1936-4A75-94F7-4704B8B01923"), 1);
+        var view = new ViewState(4, 16, [new(shellSortKey, 1)], dataKey, false,
+        [
+            new(new(basicFormat, 4), 160),
+            new(new(basicFormat, 10), 240),
+            new(shellSortKey, 176)
+        ]);
+        if (view.SortColumns.Single().Key != shellSortKey || view.GroupKey != dataKey ||
+            view.DisplayColumns is null || view.DisplayColumns.Count != 3)
+            throw new InvalidOperationException("The recursive view-state fixture must keep separate Shell sort/data keys and three display columns.");
+        Console.WriteLine($"recursive-view-state-restore: imported-state-shape=True; sort-key={view.SortColumns[0].Key}; data-group-key={view.GroupKey}; columns={view.DisplayColumns.Count}");
+        return Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
+            useWpfParent: true, viewStateToRestore: view);
+    }
+
     internal static int RunRelativePercentColumnMetadata(uint type)
     {
         if (type is not (0u or 1u or 2u)) throw new ArgumentOutOfRangeException(nameof(type));
@@ -321,7 +340,7 @@ public static class SyntheticShellSortProbe
         int sizeDisplayUnit = 0, int sizeDisplayDecimals = 2, bool sizeDisplayThousands = false,
         string? expectedDirectorySizeText = null, string? expectedFileSizeText = null,
         long? syntheticChildSizeOverride = null, bool onDemandRecursiveSize = false, int onDemandFolderCount = 0,
-        bool asyncOnDemandRecursiveSize = false)
+        bool asyncOnDemandRecursiveSize = false, ViewState? viewStateToRestore = null)
     {
         if (relativePercentColumnType is not null && !recursiveDirectorySizeSortOnly)
             throw new ArgumentException("The relative-percent metadata probe requires the isolated recursive-size view.", nameof(relativePercentColumnType));
@@ -724,6 +743,41 @@ public static class SyntheticShellSortProbe
                 throw new InvalidOperationException("The synthetic Shell view crossed the Private Desktop/foreground boundary.");
 
             Check(Marshal.QueryInterface(view, in FolderView2Id, out folderView));
+            if (viewStateToRestore is not null)
+            {
+                var restoreSucceeded = ShellViewStateRestore.Restore(viewStateToRestore,
+                    new NativeShellViewStateTarget(folderView),
+                    (step, result) => throw new InvalidOperationException($"Imported Q-Dir view restore failed at {step}: 0x{result:X8}."),
+                    () => true);
+                if (!restoreSucceeded)
+                    throw new InvalidOperationException("Imported Q-Dir recursive view state did not complete native Shell restoration.");
+                Check(ShellColumnManager.Capture(folderView, out var restoredColumns));
+                if (restoredColumns is null || !restoredColumns.SequenceEqual(viewStateToRestore.DisplayColumns!) ||
+                    !CaptureNativeSortColumns(folderView).Select(column => new SortColumnState(
+                        new(column.Key.FormatId, column.Key.PropertyId), column.Direction))
+                        .SequenceEqual(viewStateToRestore.SortColumns))
+                    throw new InvalidOperationException("Native Shell did not read back the imported Q-Dir recursive column layout/sort state.");
+                Console.WriteLine($"recursive-view-state-restore: native-restore=True; columns=[{FormatColumns(restoredColumns)}]; sorts=[{FormatSortColumns(CaptureNativeSortColumns(folderView))}]");
+                var restoreListView = FindListView(view);
+                var restoredNames = WaitForNames(restoreListView, module, "child", expectedCount: 2);
+                var recursiveValues = ReadColumnTexts(restoreListView, module, subItem: 2, expectedCount: 2);
+                var valuesByName = restoredNames.Zip(recursiveValues)
+                    .ToDictionary(pair => pair.First, pair => pair.Second, StringComparer.OrdinalIgnoreCase);
+                if (!valuesByName.TryGetValue("child", out var childValue) ||
+                    !valuesByName.TryGetValue("small.bin", out var fileValue) ||
+                    childValue != "10" || fileValue != "4")
+                    throw new InvalidOperationException($"The reordered Q-Dir recursive column did not expose its row values: names=[{string.Join('|', restoredNames)}]; values=[{string.Join('|', recursiveValues)}].");
+                var firstHeaderOrder = SortByHeader(module, restoreListView, columnIndex: 2, expectedCount: 2,
+                    stage: "restored-recursive-column-first-click");
+                var firstDirection = CaptureNativeSortColumns(folderView).Single().Direction;
+                var secondHeaderOrder = SortByHeader(module, restoreListView, columnIndex: 2, expectedCount: 2,
+                    stage: "restored-recursive-column-second-click");
+                var secondDirection = CaptureNativeSortColumns(folderView).Single().Direction;
+                if (firstDirection == secondDirection || !firstHeaderOrder.Reverse().SequenceEqual(secondHeaderOrder))
+                    throw new InvalidOperationException($"The restored recursive column did not toggle its Shell sort direction and reverse the row order: directions={firstDirection}/{secondDirection}; first=[{string.Join('|', firstHeaderOrder)}]; second=[{string.Join('|', secondHeaderOrder)}].");
+                Console.WriteLine($"recursive-view-state-restore: row-values={childValue}/{fileValue}; header-orders=[{string.Join('|', firstHeaderOrder)}]/[{string.Join('|', secondHeaderOrder)}]; directions={firstDirection}/{secondDirection}");
+                return 0;
+            }
             Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, 4, 16)); // FVM_DETAILS.
             Check(At<GetFolder>(folderView, 5)(folderView, in ShellFolder2Id, out var viewFolder));
             Check(Marshal.QueryInterface(folder, in UnknownId, out var rootIdentity));
@@ -4568,6 +4622,45 @@ public static class SyntheticShellSortProbe
     }
 
     [StructLayout(LayoutKind.Sequential)] private struct NativeSortColumn { public ShellColumnManager.NativeKey Key; public int Direction; }
+    private sealed class NativeShellViewStateTarget(nint view) : IShellViewStateTarget
+    {
+        public int SetMode(uint mode, int iconSize) =>
+            At<SetViewModeAndIconSize>(view, 35)(view, mode, iconSize);
+
+        public int SetColumns(IReadOnlyList<DisplayColumnState> columns) =>
+            ShellColumnManager.Apply(view, columns);
+
+        public int SetSorting(IReadOnlyList<SortColumnState> columns)
+        {
+            var native = columns.Select(column => new NativeSortColumn
+            {
+                Key = new ShellColumnManager.NativeKey
+                {
+                    FormatId = column.Key.FormatId,
+                    PropertyId = column.Key.PropertyId
+                },
+                Direction = column.Direction
+            }).ToArray();
+            var pointer = native.Length == 0 ? 0 : Marshal.AllocHGlobal(Marshal.SizeOf<NativeSortColumn>() * native.Length);
+            try
+            {
+                for (var index = 0; index < native.Length; index++)
+                    Marshal.StructureToPtr(native[index], pointer + index * Marshal.SizeOf<NativeSortColumn>(), false);
+                return At<SetSortColumns>(view, 27)(view, pointer, native.Length);
+            }
+            finally { if (pointer != 0) Marshal.FreeHGlobal(pointer); }
+        }
+
+        public int SetGrouping(PropertyKeyState? key, bool ascending)
+        {
+            var native = key is null ? default : new ShellColumnManager.NativeKey
+            {
+                FormatId = key.FormatId,
+                PropertyId = key.PropertyId
+            };
+            return At<SetGroupBy>(view, 17)(view, ref native, ascending ? 1 : 0);
+        }
+    }
     [StructLayout(LayoutKind.Sequential)] private struct NativeInvokeInfo
     {
         public int Size; public uint Mask; public nint Window; public nint Verb; public nint Parameters;
@@ -4661,6 +4754,7 @@ public static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ActivateView(nint self, uint state);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetViewModeAndIconSize(nint self, uint mode, int iconSize);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSortColumns(nint self, nint columns, int count);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetGroupBy(nint self, ref ShellColumnManager.NativeKey key, int ascending);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSortColumns(nint self, nint columns, int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSortColumnCount(nint self, out int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int RefreshView(nint self);
