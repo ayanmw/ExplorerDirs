@@ -25,6 +25,11 @@ internal static class Program
 
     private static int Run(string[] args)
     {
+        if (args.Length == 6 && args[0] == "--shell-provider-session-child" &&
+            Guid.TryParse(args[3], out var sessionChildClassId) &&
+            bool.TryParse(args[5], out var sessionChildIgnoreFolderSort))
+            return ShellProviderLocationProbe.RunSessionRecoveryChild(args[1], args[2], sessionChildClassId,
+                args[4], sessionChildIgnoreFolderSort);
         if (args is ["--column-header-focus"]) return ColumnHeaderFocusProbe.Run();
         if (args is ["--shell-provider-location"]) return ShellProviderLocationProbe.Run();
         if (args is ["--shell-provider-location-descending"]) return ShellProviderLocationProbe.Run(descending: true);

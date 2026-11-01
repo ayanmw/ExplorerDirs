@@ -2327,3 +2327,9 @@ HostProbe Release 构建通过，四种隐藏合成视图场景（正常/忽略�
 扩展同一 HostProbe：以当前稳定 provider CLSID 的 `edpath` parsing name、Details 模式、递归大小排序键、递归/名称列及列宽构造生产 `SessionState`；通过生产 `SessionStore.Save` 写入临时 `ExplorerDirs.ini`，再用新的 `SessionStore.Load` 读回，并以读回的 Tab 路径与 `ViewState` 创建产品 `ExplorerBrowserHost`。路径身份保持，递归列排序键/方向、显示列键/宽度保持。正常递归排序升序与忽略文件夹大小排序降序两轮均通过；子目录导航/Back、父列恢复及普通文件系统排序控制同时通过，临时 profile/注册项随探针清理。
 
 此为同一进程内真实 INI 文件保存、重载和产品 Host 重建，不是退出进程后重新启动或绿色无注册表部署验证；临时 provider CLSID 仍需外部注册才能解析。它证明应用 session 格式能携带原型路径与视图状态，不代表产品启动时会安装/注册 provider、每窗格多标签会话恢复、真实普通目录自定义列或可见体验已完成。
+
+### 2026-11-02：递归列 INI 在独立进程中的 Host 恢复
+
+将上述往返扩展为父子进程：父进程写入临时 `ExplorerDirs.ini` 并注册一次性 HKCU Shell CLSID/NameSpace；新的 HostProbe 子进程重新加载 NativeAdapter、从 INI 读取 parsing name/`ViewState`，再由 Shell 按现存注册激活 provider，创建不可见的生产 `ExplorerBrowserHost`。正常递归升序恢复为 `folder-small → file-middle.bin → folder-large`；启用忽略文件夹大小排序时，降序恢复为 `file-middle.bin → folder-large → folder-small`。两种场景均读到 3 行、递归值 5/12/29 B 和递归列，子进程前台 HWND 不变且测试窗口不可见；父进程随后完成父子目录 Back 与物理文件系统排序对照。HostProbe Release build 0 警告/错误，两种完整运行 exit 0。
+
+首轮失败是子进程在行数刚变为 3 时立即检查顺序，Shell 尚未完成产品 Host 的延迟排序恢复；主进程既有探针已按完整目标顺序等待，本次让子进程使用同一条件等待后通过。该实验真实跨越进程边界并重新通过 Windows Shell 注册激活，但仍由父进程预先建立临时 HKCU 注册，不能证明绿色部署/无注册表激活、产品 App 重启、SessionStore 自动启动路由、所有 pane/tab 配置、普通物理目录派生列或可见交互。产品与 release 未改。

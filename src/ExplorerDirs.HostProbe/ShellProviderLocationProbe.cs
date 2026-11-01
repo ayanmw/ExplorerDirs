@@ -1,5 +1,6 @@
 using Microsoft.Win32;
 using System.Collections;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
@@ -75,6 +76,8 @@ internal static class ShellProviderLocationProbe
                 targetIdentity, initialViewState, initialDirection);
             targetIdentity = (string)restoredTab.GetType().GetProperty("Path")!.GetValue(restoredTab)!;
             var viewState = restoredTab.GetType().GetProperty("View")!.GetValue(restoredTab)!;
+            LaunchSessionRecoveryChild(Path.Combine(root, "ExplorerDirs.ini"), adapterPath, classId, pathA,
+                ignoreFolderSizeForSort);
             Console.WriteLine("shell-provider-session-ini: path-preserved=True; recursive-column-and-sort-preserved=True");
             var hostType = appAssembly.GetType("ExplorerDirs.App.ExplorerBrowserHost", throwOnError: true)!;
             host = (HwndHost)Activator.CreateInstance(hostType, targetIdentity, viewState)!;
@@ -422,6 +425,142 @@ internal static class ShellProviderLocationProbe
             restoredDisplayKeys[1] != (Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 10u, 240))
             throw new InvalidOperationException("The INI round trip changed recursive/name column keys or widths.");
         return loadedTab;
+    }
+
+    internal static int RunSessionRecoveryChild(string profilePath, string adapterPath, Guid classId,
+        string defaultRoot, bool ignoreFolderSizeForSort)
+    {
+        var foregroundBefore = GetForegroundWindow();
+        nint adapter = 0;
+        HwndSource? source = null;
+        HwndHost? host = null;
+        try
+        {
+            adapter = NativeLibrary.Load(adapterPath);
+            Check(GetExport<SetClassId>(adapter, "SetSyntheticFolderClassIdForProbe")(ref classId));
+            Check(GetExport<SetPath>(adapter, "SetSyntheticSortBackingPath")(defaultRoot));
+            Check(GetExport<SetFlag>(adapter, "SetSyntheticCustomSizeColumnForProbe")(1));
+            Check(GetExport<SetFlag>(adapter, "SetSyntheticRecursiveSizeScanOnDemandForProbe")(1));
+            Check(GetExport<SetFlag>(adapter, "SetSyntheticIgnoreRecursiveFolderSizeSortForProbe")(
+                ignoreFolderSizeForSort ? 1 : 0));
+
+            var appAssembly = Assembly.Load("ExplorerDirs.App");
+            var sessionStoreType = appAssembly.GetType("ExplorerDirs.App.SessionStore", throwOnError: true)!;
+            var store = Activator.CreateInstance(sessionStoreType, [profilePath, profilePath + ".legacy"])!;
+            var session = sessionStoreType.GetMethod("Load")!.Invoke(store, null)
+                ?? throw new InvalidOperationException("The child process could not load the parent's INI session.");
+            var panes = ((IEnumerable)session.GetType().GetProperty("Panes")!.GetValue(session)!).Cast<object>().ToArray();
+            var tabs = ((IEnumerable)panes[0]).Cast<object>().ToArray();
+            if (tabs.Length != 1) throw new InvalidOperationException("The child process did not recover the session tab.");
+            var tab = tabs[0];
+            var path = (string)tab.GetType().GetProperty("Path")!.GetValue(tab)!;
+            var viewState = tab.GetType().GetProperty("View")!.GetValue(tab)!;
+            var hostType = appAssembly.GetType("ExplorerDirs.App.ExplorerBrowserHost", throwOnError: true)!;
+            host = (HwndHost)Activator.CreateInstance(hostType, path, viewState)!;
+            var grid = new Grid { Width = 800, Height = 500 };
+            grid.Children.Add(host);
+            source = new HwndSource(new HwndSourceParameters("ExplorerDirs cross-process session recovery probe")
+            {
+                WindowStyle = unchecked((int)0x80000000), Width = 800, Height = 500
+            });
+            source.RootVisual = grid;
+            grid.Measure(new Size(800, 500));
+            grid.Arrange(new Rect(0, 0, 800, 500));
+            grid.UpdateLayout();
+
+            var currentPath = hostType.GetProperty("CurrentPath")!;
+            var navigated = hostType.GetField("_hasNavigated", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var viewWindow = hostType.GetField("_viewWindow", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var readCounts = hostType.GetMethod("ReadItemCounts", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            object? counts = null;
+            WaitUntil(() =>
+            {
+                counts = readCounts.Invoke(host, [false, false]);
+                return string.Equals((string?)currentPath.GetValue(host), path, StringComparison.OrdinalIgnoreCase) &&
+                    Equals(navigated.GetValue(host), true) && (nint)viewWindow.GetValue(host)! != 0 &&
+                    counts is not null && (int)counts.GetType().GetProperty("Total")!.GetValue(counts)! == 3;
+            }, TimeSpan.FromSeconds(20), "the child process did not restore the registered path into the product ExplorerBrowserHost");
+
+            var displayColumns = CaptureDisplayColumns(hostType, host);
+            if (displayColumns.Length != 2 || !displayColumns.Any(value => value.Contains("9e5e05ac-1936-4a75-94f7-4704b8b01923", StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException($"The child process did not restore the recursive display column: [{string.Join('|', displayColumns)}].");
+            var sortColumns = CaptureSortColumns(hostType, host);
+            if (sortColumns.Length != 1 ||
+                !sortColumns[0].Contains("9e5e05ac-1936-4a75-94f7-4704b8b01923", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"The child process did not restore the recursive sort key: [{string.Join('|', sortColumns)}].");
+            var recursiveValues = ReadRecursiveValues(hostType, host, 3);
+            if (recursiveValues.Length != 3 || recursiveValues.Any(value => !TryReadBytes(value, out _)) ||
+                !recursiveValues.Select(value => TryReadBytes(value, out var bytes) ? bytes : ulong.MaxValue)
+                    .Order().SequenceEqual([5UL, 12UL, 29UL]))
+                throw new InvalidOperationException($"The child process loaded the path but not its recursive size values: [{string.Join('|', recursiveValues)}].");
+            var sorts = ((IEnumerable)viewState.GetType().GetProperty("SortColumns")!.GetValue(viewState)!).Cast<object>().ToArray();
+            var descending = (int)sorts[0].GetType().GetProperty("Direction")!.GetValue(sorts[0])! < 0;
+            var capture = hostType.GetMethod("CaptureFileViewExportSnapshot",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!;
+            var order = Array.Empty<string>();
+            var exportColumnsForNames = Array.Empty<string>();
+            WaitUntil(() =>
+            {
+                var (exportColumns, exportRows) = ReadExportRows(capture.Invoke(host, null)!);
+                exportColumnsForNames = exportColumns;
+                var nameIndex = Array.FindIndex(exportColumns, name => name.Equals("Name", StringComparison.OrdinalIgnoreCase) ||
+                    name.Contains("名称", StringComparison.Ordinal));
+                if (nameIndex < 0) return false;
+                order = exportRows.Select(row => Path.GetFileName(row[nameIndex]) ?? row[nameIndex]).ToArray();
+                return MatchesExpectedSortOrder(order, ["folder-small", "file-middle.bin", "folder-large"],
+                    descending, ignoreFolderSizeForSort);
+            }, TimeSpan.FromSeconds(15), $"the child process did not apply the saved recursive sort; columns=[{string.Join('|', exportColumnsForNames)}], order=[{string.Join('|', order)}]");
+            if (IsWindowVisible(source.Handle) || GetForegroundWindow() != foregroundBefore)
+                throw new InvalidOperationException("The cross-process recovery probe changed visibility or foreground ownership.");
+            Console.WriteLine($"shell-provider-session-child: path-restored=True; rows={counts!.GetType().GetProperty("Total")!.GetValue(counts)}; recursive-values=[{string.Join('|', recursiveValues)}]; recursive-column=True; sort=[{string.Join('|', order)}]; parent-visible=False; foreground-unchanged=True");
+            return 0;
+        }
+        finally
+        {
+            if (source is not null)
+            {
+                source.RootVisual = null;
+                source.Dispose();
+            }
+            else if (host is IDisposable disposable)
+                disposable.Dispose();
+            PumpDispatcher(TimeSpan.FromMilliseconds(150));
+            if (adapter != 0) NativeLibrary.Free(adapter);
+        }
+    }
+
+    private static void LaunchSessionRecoveryChild(string profilePath, string adapterPath, Guid classId,
+        string defaultRoot, bool ignoreFolderSizeForSort)
+    {
+        var processPath = Environment.ProcessPath ?? throw new InvalidOperationException("The current process path is unavailable.");
+        var startInfo = new ProcessStartInfo(processPath)
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        if (Path.GetFileNameWithoutExtension(processPath).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+            startInfo.ArgumentList.Add(Assembly.GetExecutingAssembly().Location);
+        startInfo.ArgumentList.Add("--shell-provider-session-child");
+        startInfo.ArgumentList.Add(profilePath);
+        startInfo.ArgumentList.Add(adapterPath);
+        startInfo.ArgumentList.Add(classId.ToString("D"));
+        startInfo.ArgumentList.Add(defaultRoot);
+        startInfo.ArgumentList.Add(ignoreFolderSizeForSort.ToString());
+
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start the session recovery child process.");
+        var standardOutput = process.StandardOutput.ReadToEndAsync();
+        var standardError = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(45000))
+        {
+            process.Kill(entireProcessTree: true);
+            throw new TimeoutException("The cross-process session recovery probe exceeded 45 seconds.");
+        }
+        Task.WaitAll(standardOutput, standardError);
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException($"The cross-process session recovery probe exited {process.ExitCode}. stdout=[{standardOutput.Result}] stderr=[{standardError.Result}]");
+        Console.Write(standardOutput.Result);
     }
 
     private static int RunFilesystemSortRestoreProbe()
@@ -1113,6 +1252,7 @@ internal static class ShellProviderLocationProbe
 
     [DllImport("user32.dll", EntryPoint = "IsWindowVisible")]
     [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsWindowVisibleNative(nint window);
+    [DllImport("user32.dll", EntryPoint = "GetForegroundWindow")] private static extern nint GetForegroundWindow();
     [DllImport("user32.dll", EntryPoint = "GetParent")] private static extern nint GetParent(nint window);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] [return: MarshalAs(UnmanagedType.Bool)] private delegate bool EnumChildProc(nint window, nint parameter);
     [DllImport("user32.dll", EntryPoint = "EnumChildWindows")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool EnumChildWindows(nint parent, EnumChildProc callback, nint parameter);
