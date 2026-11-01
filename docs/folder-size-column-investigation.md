@@ -1728,3 +1728,9 @@ NativeProbe 的 `SFVM_FSNOTIFY` 现在可报告通知 PIDL 解析名称、文件
 回看发现，上述直接 `IContextMenu::InvokeCommand` 对照没有走项目生产路径：`NativeShellCommandMenu` 会初始化 “New” 子菜单（`WM_INITMENUPOPUP`）后才判定/执行 `NewFolder` 动词。现改为在注册 namespace 的 `IShellView` 上通过 `GetItemObject(SVGIO_BACKGROUND)` 取得菜单，并调用产品 `ShellFileCommands.Invoke`/`NativeShellCommandMenu`。命令在真实 backing 目录中创建了一个“新建文件夹”，活动 Shell view 行数从 6 增至 7；探针检测并取消可选的行内重命名编辑，最终由夹具整体清理。执行前先等待 Shell 行数和磁盘项目数一致，避免将前一轮文件操作尚未收敛的刷新误当作新建命令结果。
 
 NativeProbe Release 构建 0 警告/错误；`--explorerbrowser-registered-namespace-private-desktop` 退出码 0，原有菜单查询、文件项删除/重命名、复制/移动、通知和层级导航合同通过。Private Desktop 前台/输入守卫、临时 CLSID/NameSpace 清理通过。它证明生产命令适配器能通过隔离 ExplorerBrowser namespace 的 Shell view 创建目录；不等同于可见菜单弹出/点击、快捷键、提示与进度 UI 或产品窗格接线验收。此前 no-UI 直接调用结果仅是调用方式负向对照，不作为 wrapper 命令能力失败证据。
+
+### 2026-11-01：包装 PIDL DefView 列消费复验
+
+在当前 NativeProbe Release 二进制上重跑 `--static-shell-column-wrapped-adapter-private-desktop`，确认隔离 `IShellView` 使用包装 adapter（`view-uses-adapter=1`），但列表中自定义列各行仍为空；读完列表后计数为 `GetDetailsOf(custom header/item)=1/0`、`GetDetailsEx=0`、`CompareIDs=0`。自定义列和 `System.Document.ByteCount` 的升降序均没有按 2/10/100 数值重排，四项排序合同全部失败，进程退出码 1。标准列标题仍显示，前台 HWND、last-input 与 Private Desktop 清理守卫通过。输出日志在临时目录 `explorer-dirs-wrapped-column.stdout.log`，SHA-256 `DD17FB313BC9607ACA9645192929C3019DB5CD48D0BABE57977D5C545271CBAA`。
+
+这是对 2026-10-28 包装 PIDL 结果在当前源码上的复验，不是新的成功路径：单纯改变项目 PIDL 身份仍不足以让 DefView 请求逐项属性或比较键。当前默认 DefView adapter 方案不满足“逐行显示且可排序”的门槛；不应重复相同包装方式或接入产品。若继续追逐此功能，下一条有意义的原型应改为可控制行值读取/排序的数据视图，并先用隔离视图比较其 Shell 菜单、文件操作、焦点、拖放、通知和刷新成本；在这些行为门槛有结果前，递归列继续留在 NativeProbe，产品保留 F9/状态栏扫描。
