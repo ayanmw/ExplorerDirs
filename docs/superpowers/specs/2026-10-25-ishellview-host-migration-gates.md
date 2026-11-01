@@ -182,3 +182,7 @@ Private Desktop 宿主 teardown 和前台守卫问题已在 WPF 根宿主路径�
 ### 2026-11-01：七类虚拟 Shell 位置的历史往返
 
 在现有隐藏 host-filter Private Desktop 探针中，将 PIDL Back/Forward 身份检查推广至 Desktop、This PC、Recycle Bin、Libraries、Network Places、Search Folder 和 ZIP provider。每个目标都验证 view 创建后 Back 恢复实际前置绝对 PIDL，Forward 恢复本目标绝对 PIDL；项目数只记录首个成功读取值，不等待索引稳定。连续两轮完整 watchdog 均 exit 0，所有虚拟目标首个 Back/Forward 计数均为 0，前台、输入与隔离清理守卫通过。该结果只覆盖本机当前 Windows 的这七个目标，不证明搜索结果最终加载、其他 provider、产品 ExplorerBrowser 或可见行为。NativeProbe Release 构建 0 警告/错误。日志：`src/.state/native-probe-watchdog/20261101-083358-592227e0.stdout.log`、`20261101-083358-592227e0.stderr.log`、`src/.state/native-probe-watchdog/20261101-083428-be0ccd92.stdout.log`、`src/.state/native-probe-watchdog/20261101-083428-be0ccd92.stderr.log`。
+
+### 2026-11-01：Control Panel 与不支持计数的历史 view
+
+将 Control Panel (`::{26EE0668-A00A-44D7-9371-BEB064C98683}`) 加入虚拟位置全量历史样本。连续两轮完整 Private Desktop watchdog exit 0：Desktop、This PC、Recycle Bin、Libraries、Network Places、Control Panel、Search Folder、ZIP 的 Back/Forward 均恢复各自绝对 PIDL。Control Panel 自身及紧随其后的 Search Folder Back view 中 `IFolderView.ItemCount` 返回 `E_FAIL`（`0x80004005`），因此历史合同显式记录计数 HRESULT，并允许在 view handoff 后仅按 PIDL 判定导航；不表示这些 view 的项目列表可读取或已经加载。两轮前台、输入、隔离清理守卫均通过。NativeProbe Release 构建 0 警告/错误。日志：`src/.state/native-probe-watchdog/20261101-083735-fb9bff57.stdout.log`、`20261101-083735-fb9bff57.stderr.log`、`src/.state/native-probe-watchdog/20261101-083807-bf91f621.stdout.log`、`src/.state/native-probe-watchdog/20261101-083807-bf91f621.stderr.log`。

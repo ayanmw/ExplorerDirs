@@ -467,7 +467,8 @@ internal static class ShellViewHostFilterProbe
                 ("shell:MyComputerFolder", "ThisPC"),
                 ("shell:RecycleBinFolder", "RecycleBin"),
                 ("shell:Libraries", "Libraries"),
-                ("shell:NetworkPlacesFolder", "NetworkPlaces")
+                ("shell:NetworkPlacesFolder", "NetworkPlaces"),
+                ("::{26EE0668-A00A-44D7-9371-BEB064C98683}", "ControlPanel")
             })
                 BrowseVirtualScope(parsingName, label);
 
@@ -504,15 +505,17 @@ internal static class ShellViewHostFilterProbe
                     Console.WriteLine($"ishellview-host-filter: virtual-shell-view-created=True; target={label}; folder-view-items={itemCount}; folder-view-items-hr=0x{itemCountLastHResult:X8}; list-view-items={listViewItems}; {InspectNativeContracts(readVerbs: label is not "ZipContainer" and not "ControlPanel")}");
                     Check(host.BrowseObject(0, SbspNavigateBack));
                     var backItemCount = AdoptPendingView(expectedItemCount: null,
-                        allowItemCountFailure: label == "ControlPanel", returnOnFirstSuccessfulCount: true);
+                        allowItemCountFailure: true, returnOnFirstSuccessfulCount: true);
+                    var backItemCountHResult = itemCountLastHResult;
                     if (!ILIsEqual(host.CurrentPidl, previousLocationPidl))
                         throw new Exception($"Back from {label} did not restore the previous absolute location.");
                     Check(host.BrowseObject(0, SbspNavigateForward));
                     var forwardItemCount = AdoptPendingView(expectedItemCount: null,
-                        allowItemCountFailure: label == "ControlPanel", returnOnFirstSuccessfulCount: true);
+                        allowItemCountFailure: true, returnOnFirstSuccessfulCount: true);
+                    var forwardItemCountHResult = itemCountLastHResult;
                     if (!ILIsEqual(host.CurrentPidl, virtualFolderPidl))
                         throw new Exception($"Forward to {label} did not restore its absolute PIDL identity.");
-                    Console.WriteLine($"ishellview-host-filter: virtual-history-roundtrip=True; target={label}; back-items={backItemCount}; forward-items={forwardItemCount}; pidl-identity-preserved=True");
+                    Console.WriteLine($"ishellview-host-filter: virtual-history-roundtrip=True; target={label}; back-items={backItemCount}; back-hr=0x{backItemCountHResult:X8}; forward-items={forwardItemCount}; forward-hr=0x{forwardItemCountHResult:X8}; view-counts-readable={backItemCount >= 0 && forwardItemCount >= 0}; pidl-identity-preserved=True");
                     TraceVirtualScope($"{label}-complete", foreground);
                 }
                 finally
