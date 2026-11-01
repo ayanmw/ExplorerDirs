@@ -2601,3 +2601,9 @@ App Release build 现在在构建阶段编译产品 native adapter，并将 DLL 
 增加一个明确 opt-in 的菜单入口：在“开发者”菜单选择“在新标签打开逐行递归大小实验视图”，将当前确认的文件系统目录编码为 profile-owned Shell parsing name，再以 `Name → Recursive Size → Type` 的详细视图状态创建独立标签。原始标签与其列、排序和浏览状态不变；关闭实验标签即可回到原目录。会话保存的是 provider parsing name，启动时由既有 profile owner 重建 volatile 注册；Q-Dir 导出使用现有 codec 将该身份转回物理目录路径。
 
 本轮 Release App build 0 警告/错误，Q-Dir provider path encode/decode/export round-trip smoke 通过。既有隐藏 HostProbe 已验证生产 ExplorerBrowserHost 可导航该类 provider 身份、显示递归列值并导出自定义列文本，但尚未用实际 App 菜单创建标签，也未做桌面可见列标题/异步绘制、重启恢复、排序、焦点/选区或完整文件操作验收。故入口保留为实验功能，不宣称普通物理目录的 ExplorerBrowser 原生视图已经支持递归大小列。
+
+### App profile owner 与实验 view 的隐藏 HostProbe 闭环
+
+新增 `--profile-owner-shell-host`，不再由探针手工写 HKCU CLSID/NameSpace，而是调用生产 `ProfileShellNamespaceOwner.Start` 加载产品 DLL 并建立 volatile 注册；再用生产路径 codec 生成当前实验菜单使用的 provider identity，按 App 的三列 `ViewState` 创建不可见 `ExplorerBrowserHost`。HostProbe 验证当前路径保持 provider identity、位置分类为非文件系统、三列配置捕获完整、Q-Dir 文本路径解码回原物理文件夹、异步递归值读回 5/29 B。释放 host 后生产 owner 清除两类 volatile key；父 HWND 不可见、前台 HWND 未改变。Release HostProbe build 0 警告/错误，探针 exit 0。
+
+首次探针读取时 provider 按合同返回异步占位 `0/0`；原有 product HostProbe 也等待真实期望值而非“可解析数字”。新探针据此改成等到 `{5,29}` 再通过，没有修改产品缓存/通知行为。本闭环仍未实际运行 App 菜单、跨进程/重启 session 恢复、可见绘制、自动排序、焦点/选区和文件操作验收。
