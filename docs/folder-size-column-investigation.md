@@ -2511,7 +2511,7 @@ NativeProbe Release 构建 0 警告/错误；Private Desktop watchdog exit 0，�
 
 重新检查当前 `scripts/publish.ps1` 并运行 `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/publish-smoke.ps1`：exit 0，输出 `Publish isolation smoke: PASS (fixture payload only; no real release or GUI)`。现有脚本在隔离预览副本中生成不同于源 profile 的 CLSID，重写复制的 INI 和 `.qdr` 中 `ExplorerDirs.State` Base64 JSON；测试还确认两次预览获得不同 CLSID、源 profile fixture 哈希不变、QDR `DirN` 物理路径保留。未改动脚本或真实 releases。
 
-此 smoke 当前没有用生产 `SessionStore.Parse` 读回重映射后的合法窗口会话：其 `ExplorerDirs.ini` 和第二窗口 fixture 只有简化 `Path=...` 文本，所以它证明发布脚本替换文本，不单独证明 SessionStore 的实际完整格式能恢复新路径。另从生产 `QuickLinkStore.AddFolderLocation` 确认，普通/虚拟 Shell 文件夹使用 `IShellLink.SetIDList` 写 PIDL；隔离发布会原样复制 `QuickLinks/*.lnk`，不读取或重写二进制 PIDL。若链接指向本程序 provider，旧 CLSID 可能仍存在于副本中。当前产品尚未注册该 provider，因此实际用户链接路径尚未产生；这属于 provider 集成前仍需关闭的克隆兼容缺口。
+此 smoke 当前没有用生产 `SessionStore.Parse` 读回重映射后的合法窗口会话：其 `ExplorerDirs.ini` 和第二窗口 fixture 只有简化 `Path=...` 文本，所以它证明发布脚本替换文本，不单独证明 SessionStore 的实际完整格式能恢复新路径。另从生产 `QuickLinkStore.AddFolderLocation` 确认，普通/虚拟 Shell 文件夹使用 `IShellLink.SetIDList` 写 PIDL；隔离发布会原样复制 `QuickLinks/*.lnk`，不读取或重写二进制 PIDL。进一步复核 NativeProbe 的 `SyntheticRootPathPidlItem` 后，根路径 PIDL 项本身编码 `DPRT` magic、路径分段索引和路径字符，不含 CLSID；CLSID 在 `GetDisplayNameOf` 生成的 parsing name 中。因此 `.lnk` 风险不是可对二进制做 CLSID 文本替换，而是 Shell 在另一注册 CLSID 下能否把相同 PIDL 绑定到新 provider。当前产品尚未注册该 provider，实际用户链接路径尚未产生；需在接线前实测跨注册身份的 PIDL 解析。
 
 下一步为有效 `SessionStore` profile 做新旧 CLSID 的解析往返验证，并确定是否能安全识别/重建 `.lnk` 的 provider PIDL；不能识别的链接需明确保留原始目标或在隔离副本中跳过，不能静默导向另一 profile。此轮无窗口、无产品代码或 release 变更。
 
@@ -2519,4 +2519,4 @@ NativeProbe Release 构建 0 警告/错误；Private Desktop watchdog exit 0，�
 
 新增 `--shell-namespace-profile-clone-smoke`，用生产 `SessionStore.Render` 生成带 provider parsing name 的完整会话，将其中 CLSID 改为隔离副本身份后再经 `SessionStore.ParseComplete` 读回，并核对新路径、视图模式和排序方向。定向 smoke 通过；`scripts/publish-smoke.ps1` 也再次通过。首次构建发现新用例漏传 `ViewState.GroupKey` 且 CLI 分支使用了未限定命名空间，修正后 Release `dotnet run` exit 0。
 
-这补上了此前发布 smoke 的会话格式缺口，仍只验证有效会话文本重映射；未验证 QuickLinks `.lnk` 内 PIDL 的 provider CLSID、实际克隆 profile 启动或注册 owner 生命周期。没有启动 GUI、修改产品运行配置或触碰 release。下一步先用 Shell Link COM 接口读取/识别隔离测试链接是否指向旧 provider，再决定可安全重写的边界；逐行递归大小列仍未接入产品。
+这补上了此前发布 smoke 的会话格式缺口，仍只验证有效会话文本重映射；未验证 QuickLinks `.lnk` 内 Shell PIDL 在换注册 CLSID 后是否可重用、实际克隆 profile 启动或注册 owner 生命周期。没有启动 GUI、修改产品运行配置或触碰 release。下一步创建临时 Shell Link 保存 provider 根 PIDL，切换到另一 CLSID 注册后分别测试 Shell parsing name、folder bind 和链接目标解析；只有全链路通过，才决定隔离发布是否可以原样复制 PIDL，否则设计可恢复的 profile 内链接身份存储。逐行递归大小列仍未接入产品。
