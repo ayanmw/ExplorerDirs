@@ -2174,3 +2174,12 @@ SettingsSmoke 的跨进程 INI 用例现分别保存并核对 Shell sort/display
 NativeProbe 现在直接链接生产 `QdrViewWriter` 与 `QdrImporter` 源码，在临时目录夹具上写入 `.qdr` 文件，再由 `QdrImporter.Load` 解析实际文件；探针核对导入路径、三列 PROPERTYKEY/宽度、排序键和分组键后，将导入的 `ViewState` 传给生产 `ShellViewStateRestore`。Private Desktop 上 Shell 读回列与排序状态，递归值为 10/4，标题交互方向为 `-1/+1` 且行序反转；预期导入提示为“窗口位置及程序启动命令不导入”。NativeProbe Release build 0 警告/错误，探针 exit 0，前台/输入/清理守卫通过。
 
 这证明本程序生成的合法 QDR 文件可经生产 importer 到达隔离 Shell 视图，补足上节“拼接验证”缺少真实文件解析的部分。文件来自当前 QdrViewWriter，不是从 Q-Dir 安装中取得的第三方 `.qdr`；不能据此证明 Q-Dir 导出文件兼容。产品 ExplorerBrowser 未接入递归列，用户可见交互、多窗格及生产刷新仍未验证。
+### 2026-11-02：注册 namespace 递归列导航链复验
+
+在 Private Desktop 重新运行现有 ExplorerBrowser 注册 namespace 完整探针，exit 0。根、child、nested 的实际导航及 `SBSP_PARENT`、Shell TravelLog Back/Forward 均完成；child 和 Forward 重建的新 view 初始未显示递归列时，生产 `ShellViewStateRestore` 重新应用列状态后，nested 行读回 10 B。self-hosted `IShellView` 同场探针也完成 root→child→nested，递归列可见且排序键读回；根目录和子目录 Shell 通知、原生 New Folder 行更新、IContextMenu、删除/改名、经 `IFileOperation` 的复制与移动均通过。临时 CLSID/NameSpace 注册已清理，Private Desktop 前台/输入隔离守卫通过。
+
+同轮重跑的 `BrowseToObject` 包装物理文件夹探针再次显示：调用返回 `S_OK`，但活动 `IShellFolder` 身份不是 adapter，ExplorerBrowser 将位置绑定到普通文件系统夹。这条直达路径不能让逐行属性进入 ExplorerBrowser 的物理目录 view。注册的自定义 namespace 能提供递归列与完整层级导航，但这是另一种 host/provider 架构，不能据此认为已集成产品。
+
+拖放诊断需谨慎解释：注册 namespace child 的直接 `IDropTarget::DragEnter/Drop` 调用接受 COPY；MOVE 在这段测试中报告 effect=0。探针源码明确说明直接调用没有执行 `DoDragDrop` 的源端完成阶段，因此此结果不能判为真实 Shell MOVE 失败。独立的 Shell `IFileOperation` IDataObject MOVE 已成功，源被移除且目标内容一致。仍需使用真实 OLE drag loop 才能判定拖放 MOVE；未验证可见 Explorer Dirs 窗格、真实物理路径、多窗格竞争和产品生命周期。
+
+本次仅复跑隔离探针，没有修改产品或发布版。结果日志位于用户临时目录 `explorer-dirs-registered-namespace-20261102.log` 与 `explorer-dirs-recursive-probe-20261102.log`。接下来优先评估注册 namespace 方案的便携部署和物理文件夹转接成本，再决定是否推进产品级 host 原型；ExplorerBrowser `BrowseToObject` 不能作为这层转接的替代方案。
