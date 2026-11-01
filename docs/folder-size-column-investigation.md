@@ -2435,3 +2435,9 @@ NativeProbe Release 构建 0 警告/错误；注册 namespace Private Desktop wa
 在同一存活的 ExplorerBrowser peer view 中，用已显示的 `shared-folder` 行完成第二次异步递归扫描：先仅从测试缓存精确移除旧 29 B 快照，将 payload 改为 11 B，再通过该真实 provider 的列值读取排入受 gate 控制的扫描。扫描完成时测试专用分支解析该目录的绝对 Shell PIDL 并发送 `SHCNE_UPDATEITEM`；Private Desktop watchdog exit 0，更新路径计数确认发送的是 item 事件而非 fallback 的 `SHCNE_UPDATEDIR`。Shell 之后再次请求 item details，provider 读回 11 B。
 
 两种通知都观察到 provider `EnumObjects` 增加一次：完整目录通知样本为 27→28，目标项通知为 28→29。因此本轮没有测出目标项事件减少 provider 重枚举；单次原型样本也不能证明两种刷新对像素闪烁、列表行原位更新、选区/焦点或性能的差异。目标项事件的值回读链路可用，但是否保留为产品候选仍需真实行绘制和状态检查；产品通知策略未改。Native adapter 与 NativeProbe Release 构建 0 警告/错误，Private Desktop 前台/last-input 与临时注册清理守卫通过。最终日志：`src/.state/native-probe-watchdog/20261102-033052-3ba7fc72.stdout.log`、`.stderr.log`。
+
+### 2026-11-02：ExplorerBrowser 行可访问性与焦点/选区保留
+
+在上述目标项通知场景读取真实 ExplorerBrowser `DirectUIHWND` 的 UI Automation 树。它提供 `ListItem` 行名及选择状态，但没有暴露递归大小的行内单元格文本；因此 UIA 不能证明屏幕上“11”已绘制。异步通知前后，`shared-folder` 都保持选中；通过 `IFolderView.GetFocusedItem` 解析出的焦点行名前后均为 `shared-folder`。扫描完成时另有一个新行加入，故该行索引从 1 变为 2，但焦点身份未变。Shell provider 在通知后再次请求 item details 并读回 11，`EnumObjects` 仍只增加一次。
+
+NativeProbe Release 构建 0 警告/错误；Private Desktop watchdog exit 0，前台/last-input 未变，临时注册清理通过。最终证据：`src/.state/native-probe-watchdog/20261102-033553-2acb7426.stdout.log` 与 `.stderr.log`。这是隐藏桌面下 Shell 行状态、选区/焦点身份及 provider 回调的证据，不是可见像素验收，也没有证明当前产品异步扫描已接入或屏幕列值刷新无闪烁。下一步需要在产品可见验收时确认自定义列绘制；本轮不改变刷新策略。

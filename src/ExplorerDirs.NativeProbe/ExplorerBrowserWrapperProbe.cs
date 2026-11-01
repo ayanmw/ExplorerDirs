@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Forms;
+using System.Windows.Automation;
 using System.Windows.Threading;
 using ExplorerDirs.App;
 using Microsoft.Win32;
@@ -1000,6 +1001,11 @@ internal static class ExplorerBrowserWrapperProbe
             var itemEnumerationBaseline = getEnumerationCount();
             var itemScanFinishedBaseline = getFinished();
             var itemScanCompletedBaseline = getCompleted();
+            var targetRowIndex = FindViewItemIndexByName(peerFolderView, peerViewFolder, itemNotificationChildName);
+            if (targetRowIndex < 0) throw new InvalidOperationException("The target item disappeared before focus-retention probing.");
+            Marshal.ThrowExceptionForHR(At<SelectViewItem>(peerFolderView, 15)(peerFolderView, targetRowIndex, 0x15));
+            var focusedRowBefore = ReadFocusedViewItemName(peerFolderView, peerViewFolder);
+            var itemRowAccessibilityBefore = ReadAccessibleShellRows(peerShellView);
             File.WriteAllBytes(Path.Combine(peerFixture, itemNotificationChildName, "payload.bin"), new byte[11]);
             Marshal.ThrowExceptionForHR(invalidateSnapshot(peerShellView, itemNotificationChildName));
             var pendingItemValue = ReadParsedItemDetailsByName(peerViewFolder, itemNotificationChildName, 1);
@@ -1026,12 +1032,19 @@ internal static class ExplorerBrowserWrapperProbe
             var itemEnumerationsAfter = getEnumerationCount();
             var valueAfterItemNotification = ReadParsedItemDetailsByName(peerViewFolder, itemNotificationChildName, 1);
             var itemValueReadbackAfterNotification = valueAfterItemNotification == "11" && getItemDetailsCount() > itemDetailsBaseline;
+            var focusedRowAfter = ReadFocusedViewItemName(peerFolderView, peerViewFolder);
+            var itemRowAccessibilityAfter = ReadAccessibleShellRows(peerShellView);
             var typedItemNotificationSent = getItemNotificationCount() > itemTypedNotificationBaseline;
             var directoryNotificationDelta = getDirectoryNotificationCount() - itemDirectoryNotificationBaseline;
-            Console.WriteLine($"explorerbrowser-registered-namespace-item-update-ab: updateitem-sent={typedItemNotificationSent}; notifications={itemNotificationBaseline}->{getNotificationCount()}; directory-notification-delta={directoryNotificationDelta}; item-details-callback={getItemDetailsCount() - itemDetailsBaseline}; enumerations={itemEnumerationBaseline}->{itemEnumerationsAfter}; value={valueAfterItemNotification}; provider-value-readback-after-notification={itemValueReadbackAfterNotification}");
+            Console.Error.WriteLine($"explorerbrowser-registered-namespace-row-accessibility: before=[{itemRowAccessibilityBefore}]; after=[{itemRowAccessibilityAfter}]");
+            Console.WriteLine($"explorerbrowser-registered-namespace-item-update-ab: updateitem-sent={typedItemNotificationSent}; notifications={itemNotificationBaseline}->{getNotificationCount()}; directory-notification-delta={directoryNotificationDelta}; item-details-callback={getItemDetailsCount() - itemDetailsBaseline}; enumerations={itemEnumerationBaseline}->{itemEnumerationsAfter}; value={valueAfterItemNotification}; provider-value-readback-after-notification={itemValueReadbackAfterNotification}; focused-row={focusedRowBefore}->{focusedRowAfter}; row-accessibility-before=[{itemRowAccessibilityBefore}]; row-accessibility-after=[{itemRowAccessibilityAfter}]");
             if (getFinished() <= itemScanFinishedBaseline || getCompleted() <= itemScanCompletedBaseline ||
                 getNotificationCount() <= itemNotificationBaseline || !typedItemNotificationSent || directoryNotificationDelta != 0 ||
-                !itemValueReadbackAfterNotification)
+                !itemValueReadbackAfterNotification ||
+                !string.Equals(focusedRowBefore, itemNotificationChildName, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(focusedRowAfter, itemNotificationChildName, StringComparison.OrdinalIgnoreCase) ||
+                !itemRowAccessibilityBefore.Contains("shared-folder:selected=True", StringComparison.Ordinal) ||
+                !itemRowAccessibilityAfter.Contains("shared-folder:selected=True", StringComparison.Ordinal))
                 throw new InvalidOperationException($"The targeted update notification did not return the completed recursive value to the Shell provider: finished={itemScanFinishedBaseline}->{getFinished()}; completed={itemScanCompletedBaseline}->{getCompleted()}; notifications={itemNotificationBaseline}->{getNotificationCount()}; item-details={itemDetailsBaseline}->{getItemDetailsCount()}; value='{valueAfterItemNotification}'.");
             Marshal.ThrowExceptionForHR(setItemNotification(0));
         }
@@ -1839,6 +1852,70 @@ internal static class ExplorerBrowserWrapperProbe
         return found;
     }
 
+    private static string ReadAccessibleShellRows(nint shellView)
+    {
+        var shellViewWindow = At<GetWindow>(shellView, 3)(shellView, out var viewWindow) >= 0 ? viewWindow : 0;
+        if (viewWindow == 0) return "<no-view-window>";
+        try
+        {
+            var root = AutomationElement.FromHandle(viewWindow);
+            var descendants = root.FindAll(TreeScope.Descendants, Condition.TrueCondition);
+            var rows = new List<string>();
+            for (var index = 0; index < descendants.Count && index < 256; index++)
+            {
+                var element = descendants[index];
+                var controlType = element.Current.ControlType.ProgrammaticName;
+                if (controlType is not ("ControlType.DataItem" or "ControlType.ListItem" or "ControlType.Text"))
+                    continue;
+                var name = element.Current.Name;
+                if (name.Length != 0)
+                {
+                    string selected;
+                    string keyboardFocus;
+                    try
+                    {
+                        selected = element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var pattern)
+                            ? ((SelectionItemPattern)pattern).Current.IsSelected.ToString() : "unsupported";
+                    }
+                    catch (Exception) { selected = "unsupported"; }
+                    try { keyboardFocus = element.Current.HasKeyboardFocus.ToString(); }
+                    catch (Exception) { keyboardFocus = "unsupported"; }
+                    rows.Add($"{controlType}:{name}:selected={selected}:keyboard-focus={keyboardFocus}");
+                }
+            }
+            return rows.Count == 0 ? $"<no-row-text;descendants={descendants.Count}>" : string.Join('|', rows);
+        }
+        catch (Exception exception)
+        {
+            return $"<uia-error:{exception.GetType().Name}:{exception.HResult:X8}>";
+        }
+    }
+
+    private static int FindViewItemIndexByName(nint folderView, nint folder, string expectedName)
+    {
+        Marshal.ThrowExceptionForHR(At<GetItemCount>(folderView, 7)(folderView, 2, out var count));
+        for (var index = 0; index < count; index++)
+        {
+            Marshal.ThrowExceptionForHR(At<GetItemPidl>(folderView, 6)(folderView, index, out var item));
+            try
+            {
+                if (string.Equals(ReadShellDetailsText(folder, item, 0), expectedName, StringComparison.OrdinalIgnoreCase))
+                    return index;
+            }
+            finally { Marshal.FreeCoTaskMem(item); }
+        }
+        return -1;
+    }
+
+    private static string ReadFocusedViewItemName(nint folderView, nint folder)
+    {
+        var hr = At<GetFocusedViewItem>(folderView, 10)(folderView, out var index);
+        if (hr < 0 || index < 0) return $"<unavailable:0x{hr:X8}:{index}>";
+        Marshal.ThrowExceptionForHR(At<GetItemPidl>(folderView, 6)(folderView, index, out var item));
+        try { return ReadShellDetailsText(folder, item, 0); }
+        finally { Marshal.FreeCoTaskMem(item); }
+    }
+
     private static string[] ReadNativeHeaderTitles(nint header)
     {
         var count = checked((int)SendMessageW(header, 0x1200, 0, 0)); // HDM_GETITEMCOUNT
@@ -1987,6 +2064,8 @@ internal static class ExplorerBrowserWrapperProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCurrentView(nint self, ref Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFolder(nint self, ref Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemPidl(nint self, int index, out nint pidl);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFocusedViewItem(nint self, out int index);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SelectViewItem(nint self, int index, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCurFolder(nint self, out nint pidl);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetClassId(nint self, out Guid classId);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemCount(nint self, uint scope, out int count);
