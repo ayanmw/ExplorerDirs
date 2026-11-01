@@ -6,6 +6,8 @@
 
 此项修正先前探针对“列标题索引”的假设：Header 的 item index 与屏幕显示顺序是不同索引域；必须用 `HDM_GETORDERARRAY` 映射视觉列位置，不能直接拿 `IColumnManager` 快照索引模拟用户点击。NativeProbe Release 构建通过（0 警告/错误），注册 namespace Private Desktop 探针返回并通过前台、输入、隔离清理守卫。日志：`src/.state/native-probe-watchdog/20261101-233440-382b5b77.stdout.log`。这仍是合成 `IShellView` 原型证据，未接入产品 ExplorerBrowser，也未验证用户可见列重排、产品排序状态捕获或 Q-Dir 导入后的列键映射。
 
+源码复核显示，产品的 `ColumnLayout.IsValid` 不限制已知列白名单：它验证非空格式 GUID、宽度范围和列键唯一性；`SessionStore` 保存/恢复 PROPERTYKEY 与宽度，`ShellViewStateCapture/Restore` 也保留 Shell 当前给出的列/排序键。因此通用会话层不是递归列的首要阻断点。当前缺口仍是产品 ExplorerBrowser 所浏览的物理文件夹没有递归大小值 provider；这些通用快照代码只会保存 Shell 实际暴露的列，不能创造列或逐行数据。此判断来自源码路径审阅，没有改动产品实现，也不把“未知键可持久化”误当成列值消费通过。
+
 ## 2026-11-01：Shell 多项文件通知合并失效
 
 将多项 `IFileOperation.NewItem`/`DeleteItem` 排入单个 Shell 操作，在 `size-10` 中分别创建三个文件（1/2/3 B）和删除这三个文件。探针先等到三个不同路径的 `SHCNE_CREATE`/`SHCNE_DELETE` 都抵达，再将整批通知送入一次缓存失效处理：两组都只失效一个递归根；两视图各请求一次并共享单次重扫，结果由 20 B 到 26 B 再回到 20 B。每批通知没有造成三次重复扫描；行 ID、排序、选择和焦点保持。
