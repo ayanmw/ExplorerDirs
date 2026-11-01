@@ -2615,3 +2615,11 @@ HostProbe Release build 通过，0 警告/错误，`git diff --check` 通过。�
 新增 `--profile-owner-shell-host`，不再由探针手工写 HKCU CLSID/NameSpace，而是调用生产 `ProfileShellNamespaceOwner.Start` 加载产品 DLL 并建立 volatile 注册；再用生产路径 codec 生成当前实验菜单使用的 provider identity，按 App 的三列 `ViewState` 创建不可见 `ExplorerBrowserHost`。HostProbe 验证当前路径保持 provider identity、位置分类为非文件系统、三列配置捕获完整、Q-Dir 文本路径解码回原物理文件夹、异步递归值读回 5/29 B。释放 host 后生产 owner 清除两类 volatile key；父 HWND 不可见、前台 HWND 未改变。Release HostProbe build 0 警告/错误，探针 exit 0。
 
 首次探针读取时 provider 按合同返回异步占位 `0/0`；原有 product HostProbe 也等待真实期望值而非“可解析数字”。新探针据此改成等到 `{5,29}` 再通过，没有修改产品缓存/通知行为。本闭环仍未实际运行 App 菜单、跨进程/重启 session 恢复、可见绘制、自动排序、焦点/选区和文件操作验收。
+
+### 2026-11-02：递归列跨进程 provider 枚举基线
+
+为避免在 DefView 正处理异步通知时从同一进程重入 `IShellFolder.EnumObjects`，HostProbe 新增无窗口子进程：它加载同一产品 adapter、用同一临时 CLSID/根目录配置 provider，经标准 COM interop 绑定 provider 根并计数目录 PIDL。2 项夹具返回 2 项；16 项夹具返回 16 项，进程退出码均为 0。子进程没有创建 Shell view，也没有在活动视图线程内调用 provider。
+
+完整 HostProbe 本轮随后分别尝试 2 项、16 项及表头排序场景，但都在逐项 `SHCNE_UPDATEITEM` 观察阶段中止，观察器未收到预期事件，因此没有产生 provider 行数与 DefView 行数同一时间点的对照，也没有到排序点击步骤。该次无事件结果可能与通知/观察器时序有关，不能证明产品通知链路已经回归；之前同类通知链曾通过独立探针复验。当前可得的结论仅是：单独绑定并枚举产品 provider 时，目录计数与夹具一致；此前 DefView 的 0/4 行现象仍未能归因于 provider 重复枚举或列表内部瞬态行状态。
+
+HostProbe Release build 0 警告/错误。没有可见窗口、没有产品行为改动、没有发布。下一步先用独立的通知观察器复验当前产品 adapter 的项更新送达，再在通知已确认的同一轮中保留跨进程枚举基线并同步采集 DefView 行快照；在得到稳定同轮样本前，不接自动排序。

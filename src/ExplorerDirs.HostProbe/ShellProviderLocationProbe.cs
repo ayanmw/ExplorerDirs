@@ -64,6 +64,11 @@ internal static class ShellProviderLocationProbe
             RegisterVolatileNamespace(namespaceKeyPath);
             namespaceRegistered = true;
 
+            stage = "cross-process-provider-enumeration";
+            var directProviderCount = LaunchProviderEnumerationChild(classId, adapterPath, fallbackRoot, viewRoot);
+            if (directProviderCount != expectedFolderCount)
+                throw new InvalidOperationException($"The isolated provider enumerated {directProviderCount} folders; expected {expectedFolderCount}.");
+
             stage = "construct-view-state";
             var targetIdentity = $"::{{{classId:D}}}\\edpath:{EncodePath(viewRoot)}";
             var appAssembly = Assembly.Load("ExplorerDirs.App");
@@ -877,6 +882,46 @@ internal static class ShellProviderLocationProbe
         if (process.ExitCode != 0)
             throw new InvalidOperationException($"The cross-process session recovery probe exited {process.ExitCode}. stdout=[{standardOutput.Result}] stderr=[{standardError.Result}]");
         Console.Write(standardOutput.Result);
+    }
+
+    private static int LaunchProviderEnumerationChild(Guid classId, string adapterPath, string fallbackRoot,
+        string backingPath)
+    {
+        var processPath = Environment.ProcessPath ?? throw new InvalidOperationException("The current process path is unavailable.");
+        var startInfo = new ProcessStartInfo(processPath)
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden
+        };
+        if (Path.GetFileNameWithoutExtension(processPath).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+            startInfo.ArgumentList.Add(Assembly.GetExecutingAssembly().Location);
+        startInfo.ArgumentList.Add("--shell-provider-enumeration-child");
+        startInfo.ArgumentList.Add(classId.ToString("D"));
+        startInfo.ArgumentList.Add(adapterPath);
+        startInfo.ArgumentList.Add(fallbackRoot);
+        startInfo.ArgumentList.Add(backingPath);
+
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start the provider enumeration child process.");
+        var standardOutput = process.StandardOutput.ReadToEndAsync();
+        var standardError = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(15000))
+        {
+            process.Kill(entireProcessTree: true);
+            throw new TimeoutException("The isolated provider enumeration exceeded 15 seconds.");
+        }
+        Task.WaitAll(standardOutput, standardError);
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException($"The isolated provider enumeration child exited {process.ExitCode}. stdout=[{standardOutput.Result}] stderr=[{standardError.Result}]");
+        Console.Write(standardOutput.Result);
+        var prefix = "provider-enumeration-child: count=";
+        var line = standardOutput.Result.Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries)
+            .SingleOrDefault(value => value.StartsWith(prefix, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException("The provider enumeration child returned no count.");
+        var countText = line[prefix.Length..].Split(';', 2)[0];
+        return int.Parse(countText, NumberStyles.None, CultureInfo.InvariantCulture);
     }
 
     private static int RunFilesystemSortRestoreProbe()
