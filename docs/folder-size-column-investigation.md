@@ -2139,6 +2139,12 @@ NativeProbe 给 `SyntheticFolder::CompareIDs` 增加仅用于观测的逐列调�
 隔离探针改用 live `IColumnManager` 中对应 `Recursive Size` 标题的 `{9e5e…}:1` 作为 `ViewState.SortColumns` 键，同时保留原 provider 数据键只用于 `GetDetailsEx`/值读取。共享 `ShellViewStateRestore` 随后不再添加重复列，header 标题稳定为 `Name|Recursive Size|Type`，快照列数为 3；root 行实际按递归值 `2|3|4|17|25` B 升序排列，`GetSortColumns` 读回该 Shell 键且 `order-matches-saved-sort=True`。Child view 的 `7|10` B 行序与 TravelLog Back 重建后均按快照排序；同一 NativeProbe 的原生列标题升/降序基线也分别为 `small.bin|child` 与 `child|small.bin`，比较器每方向调用一次。NativeProbe Release build 0 警告/错误，Private Desktop watchdog exit 0，前台/输入/清理守卫通过；隔离结果日志为 `src/.state/native-probe-watchdog/20261101-231548-ba6207c2.stdout.log` 和 `src/.state/native-probe-watchdog/20261101-231718-0faa1b56.stdout.log`。
 
 这只是 `IShellView` synthetic namespace 原型结论，产品仍使用 ExplorerBrowser，未接入递归列。数据键与 Shell 排序键的稳定映射、语言/列布局变化、INI 持久化跨进程、Shell 菜单切换排序方向、刷新/通知、四窗格多视图及文件操作/拖放仍需验证；NativeProbe 当前以英文列标题识别示范列，不能复制该启发式到生产实现。更早的“按 7e 数据键排序未重排”结论由本节修正为错误排序键导致的重复列/路由失配。
+
+### 2026-11-01：从实际 Shell 排序状态取键并复核跨进程 INI
+
+移除 NativeProbe 根据英文标题名推断排序键的做法。探针现在对 live header 槽执行一次真实列交互，再读取 `IFolderView2::GetSortColumns`，并确认 Shell 返回的每个排序键都存在于同一 view 的 `IColumnManager` 显示列快照；数据 provider 的 `MapColumnToSCID` 仅作为独立诊断记录。root、child 与 TravelLog Back 的恢复状态仍读回 `{9e5e05ac-1936-4a75-94f7-4704b8b01923}:1`，列快照保持三列且行序与该保存状态一致。Release NativeProbe 与 Private Desktop watchdog exit 0，前台/输入/隔离清理守卫通过；日志：`src/.state/native-probe-watchdog/20261101-231907-a27ed63c.stdout.log`。
+
+SettingsSmoke 的跨进程 INI 用例现分别保存并核对 Shell sort/display key `{9e5e…}:1` 与 provider data/group key `{7e1f…}:1`；专用子进程往返命令 exit 0，列宽、排序方向、分组方向和路径均读回。排序菜单命令的方向与读回/实际行序尚未完全厘清，仍是原型待办。以上只验证 synthetic `IShellView` 和通用会话 INI 往返；ExplorerBrowser 产品、用户物理目录、发布包均未改。
 ### 2026-11-01：递归列身份的标签快照与 INI 往返核对
 
 生产 `OnNavigationPending` 在当前已导航标签上调用 `CaptureViewState`；捕获流程使用同一 Browser 与 view generation 读取模式、列布局、排序和分组，只有完整且仍当前的结果才替换缓存。`PaneControl`/`SessionStore` 以每标签 `ViewState` 保存这些字段。现有跨进程 `ColumnLayoutProcessSmoke` 使用与 NativeProbe provider 完全相同的递归列 PropertyKey（`7E1F84B7-C052-4E51-8A3C-869254A6B910:1`），核对列宽、排序方向、分组方向和路径从 INI 子进程读回；SettingsSmoke 全量运行 exit 0，view-state restore smoke 通过。此项是既有通用快照/INI代码对该 key 的持久化证据，不代表产品物理目录能生成此属性，或该 key 已在用户配置中提供列菜单入口。

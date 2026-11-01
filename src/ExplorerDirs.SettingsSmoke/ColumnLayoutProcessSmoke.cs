@@ -9,6 +9,8 @@ internal static class ColumnLayoutProcessSmoke
 {
     private static readonly PropertyKeyState RecursiveSizeKey = new(
         Guid.Parse("7E1F84B7-C052-4E51-8A3C-869254A6B910"), 1);
+    private static readonly PropertyKeyState ShellRecursiveSortKey = new(
+        Guid.Parse("9E5E05AC-1936-4A75-94F7-4704B8B01923"), 1);
 
     internal static void Run()
     {
@@ -20,9 +22,9 @@ internal static class ColumnLayoutProcessSmoke
             var state = new SessionState(2, 4,
             [
                 [new TabSettings("C:\\prototype", new ViewState(4, 16,
-                    [new SortColumnState(RecursiveSizeKey, -1)], RecursiveSizeKey, false,
+                    [new SortColumnState(ShellRecursiveSortKey, -1)], RecursiveSizeKey, false,
                     [new DisplayColumnState(new(Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 10), 240),
-                     new DisplayColumnState(RecursiveSizeKey, 176)]))],
+                     new DisplayColumnState(ShellRecursiveSortKey, 176)]))],
                 [], [], []
             ], ActivePane: 0, ActiveTabIndices: [0, 0, 0, 0]);
             File.WriteAllText(path, SessionStore.Render(state));
@@ -65,12 +67,12 @@ internal static class ColumnLayoutProcessSmoke
         var tab = parsed.Panes[0][0];
         var view = tab.View;
         if (view.DisplayColumns is not [{ Key: { PropertyId: 10 }, Width: 240 }, { Key: var columnKey, Width: 176 }] ||
-            columnKey != RecursiveSizeKey ||
-            view.SortColumns is not [{ Key: var sortKey, Direction: -1 }] || sortKey != RecursiveSizeKey ||
+            columnKey != ShellRecursiveSortKey ||
+            view.SortColumns is not [{ Key: var sortKey, Direction: -1 }] || sortKey != ShellRecursiveSortKey ||
             view.GroupKey != RecursiveSizeKey || view.GroupAscending ||
             parsed.Panes[0][0].Path != "C:\\prototype")
-            throw new InvalidDataException("Custom column identity, width, sort, group or tab path changed across processes.");
+            throw new InvalidDataException("Shell sort identity, recursive data key, width, group or tab path changed across processes.");
 
-        Console.WriteLine($"key={RecursiveSizeKey}; width=176; sort=-1; group-ascending=False; path={tab.Path}");
+        Console.WriteLine($"sort-key={ShellRecursiveSortKey}; data-and-group-key={RecursiveSizeKey}; width=176; sort=-1; group-ascending=False; path={tab.Path}");
     }
 }

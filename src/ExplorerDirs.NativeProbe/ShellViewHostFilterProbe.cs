@@ -174,7 +174,7 @@ internal static class ShellViewHostFilterProbe
                 Thread.Sleep(10);
             } while (DateTime.UtcNow < rootEnumerationDeadline);
             if (rootCount < 4) throw new TimeoutException($"Self-host root Shell view did not enumerate fixture items: {rootCount}.");
-            var initialRootState = CaptureRecursiveSizeViewState(folder, folderView);
+            var initialRootState = CaptureRecursiveSizeViewState(folder, viewWindow, folderView);
             var initialRootRestore = RestoreAndReadRecursiveSizeViewState(
                 folder, view, viewWindow, folderView, rootCount, initialRootState, "initial-root");
             Marshal.Release(folderView);
@@ -203,7 +203,7 @@ internal static class ShellViewHostFilterProbe
             }
             finally { Marshal.FreeCoTaskMem(nestedRowPidl); }
             Console.WriteLine($"ishellview-host-filter: registered-namespace-recursive-size={nestedRecursiveSize}; expected=10");
-            var savedRecursiveViewState = CaptureRecursiveSizeViewState(folder, folderView);
+            var savedRecursiveViewState = CaptureRecursiveSizeViewState(folder, viewWindow, folderView);
             var initialRecursiveRestore = RestoreAndReadRecursiveSizeViewState(
                 folder, view, viewWindow, folderView, childCount, savedRecursiveViewState, "initial-child");
             Check(host.BrowseObject(nestedPidl, 0));
@@ -247,27 +247,27 @@ internal static class ShellViewHostFilterProbe
         }
     }
 
-    private static ViewState CaptureRecursiveSizeViewState(nint folder, nint view)
+    private static ViewState CaptureRecursiveSizeViewState(nint folder, nint viewWindow, nint view)
     {
-        var mapResult = At<MapColumnToScid>(folder, 19)(folder, 1, out var key);
+        var mapResult = At<MapColumnToScid>(folder, 19)(folder, 1, out var providerKey);
         Check(mapResult);
         var captureResult = ShellColumnManager.Capture(view, out var columns);
         Check(captureResult);
         if (columns is null) throw new InvalidOperationException("Shell returned no display-column snapshot for the recursive-size state probe.");
-        var nativeSortKey = new PropertyKeyState(key.FormatId, key.PropertyId);
-        if (columns.Count > 1 && ReadShellDetail(folder, 0, 1, out var title) >= 0 &&
-            string.Equals(title, "Recursive Size", StringComparison.OrdinalIgnoreCase))
-        {
-            // The native DefView sort key can differ from the provider's property key; persist the key attached to its live header slot.
-            nativeSortKey = new PropertyKeyState(columns[1].Key.FormatId, columns[1].Key.PropertyId);
-        }
-        Console.WriteLine($"ishellview-native-column-state: provider-key={key.FormatId:B}:{key.PropertyId}; sort-key={nativeSortKey.FormatId:B}:{nativeSortKey.PropertyId}; columns=[{string.Join('|', columns.Select(column => $"{column.Key.FormatId:B}:{column.Key.PropertyId}"))}]");
-        var stateColumns = columns.Any(column => column.Key.FormatId == nativeSortKey.FormatId && column.Key.PropertyId == nativeSortKey.PropertyId)
-            ? columns
-            : columns.Append(new DisplayColumnState(nativeSortKey, 160)).ToArray();
+        // A real header interaction makes the Shell choose its own sort identity; capture that state instead of deriving it from provider metadata.
+        ClickHeaderItem(viewWindow, 1);
+        var sortCountResult = At<GetSortColumnCount>(view, 26)(view, out var sortCount);
+        Check(sortCountResult);
+        if (sortCount == 0) throw new InvalidOperationException("The native recursive-size header did not establish a Shell sort key.");
+        var nativeSortColumns = new NativeSortColumn[sortCount];
+        Check(At<GetSortColumns>(view, 28)(view, nativeSortColumns, sortCount));
+        var sortColumns = nativeSortColumns.Select(column => new SortColumnState(
+            new PropertyKeyState(column.Key.FormatId, column.Key.PropertyId), column.Direction)).ToArray();
+        if (sortColumns.Any(column => !columns.Any(display => display.Key.FormatId == column.Key.FormatId && display.Key.PropertyId == column.Key.PropertyId)))
+            throw new InvalidOperationException("The Shell-reported sort key is missing from its live display-column snapshot.");
+        Console.WriteLine($"ishellview-native-column-state: provider-key={providerKey.FormatId:B}:{providerKey.PropertyId}; sort-columns=[{string.Join('|', nativeSortColumns.Select(column => $"{column.Key.FormatId:B}:{column.Key.PropertyId}:{column.Direction}"))}]; columns=[{string.Join('|', columns.Select(column => $"{column.Key.FormatId:B}:{column.Key.PropertyId}"))}]");
         return new ViewState(4, -1,
-            [new SortColumnState(nativeSortKey, 1)],
-            null, true, stateColumns);
+            sortColumns, null, true, columns);
     }
 
     private static string RestoreAndReadRecursiveSizeViewState(nint folder, nint shellView, nint viewWindow,
