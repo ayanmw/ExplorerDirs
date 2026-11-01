@@ -1821,4 +1821,6 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 
 本次 Private Desktop watchdog 成功退出，NativeProbe Release build 0 警告/错误。全局快照项数从 3 增至 5，因它包含目标外 Shell 元数据/视图缓存变化，不能作为目标路径的断言；探针改为检查特定目标快照和存活 view 的读回值。运行期间前台与 last-input 未变化，隔离桌面清理守卫通过。
 
-这仍是合成 namespace + ExplorerBrowser 隔离实验。它由探针在 `Destroy` 后显式调用 view-retire 入口；不证明 Browser 自动触发产品取消，也不验证真实 child PIDL、产品 Pane/UI dispatcher 或可见重绘。下一步继续真实物理 Shell PIDL 包装与产品接线审查，保留 ExplorerBrowser 主架构和现有 Shell 交互兼容门槛；产品和 release 未修改。
+这仍是合成 namespace + ExplorerBrowser 隔离实验。它由探针在 `Destroy` 后显式调用 view-retire 入口；不证明 Browser 自动触发产品取消，也不验证产品 Pane/UI dispatcher 或可见重绘。
+
+路线调整依据：通用 `StaticShellFolderAdapter` 已有真实文件系统 child PIDL 的包裹/解包和 Shell folder 方法转发；然而[包装 PIDL DefView 复验](#2026-11-01-包装-pidl-defview-列消费复验)中，DefView 只请求了自定义列标题，没有请求逐行值或排序比较。因此只把本隔离 namespace 的合成 child PIDL 替换为真实 PIDL，不能跨过列消费门槛。下一阶段优先在受控行视图中把已有真实 Shell 行身份、递归列、Shell 菜单/文件操作、通知刷新、焦点和拖放组合成一条集成合同；每个宿主迁移门槛仍需独立验证。产品和 release 未修改。
