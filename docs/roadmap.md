@@ -5836,4 +5836,6 @@ peer SysListView32 现读取 Shell 文件夹的名称、大小、项目类型、
 
 2026-11-01 逐行递归大小百分比原型：隐藏 peer ListView 在同级递归值未齐时保持百分比为空，齐备后按当前目录总量回填；Shell 内容更新后同级分母与比例重算（size-10: 10/122→30/142）。NativeProbe Release 与 Private Desktop watchdog 通过。精准比例因此依赖同级文件夹大小全部可用；产品接线前需评估一次性目录树扫描与逐目录扫描的成本差异，并集中可见验收格式。未接入产品 ExplorerBrowser。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01按需递归大小的同目录百分比更新)。
 
+2026-11-01 百分比分母扫描策略对照：同一生产扫描器比较一次树遍历与重用已知 Shell 行、逐个扫描同级文件夹。64 个同级目录暖缓存夹具中两者大小结果相同；两次 5 轮测量中树扫描中位数 25/48 ms、逐文件夹 47/68 ms，托管分配分别固定为 152,104/171,064 B。方向一致但只有本地暖缓存结果；下一步检查单次扫描的逐行增量发布和取消，不声称冷盘/网络性能。产品未接入。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01同级百分比分母的两种扫描策略对照)。
+
 2026-11-01 ExplorerBrowser 注册 namespace 递归列排序：`IFolderView2.SetSortColumns` 拒绝 provider 自定义递归 Size key，标准 `PKEY_Size` 不调用递归比较器；隔离视图 `IShellView` 表头真实鼠标点击及背景排序菜单均已验证升降序正确，递归比较各 1 次、比较期间无递归扫描。WPF `HwndSource` 根宿主的 Private Desktop 全流程 exit 0、前台/last-input/临时注册及夹具清理守卫通过；NativeProbe 模块由隔离进程退出时回收。原生 `STATIC` 根宿主仍会在父窗口销毁阶段挂起，根因未明。该路径仅证明注册 namespace 原型排序可行；产品仍使用 ExplorerBrowser，递归列、菜单、操作及 UI 均未接入。详见 `docs/folder-size-column-investigation.md`。

@@ -7,6 +7,108 @@ namespace ExplorerDirs.SettingsSmoke;
 
 internal static class RecursiveDirectoryScannerSmoke
 {
+    internal static void RunSiblingPercentageStrategyProbe()
+    {
+        const int folderCount = 64;
+        const int filesPerFolder = 16;
+        const int repeatedRuns = 5;
+        var root = Path.Combine(Path.GetTempPath(), "ExplorerDirs-SiblingPercentageStrategy-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            File.WriteAllBytes(Path.Combine(root, "root-file.bin"), new byte[13]);
+            for (var folderIndex = 0; folderIndex < folderCount; folderIndex++)
+            {
+                var folder = Path.Combine(root, $"folder-{folderIndex:D3}");
+                var nested = Path.Combine(folder, "nested");
+                Directory.CreateDirectory(nested);
+                for (var fileIndex = 0; fileIndex < filesPerFolder; fileIndex++)
+                    File.WriteAllBytes(Path.Combine(folder, $"payload-{fileIndex:D2}.bin"), new byte[32 + fileIndex]);
+                File.WriteAllBytes(Path.Combine(nested, "nested.bin"), new byte[folderIndex % 17 + 1]);
+            }
+
+            var rootPath = Path.GetFullPath(root);
+            var folderPaths = Directory.GetDirectories(rootPath).Select(Path.GetFullPath).ToArray();
+            var requestedPaths = folderPaths.Append(rootPath).ToArray();
+            var directFileBytes = Directory.GetFiles(rootPath)
+                .Select(path => (ulong)new FileInfo(path).Length).Aggregate(0UL, checked((sum, value) => sum + value));
+
+            (ulong TotalBytes, long Entries, IReadOnlyDictionary<string, RecursiveDirectoryScanResult> Folders)
+                ScanOneTree()
+            {
+                long entries = 0;
+                var results = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(rootPath, requestedPaths,
+                    CancellationToken.None, count => entries = count);
+                var total = results[rootPath].Bytes;
+                return (total, entries, results);
+            }
+
+            (ulong TotalBytes, long Entries, IReadOnlyDictionary<string, RecursiveDirectoryScanResult> Folders)
+                ScanEachSibling()
+            {
+                var total = directFileBytes;
+                long entries = 0;
+                var folderResults = new Dictionary<string, RecursiveDirectoryScanResult>(StringComparer.OrdinalIgnoreCase);
+                foreach (var path in folderPaths)
+                {
+                    long childEntries = 0;
+                    var childResults = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(path, [path],
+                        CancellationToken.None, count => childEntries = count);
+                    var summary = childResults[Path.GetFullPath(path)];
+                    entries = checked(entries + childEntries);
+                    total = checked(total + summary.Bytes);
+                    folderResults.Add(Path.GetFullPath(path), summary);
+                }
+                return (total, entries, folderResults);
+            }
+
+            var expected = ScanOneTree();
+            var siblingExpected = ScanEachSibling();
+            if (expected.TotalBytes != siblingExpected.TotalBytes ||
+                folderPaths.Any(path => !expected.Folders.TryGetValue(path, out var onePass) ||
+                    !siblingExpected.Folders.TryGetValue(path, out var perFolder) || onePass != perFolder))
+                throw new InvalidOperationException("Single-tree and per-sibling scans did not produce identical row sizes and directory totals.");
+
+            var onePassSamples = new (long Milliseconds, long AllocatedBytes, long Entries)[repeatedRuns];
+            var siblingSamples = new (long Milliseconds, long AllocatedBytes, long Entries)[repeatedRuns];
+            for (var index = 0; index < repeatedRuns; index++)
+            {
+                onePassSamples[index] = Measure(ScanOneTree);
+                siblingSamples[index] = Measure(ScanEachSibling);
+            }
+            Console.WriteLine($"sibling-percentage-scan-strategy: folders={folderCount}; nested-folders={folderCount}; " +
+                $"files={folderCount * (filesPerFolder + 1) + 1}; warmup=1; repetitions={repeatedRuns}; " +
+                $"same-values=True; direct-file-bytes-reused={directFileBytes}; " +
+                $"single-tree={Format(onePassSamples)}; per-sibling={Format(siblingSamples)}; " +
+                "scope=warm-local-temp-filesystem; per-sibling-uses-preexisting-shell-row-paths-and-file-sizes=True; product-view-changed=False");
+
+            static (long Milliseconds, long AllocatedBytes, long Entries) Measure(
+                Func<(ulong TotalBytes, long Entries, IReadOnlyDictionary<string, RecursiveDirectoryScanResult> Folders)> scan)
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+                var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+                var timer = Stopwatch.StartNew();
+                var result = scan();
+                timer.Stop();
+                var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+                return (timer.ElapsedMilliseconds, allocated, result.Entries);
+            }
+
+            static string Format((long Milliseconds, long AllocatedBytes, long Entries)[] samples)
+            {
+                var elapsed = samples.Select(sample => sample.Milliseconds).Order().ToArray();
+                var allocations = samples.Select(sample => sample.AllocatedBytes).Order().ToArray();
+                var entries = samples.Select(sample => sample.Entries).Distinct().ToArray();
+                if (entries.Length != 1) throw new InvalidOperationException("A scan strategy changed its entry count between repetitions.");
+                return $"median-ms={elapsed[elapsed.Length / 2]}; min-ms={elapsed[0]}; max-ms={elapsed[^1]}; " +
+                    $"median-allocated={allocations[allocations.Length / 2]}; entries={entries[0]}";
+            }
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     internal static void RunAllocationProbe()
     {
         const int directoryCount = 5000;

@@ -2004,3 +2004,11 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 NativeProbe Release 构建 0 警告/错误；Private Desktop `--ishellview-recursive-size-projection-private-desktop` exit 0，前台、输入和隔离清理守卫通过。日志：`src/.state/native-probe-watchdog/20261101-210628-5db8401e.stdout.log`。这验证的是隐藏 peer 列的数据合同，不是 Q-Dir 的显示舍入/下划线样式，也未接 ExplorerBrowser 产品或可见 UI。
 
 该切片暴露了一个真实取舍：只显示可见行递归大小时可保持按需扫描，但准确的同目录百分比要等全部同级文件夹的递归大小已知后才能计算；本原型在此之前留空。产品接线前还需比较“同级逐目录请求”与“单次遍历当前目录并累计全部行值”的扫描成本，并由可见验收决定空白阶段和比例格式；没有把本轮策略提升为产品默认值。
+
+### 2026-11-01：同级百分比分母的两种扫描策略对照
+
+新增 `--recursive-directory-sibling-percentage-strategy-probe`，在 64 个同级文件夹、每个含一个嵌套目录及 16 个文件、根目录另含一个文件的暖缓存临时夹具上，对比同一个生产 `RecursiveDirectoryScanner` 的两种用法：单次 `ScanDirectoryTreeForPaths(root, root + all sibling folders)`；以及重用已枚举的子文件夹路径和根目录文件大小、逐个调用 `ScanDirectoryTreeForPaths(folder, [folder])`。两种策略的根目录总字节数及每个同级文件夹摘要完全一致。
+
+连续两次各做 1 次预热及 5 次计时，单次树扫描的中位数分别为 25 ms、48 ms，逐文件夹扫描为 47 ms、68 ms；单次树扫描托管分配均为 152,104 B，逐文件夹扫描均为 171,064 B。树扫描记录访问 1,217 项；逐文件夹扫描访问 1,152 项，因为它复用已知的根行，省去 65 个根项重新枚举。两轮方向一致但暖缓存耗时有波动；这里只能说明此本地夹具中一次遍历较快且分配较少，不能外推到首次冷读、机械盘、网络位置、访问拒绝或产品内存。Release SettingsSmoke 构建 0 警告/错误，定向探针两次 exit 0。产品视图未修改。
+
+当前证据支持优先采用单次目录树遍历生成所有同级递归快照，再显示精确百分比；仍需验证扫描中的逐行增量发布/取消对交互响应的影响，以及冷/慢存储行为，之后才能决定产品接线。测试命令：`dotnet run --project src/ExplorerDirs.SettingsSmoke/ExplorerDirs.SettingsSmoke.csproj -c Release --no-build -- --recursive-directory-sibling-percentage-strategy-probe`。
