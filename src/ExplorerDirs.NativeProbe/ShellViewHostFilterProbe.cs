@@ -540,6 +540,25 @@ internal static class ShellViewHostFilterProbe
                         var thisPcPidl = ILClone(host.CurrentPidl);
                         try
                         {
+                            var historyCountBeforeRecreateLoop = host.NavigationHistory.Count;
+                            var historyIndexBeforeRecreateLoop = host.HistoryIndex;
+                            var retiredWindowsDestroyed = true;
+                            for (var cycle = 0; cycle < 8; cycle++)
+                            {
+                                var retiredWindow = viewWindow;
+                                Check(host.BrowseObject(thisPcPidl, 0));
+                                AdoptPendingView(expectedItemCount: null,
+                                    allowItemCountFailure: true, returnOnFirstSuccessfulCount: true);
+                                if (IsWindow(retiredWindow) || !IsWindow(viewWindow) ||
+                                    host.HistoryIndex != historyIndexBeforeRecreateLoop ||
+                                    host.NavigationHistory.Count != historyCountBeforeRecreateLoop ||
+                                    !ILIsEqual(host.CurrentPidl, thisPcPidl))
+                                    retiredWindowsDestroyed = false;
+                                if (!retiredWindowsDestroyed)
+                                    throw new Exception($"Repeated This PC view replacement failed at cycle {cycle + 1}: retired-window-destroyed={!IsWindow(retiredWindow)}; active-window-valid={IsWindow(viewWindow)}; history-index={host.HistoryIndex}; history-count={host.NavigationHistory.Count}.");
+                            }
+                            Console.WriteLine($"ishellview-host-filter: same-path-view-retirement=True; target=ThisPC; cycles=8; retired-windows-destroyed={retiredWindowsDestroyed}; active-window-valid={IsWindow(viewWindow)}; history-unchanged=True");
+
                             Check(host.BrowseObject(volumeRootPidl, 0));
                             AdoptPendingView(expectedItemCount: null,
                                 allowItemCountFailure: true, returnOnFirstSuccessfulCount: true);
