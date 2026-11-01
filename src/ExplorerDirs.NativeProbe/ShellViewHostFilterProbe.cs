@@ -94,11 +94,8 @@ internal static class ShellViewHostFilterProbe
                 Check(SHBindToObject(0, targetPidl, 0, in ShellFolderId, out childFolder));
                 var shellViewId = ShellViewId;
                 Check(At<CreateViewObject>(childFolder, 8)(childFolder, parent, ref shellViewId, out childView));
-                Check(Marshal.QueryInterface(childView, in FolderView2Id, out var precreateFolderView));
-                try { Check(At<SetViewModeAndIconSize>(precreateFolderView, 35)(precreateFolderView, 4, 16)); }
-                finally { Marshal.Release(precreateFolderView); }
                 host!.View = childView;
-                var settings = new StreamProbeSettings { Mode = uint.MaxValue };
+                var settings = new StreamProbeSettings { Mode = 4 }; // FVM_DETAILS at CreateViewWindow time.
                 var bounds = new StreamProbeRect { Right = 640, Bottom = 480 };
                 Check(At<CreateViewWindow>(childView, 9)(childView, previousView, ref settings,
                     viewPointer, ref bounds, out childWindow));
@@ -158,12 +155,30 @@ internal static class ShellViewHostFilterProbe
                 rootPidl, childPidl, Navigate);
             host.View = view;
             viewPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
-            var settings = new StreamProbeSettings { Mode = uint.MaxValue };
+            var settings = new StreamProbeSettings { Mode = 4 }; // FVM_DETAILS at CreateViewWindow time.
             var initialBounds = new StreamProbeRect { Right = 640, Bottom = 480 };
             Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, viewPointer, ref initialBounds, out viewWindow));
             created = true;
             _ = ShowWindow(parent, 4); // SW_SHOWNOACTIVATE on the isolated Private Desktop enables native header interaction.
+            Check(At<ActivateView>(view, 7)(view, 2)); // SVUIA_ACTIVATE_NOFOCUS.
+            _ = At<RefreshView>(view, 8)(view);
             Application.DoEvents();
+            Check(Marshal.QueryInterface(view, in FolderView2Id, out folderView));
+            int rootCount;
+            var rootEnumerationDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+            do
+            {
+                Application.DoEvents();
+                Check(At<ItemCount>(folderView, 7)(folderView, 2, out rootCount));
+                if (rootCount >= 4) break;
+                Thread.Sleep(10);
+            } while (DateTime.UtcNow < rootEnumerationDeadline);
+            if (rootCount < 4) throw new TimeoutException($"Self-host root Shell view did not enumerate fixture items: {rootCount}.");
+            var initialRootState = CaptureRecursiveSizeViewState(folder, folderView);
+            var initialRootRestore = RestoreAndReadRecursiveSizeViewState(
+                folder, view, viewWindow, folderView, rootCount, initialRootState, "initial-root");
+            Marshal.Release(folderView);
+            folderView = 0;
             Check(host.BrowseObject(childPidl, 0));
             var childCount = AdoptPendingView(expectedItemCount: 2);
             var childLocationMatches = ILIsEqual(host.CurrentPidl, childPidl);
@@ -216,7 +231,7 @@ internal static class ShellViewHostFilterProbe
                 throw new InvalidOperationException($"Self-hosted Shell history mismatch: back={backRestoredChild}; forward={forwardRestoredNested}; index={host.HistoryIndex}.");
             if (GetForegroundWindow() != foreground)
                 throw new InvalidOperationException("Self-hosted namespace navigation changed the foreground window.");
-            return $"root->child->nested=True; child-items={childCount}; nested-items={nestedCount}; nested-file={names[0]}; recursive-size={nestedRecursiveSize}; back-forward=True; history-index={host.HistoryIndex}; recursive-state-initial={initialRecursiveRestore}; recursive-state-after-back={backRecursiveRestore}";
+            return $"root->child->nested=True; root-items={rootCount}; root-recursive-state={initialRootRestore}; child-items={childCount}; nested-items={nestedCount}; nested-file={names[0]}; recursive-size={nestedRecursiveSize}; back-forward=True; history-index={host.HistoryIndex}; recursive-state-initial={initialRecursiveRestore}; recursive-state-after-back={backRecursiveRestore}";
         }
         finally
         {
@@ -272,9 +287,10 @@ internal static class ShellViewHostFilterProbe
         var listViewForHeader = FindChildByClass(viewWindow, "SysListView32");
         var headerForDiagnostics = listViewForHeader == 0 ? 0 : SendMessageW(listViewForHeader, 0x101F, 0, 0);
         var headerCount = headerForDiagnostics == 0 ? -1 : SendMessageW(headerForDiagnostics, 0x1200, 0, 0).ToInt32();
+        var listViewMode = listViewForHeader == 0 ? -1 : SendMessageW(listViewForHeader, 0x108F, 0, 0).ToInt32(); // LVM_GETVIEW.
         var modeResult = At<GetViewModeAndIconSize>(view, 36)(view, out var currentMode, out var currentIconSize);
         var listViewStyle = listViewForHeader == 0 ? 0 : GetWindowLongPtrW(listViewForHeader, GwlStyle).ToInt64();
-        var headerDiagnostics = $"view-mode-hr=0x{modeResult:X8}; mode={currentMode}; icon-size={currentIconSize}; list-style=0x{listViewStyle:X}; list-visible={(listViewForHeader != 0 && IsWindowVisible(listViewForHeader))}; header-visible={(headerForDiagnostics != 0 && IsWindowVisible(headerForDiagnostics))}; header-count={headerCount}; recursive-column-index={recursiveColumnIndex}; column-keys=[{(columns is null ? "" : string.Join('|', columns.Select(column => $"{column.Key.FormatId:B}:{column.Key.PropertyId}")))}]";
+        var headerDiagnostics = $"view-mode-hr=0x{modeResult:X8}; mode={currentMode}; icon-size={currentIconSize}; list-view-mode={listViewMode}; list-style=0x{listViewStyle:X}; list-visible={(listViewForHeader != 0 && IsWindowVisible(listViewForHeader))}; header-visible={(headerForDiagnostics != 0 && IsWindowVisible(headerForDiagnostics))}; header-count={headerCount}; recursive-column-index={recursiveColumnIndex}; column-keys=[{(columns is null ? "" : string.Join('|', columns.Select(column => $"{column.Key.FormatId:B}:{column.Key.PropertyId}")))}]";
         var countResult = At<GetSortColumnCount>(view, 26)(view, out var sortCount);
         var sortReadbackResult = countResult;
         NativeSortColumn[] sorts = [];
@@ -303,6 +319,40 @@ internal static class ShellViewHostFilterProbe
             : valueOrder.OrderByDescending(entry => entry.Bytes).Select(entry => entry.Name).ToArray();
         var orderMatchesSavedSort = names.SequenceEqual(expectedNames,
             StringComparer.OrdinalIgnoreCase);
+        string? shellMenuSortFailure = null;
+        string[] namesAfterShellMenuSort = names;
+        string[] valuesAfterShellMenuSort = values;
+        var shellMenuSortReadback = "not-run";
+        if (stage == "initial-root")
+        {
+            try
+            {
+                var opposite = saved.SortColumns.Select(column => column with { Direction = -column.Direction }).ToArray();
+                var target = new NativeShellViewStateTarget(view);
+                Check(target.SetSorting(opposite));
+                InvokeBackgroundVerb(shellView, GetParent(viewWindow),
+                    saved.SortColumns[0].Direction > 0 ? "sortascending" : "sortdescending");
+                var settleDeadline = DateTime.UtcNow + TimeSpan.FromMilliseconds(350);
+                do
+                {
+                    Application.DoEvents();
+                    Thread.Sleep(10);
+                } while (DateTime.UtcNow < settleDeadline);
+                namesAfterShellMenuSort = ReadVisibleItemNames(view, itemCount);
+                valuesAfterShellMenuSort = ReadRecursiveSizeValues(folder, view, itemCount);
+                var afterMenuCountHr = At<GetSortColumnCount>(view, 26)(view, out var afterMenuCount);
+                if (afterMenuCountHr >= 0 && afterMenuCount > 0)
+                {
+                    var afterMenuSorts = new NativeSortColumn[afterMenuCount];
+                    var afterMenuReadHr = At<GetSortColumns>(view, 28)(view, afterMenuSorts, afterMenuCount);
+                    shellMenuSortReadback = afterMenuReadHr < 0
+                        ? $"hr=0x{afterMenuReadHr:X8}"
+                        : string.Join('|', afterMenuSorts.Select(sort => $"{sort.Key.FormatId:B}:{sort.Key.PropertyId}:{sort.Direction}"));
+                }
+                else shellMenuSortReadback = $"count-hr=0x{afterMenuCountHr:X8};count={afterMenuCount}";
+            }
+            catch (Exception ex) { shellMenuSortFailure = $"{ex.GetType().Name}: {ex.Message}"; }
+        }
         string? headerSortFailure = null;
         try
         {
@@ -327,7 +377,7 @@ internal static class ShellViewHostFilterProbe
                 sortAfterHeader[0].Key.PropertyId == saved.SortColumns[0].Key.PropertyId &&
                 sortAfterHeader[0].Direction == saved.SortColumns[0].Direction;
         }
-        var result = $"restored={restored}; failures=[{string.Join(',', failures)}]; mode-reapply-hr=0x{modeReapplyResult:X8}; current-mode-reapply-hr=0x{currentModeReapplyResult:X8}; refresh-hr=0x{refreshResult:X8}; columns-hr=0x{columnCaptureResult:X8}; recursive-column-visible={recursiveColumnVisible}; sort-count-hr=0x{countResult:X8}; sort-readback-hr=0x{sortReadbackResult:X8}; sort-matches={sortMatches}; header-diagnostics={headerDiagnostics}; order=[{orderBeforeRestoreRetry}]; recursive-values=[{valuesBeforeRestoreRetry}]; order-matches-saved-sort={orderMatchesSavedSort}; header-sort-failure={headerSortFailure ?? "none"}; order-after-header-sort=[{string.Join('|', namesAfterHeaderSort)}]; values-after-header-sort=[{string.Join('|', valuesAfterHeaderSort)}]; header-sort-matches-saved-sort={headerSortMatchesSavedSort}; sort-after-header-matches={sortAfterHeaderMatches}";
+        var result = $"restored={restored}; failures=[{string.Join(',', failures)}]; mode-reapply-hr=0x{modeReapplyResult:X8}; current-mode-reapply-hr=0x{currentModeReapplyResult:X8}; refresh-hr=0x{refreshResult:X8}; columns-hr=0x{columnCaptureResult:X8}; recursive-column-visible={recursiveColumnVisible}; sort-count-hr=0x{countResult:X8}; sort-readback-hr=0x{sortReadbackResult:X8}; sort-matches={sortMatches}; header-diagnostics={headerDiagnostics}; order=[{orderBeforeRestoreRetry}]; recursive-values=[{valuesBeforeRestoreRetry}]; order-matches-saved-sort={orderMatchesSavedSort}; shell-menu-sort-failure={shellMenuSortFailure ?? "none"}; sort-after-shell-menu=[{shellMenuSortReadback}]; order-after-shell-menu-sort=[{string.Join('|', namesAfterShellMenuSort)}]; values-after-shell-menu-sort=[{string.Join('|', valuesAfterShellMenuSort)}]; header-sort-failure={headerSortFailure ?? "none"}; order-after-header-sort=[{string.Join('|', namesAfterHeaderSort)}]; values-after-header-sort=[{string.Join('|', valuesAfterHeaderSort)}]; header-sort-matches-saved-sort={headerSortMatchesSavedSort}; sort-after-header-matches={sortAfterHeaderMatches}";
         Console.WriteLine($"ishellview-state-restore: stage={stage}; {result}");
         return result;
     }
@@ -337,6 +387,7 @@ internal static class ShellViewHostFilterProbe
         var listView = FindChildByClass(viewWindow, "SysListView32");
         var header = listView == 0 ? 0 : SendMessageW(listView, 0x101F, 0, 0); // LVM_GETHEADER.
         if (header == 0) throw new InvalidOperationException("The restored Shell view has no native header control.");
+        _ = ShowWindow(header, 4); // SW_SHOWNOACTIVATE, isolated view only; test whether a hidden but present header owns sorting.
         var rectanglePointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeRect>());
         try
         {

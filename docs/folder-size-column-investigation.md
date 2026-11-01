@@ -2114,9 +2114,11 @@ Child view 初始也不含 Recursive Size 列；测试调用 `ShellColumnManager
 
 ### 2026-11-01：恢复后的 Shell 模式与实际列表样式核验
 
-为解释标题排序为何未生效，探针同时读取 `IFolderView2::GetViewModeAndIconSize` 与真实 `SysListView32` 窗口。恢复器和随后重复调用 `SetViewModeAndIconSize` 均报告 Details（mode 4、16 px）；`SetCurrentViewMode(Details)` 返回成功，但 `LVS_TYPEMASK` 仍为 `LVS_ICON`，列表可见而 `SysHeader32` 隐藏。`IShellView::Refresh` 返回 `S_FALSE`，没有改变窗口样式；对隐藏标题发点击消息也没有改变排序键之外的状态或实际行序。因此本轮还不能判断排序重应用本身是否可行：恢复视图的接口模式与 live ListView 样式尚未同步，排序交互前置条件未建立。
+为解释标题排序为何未生效，探针同时读取 `IFolderView2::GetViewModeAndIconSize`、`SysListView32::LVM_GETVIEW` 和窗口 style。真实 ListView API 返回 Details（`LVM_GETVIEW=1`），Shell 也报告 mode 4、16 px；`GWL_STYLE & LVS_TYPEMASK` 仍编码为 `LVS_ICON`，但不能据此判定当前视图实际是图标模式。`SysHeader32` 仍报告不可见，强制显示并发送标题点击消息也没有改变目标行序。`IShellView::Refresh` 返回 `S_FALSE`。
 
-Release NativeProbe build 0 警告/错误，Private Desktop watchdog exit 0，前台/last-input/隔离清理守卫通过。日志：`src/.state/native-probe-watchdog/20261101-225207-2a0e5a8d.stdout.log`。后续先对齐新建 `IShellView` 的真实 Details 子控件状态，再继续测自定义列升降序；本结果不应被解释成产品模式切换失败，ExplorerBrowser 产品未修改。
+随后把排序复核移到同级多个文件夹的 root view，避免用一个文件和一个文件夹比较而混入“文件夹优先”分组。递归值 `child=17`、`child-small=2`，恢复器后仍按 `child|child-small` 排列，排序键读回 `{7e1f84b7-c052-4e51-8a3c-869254a6b910}:1`、方向 `+1`。先临时将方向设为 `-1`，再执行原生 `sortascending`，状态读回方向 `+1`，但同一文件夹组仍是 `child(17)|child-small(2)`；文件组 `rename-complete(25)|root(4)|notification-created(3)` 也呈降序。当前证据表明排序状态与实际行序不一致，且不同项目组的排序效果也需分开核对；标题交互尚未成功建立，所以不能把原因单独归结为恢复时序或属性比较器。
+
+NativeProbe Release build 0 警告/错误，Private Desktop watchdog exit 0，前台/last-input/隔离清理守卫通过。日志：`src/.state/native-probe-watchdog/20261101-225856-3f34a875.stdout.log`。下一步应在同一 view 对照有效原生列（如 Name/Size）的程序化排序与用户标题交互，再核对自定义列比较结果符号/方向映射；产品 ExplorerBrowser 未修改。
 ### 2026-11-01：递归列身份的标签快照与 INI 往返核对
 
 生产 `OnNavigationPending` 在当前已导航标签上调用 `CaptureViewState`；捕获流程使用同一 Browser 与 view generation 读取模式、列布局、排序和分组，只有完整且仍当前的结果才替换缓存。`PaneControl`/`SessionStore` 以每标签 `ViewState` 保存这些字段。现有跨进程 `ColumnLayoutProcessSmoke` 使用与 NativeProbe provider 完全相同的递归列 PropertyKey（`7E1F84B7-C052-4E51-8A3C-869254A6B910:1`），核对列宽、排序方向、分组方向和路径从 INI 子进程读回；SettingsSmoke 全量运行 exit 0，view-state restore smoke 通过。此项是既有通用快照/INI代码对该 key 的持久化证据，不代表产品物理目录能生成此属性，或该 key 已在用户配置中提供列菜单入口。
