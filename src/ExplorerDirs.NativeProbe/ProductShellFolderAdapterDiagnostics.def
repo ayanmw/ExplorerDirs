@@ -4,6 +4,7 @@ EXPORTS
     DllCanUnloadNow PRIVATE
     ConfigureShellNamespaceRoot
     GetProductAsyncItemNotificationAttempts
+    GetProductAsyncItemNotificationUnderSyntheticRootCount
     GetProductAsyncDirectoryNotificationAttempts
     GetProductAsyncItemNotificationIdentityCount
     GetProductAsyncItemNotificationIdentity

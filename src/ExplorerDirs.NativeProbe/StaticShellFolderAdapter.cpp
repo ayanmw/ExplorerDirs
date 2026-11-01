@@ -1855,6 +1855,7 @@ namespace
     volatile LONG g_syntheticAsyncRecursiveSizeDirectoryNotificationsSentForProbe = 0;
 #if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
     volatile LONG g_productAsyncItemNotificationAttempts = 0;
+    volatile LONG g_productAsyncItemNotificationUnderSyntheticRoot = 0;
     volatile LONG g_productAsyncDirectoryNotificationAttempts = 0;
     std::mutex g_productAsyncItemNotificationIdentityMutex;
     std::vector<std::wstring> g_productAsyncItemNotificationIdentities;
@@ -4553,6 +4554,9 @@ namespace
 #if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
                                 RecordProductAsyncItemNotificationIdentity(
                                     reinterpret_cast<PCIDLIST_ABSOLUTE>(notification.second));
+                                if (self->_root && ILIsParent(self->_root,
+                                    reinterpret_cast<PCIDLIST_ABSOLUTE>(notification.second), TRUE))
+                                    InterlockedIncrement(&g_productAsyncItemNotificationUnderSyntheticRoot);
                                 InterlockedIncrement(&g_productAsyncItemNotificationAttempts);
 #endif
                                 SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_IDLIST, notification.second, nullptr);
@@ -5116,6 +5120,9 @@ extern "C" HRESULT WINAPI ConfigureShellNamespaceRoot(
 #if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
 extern "C" LONG WINAPI GetProductAsyncItemNotificationAttempts()
 { return InterlockedCompareExchange(&g_productAsyncItemNotificationAttempts, 0, 0); }
+
+extern "C" LONG WINAPI GetProductAsyncItemNotificationUnderSyntheticRootCount()
+{ return InterlockedCompareExchange(&g_productAsyncItemNotificationUnderSyntheticRoot, 0, 0); }
 
 extern "C" LONG WINAPI GetProductAsyncDirectoryNotificationAttempts()
 { return InterlockedCompareExchange(&g_productAsyncDirectoryNotificationAttempts, 0, 0); }
