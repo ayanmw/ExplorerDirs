@@ -20,8 +20,11 @@ internal static class ShellRefreshPresentationSmoke
             modePath.IndexOf("ShellViewRedrawLease.TrySuppress(view)", StringComparison.Ordinal) <
                 modePath.IndexOf("ApplyMode(", StringComparison.Ordinal) &&
             modePath.Contains("ApplyMode(", StringComparison.Ordinal) &&
+            modePath.Contains("RedrawWindow(viewWindow", StringComparison.Ordinal) &&
+            modePath.IndexOf("RedrawWindow(viewWindow", StringComparison.Ordinal) >
+                modePath.IndexOf("ShellViewRedrawLease.TrySuppress(view)", StringComparison.Ordinal) &&
             !modePath.Contains("Refresh(", StringComparison.Ordinal) && !modePath.Contains("Navigate(", StringComparison.Ordinal),
-            "view-style changes suppress native redraw only around the existing-view mode setter");
+            "view-style changes invalidate the existing native view after restoring redraw from the scoped mode setter");
         Check(refreshPath.Contains("shellView.Refresh()", StringComparison.Ordinal) &&
             !refreshPath.Contains("ShellViewRedrawLease.TrySuppress(folderView)", StringComparison.Ordinal) &&
             !refreshPath.Contains("refreshRedrawLease", StringComparison.Ordinal) &&

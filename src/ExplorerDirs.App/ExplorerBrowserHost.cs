@@ -28,6 +28,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private const uint BrowseBack = 0x4000;
     private const uint BrowseForward = 0x8000;
     private const uint AncestorRootOwner = 3;
+    private const uint RedrawInvalidateNoEraseChildrenAndFrame = 0x0001 | 0x0020 | 0x0080 | 0x0400;
     // Standard Shell view command IDs from shlobj.h; the Shell executes the operations.
     private const int ShellCut = 0x7018;
     private const int ShellCopy = 0x7019;
@@ -2568,6 +2569,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                             new NativeViewStateTarget(view, Current),
                             result => MenuError?.Invoke(this, $"无法切换查看方式：0x{result:X8}"), Current)) return false;
                 }
+                // Re-enabling redraw does not guarantee that a control invalidated while
+                // frozen will paint. Request one asynchronous repaint without erasing the
+                // old surface first, so the native view replaces it in its normal paint cycle.
+                var viewWindow = _viewWindow;
+                if (Current() && viewWindow != IntPtr.Zero && viewWindow == _viewWindow && IsWindow(viewWindow))
+                    _ = RedrawWindow(viewWindow, IntPtr.Zero, IntPtr.Zero, RedrawInvalidateNoEraseChildrenAndFrame);
             }
         }
         catch (COMException ex)
@@ -6006,6 +6013,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsWindow(IntPtr hwnd);
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool RedrawWindow(IntPtr hwnd, IntPtr updateRect, IntPtr updateRegion, uint flags);
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsChild(IntPtr parent, IntPtr child);
