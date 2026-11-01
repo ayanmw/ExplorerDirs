@@ -1468,3 +1468,17 @@ Native adapter `/W4 /WX` 与 NativeProbe Release 均构建成功，0 警告/错�
 将相同延迟开关接入不创建 Shell view 的 `--synthetic-async-on-demand-recursive-size-column-smoke`，用 8 个目录任务核对后台逐项队列。0 ms 基线累计扫描 9.472 ms（平均 1.184 ms）；50 ms 注入累计 413.776 ms（平均 51.722 ms）；200 ms 注入累计 1,616.081 ms（平均 202.010 ms）。三轮均使用 2 个 worker 完成 8/8 个快照，首次列值回调保持立即返回空值、之后读到 10 B，重复读取命中缓存；关闭 provider 后剩余 8 个排队请求均被取消，fixture 无 Shell view 创建。日志分别为 `src/.state/native-probe-watchdog/20261101-async-latency-smoke-0ms.stdout.log`、`...-50ms.stdout.log`、`...-200ms.stdout.log`。
 
 这只验证队列任务层面对人为延迟的处理与取消，不包含 `IShellView` 里的 DefView 行请求、菜单/排序消息泵、队列背压或 view 批次策略；不能据此判定慢磁盘/网络上的可见体验。下一步仍需在授权隔离桌面上对 500 项单 view 的逐行与按 view 批次做延迟对照，比较队列拒绝、值最终就绪、通知数、选区/焦点及消息泵响应，再决定是否继续产品架构评审。
+
+### 2026-11-01：无窗口逐项与 view-batch worker 对照
+
+把同一无窗口 async smoke 扩展为逐项/按 provider 批次两种调度，每轮向一个 provider 连续请求 8 个目录大小，验证回调立即返回空值、8 个扫描均发布、重复读取命中缓存，以及 provider 释放时未启动的任务被取消。逐项模式排 8 个扫描任务并用两个 worker；批次模式将 8 项合并为一个 task、用一个 worker，整批可取消。两者在 0/50/200 ms 注入下均完成 8 项，无窗口、无拒绝。
+
+| 单项扫描注入 | 逐项模式累计扫描 / smoke 墙钟 | view-batch 累计扫描 / smoke 墙钟 |
+| --- | ---: | ---: |
+| 0 ms | 8.693 ms / 212.860 ms | 5.091 ms / 346.392 ms |
+| 50 ms | 415.991 ms / 424.117 ms | 410.680 ms / 733.627 ms |
+| 200 ms | 1,613.059 ms / 1,025.273 ms | 1,612.369 ms / 1,936.719 ms |
+
+墙钟包含合成 fixture、排队门闩、等待 8 项完成和取消分支，不是纯扫描时间。累计扫描时间相近；view-batch 的单 task 串行处理让 50/200 ms 样本的总等待分别约为逐项模式的 1.73/1.89 倍，0 ms 时也多约 134 ms，显示当前 25/50 ms 合并等待和单 worker 串行的成本。逐项模式的两个 worker 则能并行延迟任务。另一方面，该 smoke 只有 8 项且没有制造队列压力，不能反驳四个 80 项 view 的隔离 Shell 探针中“324 个逐项任务产生 66 次拒绝，而四个 view-batch task 零拒绝”的结果。
+
+因此当前证据不支持把单 worker 全 view 串行批次直接作为最终策略。后续原型应评估按 view 合并入口、再以有界小块利用共享两 worker 队列的调度，并在真实隐藏 `IShellView` 中对照队列拒绝、值最终就绪和状态保持。此处只测了无窗口 provider task；未验证 DefView 消息泵、视图关闭时的活动扫描、磁盘/网络 I/O 特征、可见体验或产品接线。日志：`src/.state/native-probe-watchdog/20261101-async-no-view-per-row-0ms.stdout.log`、`...-50ms.stdout.log`、`...-200ms.stdout.log` 与对应 `view-batch` 日志。

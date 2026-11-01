@@ -5107,6 +5107,9 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticOnDemandRecursiveSiz
 extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticAsyncOnDemandRecursiveSizeColumnSmoke(PCWSTR backingPath)
 {
     if (!backingPath || !*backingPath) return E_INVALIDARG;
+    const bool batchByView = InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeBatchByViewForProbe, 0, 0) != 0;
+    const auto expectedWorkerCount = batchByView ? 1L : static_cast<LONG>(SyntheticAsyncRecursiveSizeQueue::kWorkerCount);
+    const auto expectedTaskCount = batchByView ? 1L : 8L;
     const auto previousDemandSetting = InterlockedExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, 1);
     const auto previousAsyncSetting = InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanForProbe, 1);
     const auto previousCustomColumnSetting = InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 1);
@@ -5172,17 +5175,17 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticAsyncOnDemandRecursi
     const auto workerStartDeadline = GetTickCount64() + 5000;
     while (SUCCEEDED(result) &&
         InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizePeakWorkersForProbe, 0, 0) <
-            static_cast<LONG>(SyntheticAsyncRecursiveSizeQueue::kWorkerCount) &&
+            expectedWorkerCount &&
         GetTickCount64() < workerStartDeadline) Sleep(1);
     const auto peakWorkers = InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizePeakWorkersForProbe, 0, 0);
-    if (SUCCEEDED(result) && peakWorkers != static_cast<LONG>(SyntheticAsyncRecursiveSizeQueue::kWorkerCount)) { TraceSyntheticSortStage("async-queue-smoke: worker-limit-not-reached"); result = E_FAIL; }
+    if (SUCCEEDED(result) && peakWorkers != expectedWorkerCount) { TraceSyntheticSortStage("async-queue-smoke: expected-worker-count-not-reached"); result = E_FAIL; }
 
     SetEvent(g_syntheticAsyncRecursiveSizeScanGateForProbe);
     const auto deadline = GetTickCount64() + 10000;
     while (SUCCEEDED(result) &&
-        InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0, 0) < 8 &&
+        InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0, 0) < expectedTaskCount &&
         GetTickCount64() < deadline) Sleep(1);
-    const bool workerCompleted = InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0, 0) == 8 &&
+    const bool workerCompleted = InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0, 0) == expectedTaskCount &&
         InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanCompletedForProbe, 0, 0) == 8 &&
         InterlockedCompareExchange(&g_syntheticOnDemandSizeScanCount, 0, 0) == 8 &&
         InterlockedCompareExchange(&g_syntheticDirectoryMetricsCallCount, 0, 0) == 16 &&
@@ -5228,10 +5231,10 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticAsyncOnDemandRecursi
         SetEvent(cancellationGate);
         const auto cancellationDeadline = GetTickCount64() + 10000;
         while (SUCCEEDED(result) &&
-            InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0, 0) < 8 &&
+            InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0, 0) < expectedTaskCount &&
             GetTickCount64() < cancellationDeadline) Sleep(1);
         const bool queuedWorkCancelled =
-            InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0, 0) == 8 &&
+            InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0, 0) == expectedTaskCount &&
             InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanCompletedForProbe, 0, 0) == 0 &&
             InterlockedCompareExchange(&g_syntheticOnDemandSizeScanCount, 0, 0) == 0 &&
             InterlockedCompareExchange(&g_syntheticDirectoryMetricsCallCount, 0, 0) == 0;
@@ -5250,7 +5253,10 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticAsyncOnDemandRecursi
     InterlockedExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, previousDemandSetting);
     InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanForProbe, previousAsyncSetting);
     InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, previousCustomColumnSetting);
-    if (SUCCEEDED(result)) TraceSyntheticSortStage("synthetic-async-on-demand-size: callbacks-returned-empty; 8-reads-queued; peak-active-workers=2; 8-snapshots-published; released-view-cancelled-8-queued-reads; repeated-reads-cached");
+    if (SUCCEEDED(result))
+        TraceSyntheticSortStage(batchByView
+            ? "synthetic-async-on-demand-size: mode=view-batch; callbacks-returned-empty; 8-reads-coalesced; peak-active-workers=1; 8-snapshots-published; released-view-cancelled-batch; repeated-reads-cached"
+            : "synthetic-async-on-demand-size: mode=per-row; callbacks-returned-empty; 8-reads-queued; peak-active-workers=2; 8-snapshots-published; released-view-cancelled-8-queued-reads; repeated-reads-cached");
     return result;
 }
 
