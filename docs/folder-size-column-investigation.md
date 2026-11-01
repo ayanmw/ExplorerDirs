@@ -1254,3 +1254,11 @@ NativeProbe 增加三种状态模式，仅对隔离合成 view 的列 3（Relati
 扩展 WPF Private Desktop 下的 synthetic filesystem `IShellView` 探针：初始 Details view 显示递归大小 `child=10`、`small.bin=4`；先经递归大小列标题建立 Shell 原生 sort key，再从该 view 的 `GetItemObject(SVGIO_BACKGROUND)` 获取背景 `IContextMenu`，查询 canonical `sortascending` / `sortdescending` 后以 `InvokeCommand` 执行。两条命令 HRESULT 均为 `S_OK`；`IFolderView2.GetSortColumns` 读回相同键 `{9e5e05ac-1936-4a75-94f7-4704b8b01923}:1`，方向分别 `+1/-1`，项目顺序分别 `small.bin|child` 与 `child|small.bin`。NativeProbe Release build 0 警告/错误，Private Desktop watchdog exit 0，前台 HWND、输入 tick 与隔离清理守卫通过。
 
 这补齐的是 synthetic view 将原生背景排序命令路由到其自有递归大小列的程序化合同；未显示 popup 或模拟用户选菜单，未覆盖普通 ExplorerBrowser、其它 provider、交互命中/焦点，也没有解决更新通知后 DefView 不重新读取派生列的问题。产品仍为 ExplorerBrowser，派生列仍是隔离原型。
+
+### 2026-11-01：对照 Q-Dir 逐行大小显示与排序选项
+
+复核 Q-Dir 官方[逐行文件夹大小说明](https://www.softwareok.com/?seite=freeware/q-dir/File_and_folder_size_Column_with_percentage)及[大小显示 FAQ](https://www.softwareok.com/?faq=155&seite=faq-Q-DIR)：Q-Dir 将递归大小复用“大小”列，将文件/文件夹数量复用“类型”列，并列出 Bytes/KB/MB/自动单位、千位分隔、0–3 位或自动小数、百分比、文件/文件夹计数、失焦暂停扫描和忽略文件夹大小排序等独立选项。官方说明还指出忽略递归大小排序是为了避免导航性能问题。
+
+当前 synthetic provider 原型只显示十进制原始字节文本，另有实验性 Relative % 列；它没有格式偏好、计数列替换、失焦暂停或排序策略选项。原生背景菜单排序命令已证明缓存值可参与升/降序，但这只验证可行性，不代表 Q-Dir 默认策略一致。特别是排序必须只读取已完成快照、不能在 Shell 比较回调中启动目录扫描；若未计算或过期，应使用明确的回退/占位策略，避免排序同步遍历目录树。
+
+后续原型应拆成两个可独立核验的合同：一是已完成递归扫描值的列显示格式（单位、舍入/小数、分组符、百分比与目录计数的列落点）；二是递归值排序策略（启用/忽略、缓存未命中时的比较结果，以及排序期间扫描调用数必须为零）。默认值和便携 INI/UI 选项属于产品设计，当前不由此调查决定。以上结论来自官方公开说明与本仓库原型源码，不代表对 Q-Dir 当前默认值的运行时实测。
