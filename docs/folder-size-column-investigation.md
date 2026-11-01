@@ -1432,3 +1432,9 @@ Shell 通知现由有界队列合并：首个待发送更新后等待最多 200m
 本结论只适用于闸门强制制造的背压，不代表普通负载必现，也不证明 ExplorerBrowser 产品存在相同队列行为。两次无闸门复测曾因探针在 view 异步重枚举时立即要求精确行数而读到暂时的 0 行；`ReadSharedViewColumns` 改为等待 `child` 行和预期行数后，无闸门 80 目录/根对照通过：324 次唯一扫描、拒绝 0、四 view 各 82/82、通知 7 次、聚合重枚举 4 次，选区和焦点均保留。另在队列排空后对四个 ListView 的全部行发送 `LVM_UPDATE`，再对四个 `IShellView` 调用 `Refresh`；扫描仍为 258/324、拒绝仍为 66，虽额外触发聚合枚举也没有恢复空白列值。因此只靠常规刷新无法让当前原型重建被丢弃的排队请求。接下来要在 provider 侧保留可取消的待处理请求，或把多个行值合并成有界批量扫描；不能依赖 Shell 再次请求。
 
 NativeProbe Release build 成功，0 警告/错误；原生 adapter `/W4 /WX` 构建成功。无闸门通过日志：`src/.state/native-probe-watchdog/20261101-130917-3b6cb733.stdout.log`；强制饱和及刷新恢复失败日志：`src/.state/native-probe-watchdog/20261101-131142-3eb10c9e.stdout.log`；先前暂时行数采样失败日志：`src/.state/native-probe-watchdog/20261101-130709-027b57c3.stdout.log`、`src/.state/native-probe-watchdog/20261101-130736-70fce9ed.stdout.log`。
+
+### 2026-11-01：不同根目录下按视图合并队列的原型评估
+
+针对 66 个拒绝任务，做了仅限 NativeProbe 的两种按视图合并实验。第一种在首次行请求时枚举并扫描同级所有目录：80 目录/根的首轮四个任务共扫描 324 项且无拒绝，但 Shell 通知后的补充请求又扫描，最终达到 494 项，未满足唯一扫描合同。第二种只收集 Shell 实际请求的行并合并到 view 工作项；在四个不同根的 82 行视图中，门闩释放时四项工作已扫描 324 个目录，队列拒绝为 0。后续 Shell 通知/重新请求又生成最多四个批次；最近一轮共扫描 551 项、完成 7 个工作项、拒绝 0，最终四 view 均为 82/82，选区/焦点均保留，峰值 worker 为 2。其它重复轮次累计扫描为 552–611 项，其中 227–287 项超过预期唯一目录数，且有一轮发生焦点状态失败。
+
+因此，合并工作项能避免此强制背压场景的队列丢弃，但当前通知和 provider 生命周期下仍会增加重复扫描，结果不优于 324 次唯一扫描、66 个拒绝的基线；不接入产品，也不保留这次试验代码。后续若继续该方向，应先找出跨 provider 的缓存身份/通知重查路径为何再次提交相同目录，再以“扫描不超过唯一目录数、0 拒绝、四 view 值与焦点全恢复”作为门槛。验证均是隐藏合成 `IShellView`，不是 ExplorerBrowser 产品行为。构建：原生 adapter `/W4 /WX` 成功，NativeProbe Release 0 警告/错误。最新日志：`src/.state/native-probe-watchdog/20261101-132113-d13d6812.stdout.log`；失败对照：`src/.state/native-probe-watchdog/20261101-131939-4d507bd7.stdout.log`、`src/.state/native-probe-watchdog/20261101-131803-889685c5.stdout.log`、`src/.state/native-probe-watchdog/20261101-131644-32d47d14.stdout.log`。
