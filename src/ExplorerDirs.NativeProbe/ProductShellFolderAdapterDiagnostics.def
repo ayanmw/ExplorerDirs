@@ -5,3 +5,5 @@ EXPORTS
     ConfigureShellNamespaceRoot
     GetProductAsyncItemNotificationAttempts
     GetProductAsyncDirectoryNotificationAttempts
+    GetProductAsyncItemNotificationIdentityCount
+    GetProductAsyncItemNotificationIdentity

@@ -1856,6 +1856,21 @@ namespace
 #if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
     volatile LONG g_productAsyncItemNotificationAttempts = 0;
     volatile LONG g_productAsyncDirectoryNotificationAttempts = 0;
+    std::mutex g_productAsyncItemNotificationIdentityMutex;
+    std::vector<std::wstring> g_productAsyncItemNotificationIdentities;
+
+    void RecordProductAsyncItemNotificationIdentity(PCIDLIST_ABSOLUTE itemPidl)
+    {
+        LPWSTR parsingName = nullptr;
+        if (FAILED(SHGetNameFromIDList(itemPidl, SIGDN_DESKTOPABSOLUTEPARSING, &parsingName)) || !parsingName) return;
+        try
+        {
+            std::lock_guard<std::mutex> lock(g_productAsyncItemNotificationIdentityMutex);
+            g_productAsyncItemNotificationIdentities.emplace_back(parsingName);
+        }
+        catch (...) {}
+        CoTaskMemFree(parsingName);
+    }
 #endif
     // Product notifications target the completed folder row so Shell can refresh that value directly.
 #if defined(EXPLORERDIRS_NATIVEPROBE)
@@ -4481,6 +4496,8 @@ namespace
                                 ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeNotificationsSentForProbe);
                                 ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeItemNotificationsSentForProbe);
 #if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
+                                RecordProductAsyncItemNotificationIdentity(
+                                    reinterpret_cast<PCIDLIST_ABSOLUTE>(notification.second));
                                 InterlockedIncrement(&g_productAsyncItemNotificationAttempts);
 #endif
                                 SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_IDLIST, notification.second, nullptr);
@@ -5047,6 +5064,20 @@ extern "C" LONG WINAPI GetProductAsyncItemNotificationAttempts()
 
 extern "C" LONG WINAPI GetProductAsyncDirectoryNotificationAttempts()
 { return InterlockedCompareExchange(&g_productAsyncDirectoryNotificationAttempts, 0, 0); }
+
+extern "C" LONG WINAPI GetProductAsyncItemNotificationIdentityCount()
+{
+    std::lock_guard<std::mutex> lock(g_productAsyncItemNotificationIdentityMutex);
+    return static_cast<LONG>(g_productAsyncItemNotificationIdentities.size());
+}
+
+extern "C" HRESULT WINAPI GetProductAsyncItemNotificationIdentity(LONG index, LPWSTR buffer, UINT capacity)
+{
+    if (!buffer || capacity == 0) return E_INVALIDARG;
+    std::lock_guard<std::mutex> lock(g_productAsyncItemNotificationIdentityMutex);
+    if (index < 0 || static_cast<size_t>(index) >= g_productAsyncItemNotificationIdentities.size()) return E_BOUNDS;
+    return StringCchCopyW(buffer, capacity, g_productAsyncItemNotificationIdentities[static_cast<size_t>(index)].c_str());
+}
 #endif
 
 #if defined(EXPLORERDIRS_NATIVEPROBE)

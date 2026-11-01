@@ -13,6 +13,7 @@ internal sealed class ShellItemUpdateObserver : IDisposable
     private int _updatedItemPidls;
     private readonly Dictionary<int, int> _eventCounts = new();
     private readonly HashSet<string> _updatedItemNames = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _updatedItemParsingNames = new(StringComparer.OrdinalIgnoreCase);
 
     internal int UpdatedItemPidls
     {
@@ -20,6 +21,7 @@ internal sealed class ShellItemUpdateObserver : IDisposable
     }
     internal int TotalEvents { get { lock (_sync) return _eventCounts.Values.Sum(); } }
     internal string[] UpdatedItemNames { get { lock (_sync) return _updatedItemNames.Order(StringComparer.OrdinalIgnoreCase).ToArray(); } }
+    internal string[] UpdatedItemParsingNames { get { lock (_sync) return _updatedItemParsingNames.Order(StringComparer.OrdinalIgnoreCase).ToArray(); } }
     internal string EventSummary
     {
         get { lock (_sync) return string.Join(',', _eventCounts.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key:X}:{pair.Value}")); }
@@ -91,6 +93,16 @@ internal sealed class ShellItemUpdateObserver : IDisposable
                                 lock (_sync) _updatedItemNames.Add(path);
                         }
                         finally { Marshal.FreeCoTaskMem(name); }
+                    }
+                    if (SHGetNameFromIDList(pidl, 0x80028000, out var parsingName) >= 0 && parsingName != 0)
+                    {
+                        try
+                        {
+                            var value = Marshal.PtrToStringUni(parsingName);
+                            if (!string.IsNullOrWhiteSpace(value))
+                                lock (_sync) _updatedItemParsingNames.Add(value);
+                        }
+                        finally { Marshal.FreeCoTaskMem(parsingName); }
                     }
                 }
             }

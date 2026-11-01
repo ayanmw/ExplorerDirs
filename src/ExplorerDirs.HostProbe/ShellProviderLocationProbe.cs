@@ -35,6 +35,7 @@ internal static class ShellProviderLocationProbe
         var namespaceRegistered = false;
         var stage = "fixture";
         HwndSource? source = null;
+        HwndSource? notificationSource = null;
         ShellItemUpdateObserver? itemUpdateObserver = null;
         ShellItemUpdateObserver? filesystemUpdateObserver = null;
         ShellItemUpdateObserver? desktopUpdateObserver = null;
@@ -95,15 +96,22 @@ internal static class ShellProviderLocationProbe
 
             var hostType = appAssembly.GetType("ExplorerDirs.App.ExplorerBrowserHost", throwOnError: true)!;
             host = (HwndHost)Activator.CreateInstance(hostType, targetIdentity, viewState)!;
-            var grid = new Grid { Width = 640, Height = 360 };
+            var viewHeight = notificationBurst ? 1000 : 360;
+            var grid = new Grid { Width = 640, Height = viewHeight };
             grid.Children.Add(host);
             source = new HwndSource(new HwndSourceParameters("ExplorerDirs product async HostProbe")
             {
-                WindowStyle = unchecked((int)0x80000000), Width = 640, Height = 360
+                WindowStyle = unchecked((int)0x80000000), Width = 640, Height = viewHeight
             });
             itemUpdateObserver = new ShellItemUpdateObserver(source, targetIdentity);
             filesystemUpdateObserver = new ShellItemUpdateObserver(source, viewRoot);
-            desktopUpdateObserver = ShellItemUpdateObserver.ForDesktop(source);
+            notificationSource = new HwndSource(new HwndSourceParameters("ExplorerDirs Shell notification observer")
+            {
+                WindowStyle = unchecked((int)0x80000000), Width = 1, Height = 1
+            });
+            desktopUpdateObserver = ShellItemUpdateObserver.ForDesktop(notificationSource);
+            if (IsWindowVisible(notificationSource.Handle))
+                throw new InvalidOperationException("The independent Shell notification observer window became visible.");
             source.RootVisual = grid;
             grid.Measure(new Size(640, 360));
             grid.Arrange(new Rect(0, 0, 640, 360));
@@ -173,7 +181,10 @@ internal static class ShellProviderLocationProbe
                     }
                     catch (TimeoutException) { }
                 }
-                Console.WriteLine($"shell-provider-product-async-notifications: adapter-item-send-attempts={ReadProductDiagnosticCounter(adapter, "GetProductAsyncItemNotificationAttempts")}; expected-item-names=[{string.Join('|', expectedUpdatedNames)}]; provider-root-item-pidls={itemUpdateObserver.UpdatedItemPidls}; provider-root-events=[{itemUpdateObserver.EventSummary}]; physical-root-item-names=[{string.Join('|', filesystemUpdateObserver.UpdatedItemNames)}]; physical-root-events=[{filesystemUpdateObserver.EventSummary}]; desktop-item-names=[{string.Join('|', desktopUpdateObserver.UpdatedItemNames)}]; desktop-events=[{desktopUpdateObserver.EventSummary}]; burst-delivery-samples=[{string.Join('|', notificationDeliverySamples)}]");
+                var sentNotificationIdentities = ReadProductDiagnosticItemIdentities(adapter);
+                var sentNotificationNames = sentNotificationIdentities.Select(GetProviderItemName).ToArray();
+                var receivedNotificationNames = desktopUpdateObserver.UpdatedItemParsingNames.Select(GetProviderItemName).ToArray();
+                Console.WriteLine($"shell-provider-product-async-notifications: adapter-item-send-attempts={ReadProductDiagnosticCounter(adapter, "GetProductAsyncItemNotificationAttempts")}; adapter-pidl-identities=[{string.Join('|', sentNotificationNames)}]; expected-item-names=[{string.Join('|', expectedUpdatedNames)}]; provider-root-item-pidls={itemUpdateObserver.UpdatedItemPidls}; provider-root-events=[{itemUpdateObserver.EventSummary}]; physical-root-item-names=[{string.Join('|', filesystemUpdateObserver.UpdatedItemNames)}]; physical-root-events=[{filesystemUpdateObserver.EventSummary}]; desktop-item-names=[{string.Join('|', desktopUpdateObserver.UpdatedItemNames)}]; desktop-pidl-identities=[{string.Join('|', receivedNotificationNames)}]; identities-match={sentNotificationIdentities.Order(StringComparer.OrdinalIgnoreCase).SequenceEqual(desktopUpdateObserver.UpdatedItemParsingNames.Order(StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase)}; desktop-events=[{desktopUpdateObserver.EventSummary}]; burst-delivery-samples=[{string.Join('|', notificationDeliverySamples)}]");
                 if (!expectedUpdatedNames.SetEquals(desktopUpdateObserver.UpdatedItemNames))
                     throw new InvalidOperationException($"The Desktop-scope observer did not receive every changed row: expected=[{string.Join('|', expectedUpdatedNames)}]; received=[{string.Join('|', desktopUpdateObserver.UpdatedItemNames)}]; provider-root-events=[{itemUpdateObserver.EventSummary}]; physical-root-events=[{filesystemUpdateObserver.EventSummary}]; desktop-events=[{desktopUpdateObserver.EventSummary}].");
                 if (notificationBurst)
@@ -336,6 +347,7 @@ internal static class ShellProviderLocationProbe
             itemUpdateObserver?.Dispose();
             filesystemUpdateObserver?.Dispose();
             desktopUpdateObserver?.Dispose();
+            notificationSource?.Dispose();
             if (source is not null)
             {
                 source.RootVisual = null;
@@ -1157,6 +1169,28 @@ internal static class ShellProviderLocationProbe
             ? Marshal.GetDelegateForFunctionPointer<GetCounter>(address)().ToString(CultureInfo.InvariantCulture)
             : "unavailable";
 
+    private static string[] ReadProductDiagnosticItemIdentities(nint adapter)
+    {
+        if (!NativeLibrary.TryGetExport(adapter, "GetProductAsyncItemNotificationIdentityCount", out var countAddress) ||
+            !NativeLibrary.TryGetExport(adapter, "GetProductAsyncItemNotificationIdentity", out var identityAddress))
+            return [];
+        var count = Marshal.GetDelegateForFunctionPointer<GetCounter>(countAddress)();
+        var getIdentity = Marshal.GetDelegateForFunctionPointer<GetProductAsyncItemNotificationIdentity>(identityAddress);
+        var identities = new string[count];
+        for (var index = 0; index < count; index++)
+        {
+            var buffer = new StringBuilder(4096);
+            Check(getIdentity(index, buffer, (uint)buffer.Capacity));
+            identities[index] = buffer.ToString();
+        }
+        return identities;
+    }
+
+    private static string GetProviderItemName(string identity) =>
+        TryDecodeProviderBackingPath(identity, out var backingPath)
+            ? Path.GetFileName(backingPath) ?? backingPath
+            : identity;
+
     private static void WaitUntil(Func<bool> condition, TimeSpan timeout, string failure)
     {
         var frame = new DispatcherFrame();
@@ -1845,6 +1879,9 @@ internal static class ShellProviderLocationProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetClassId(ref Guid classId);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetFlag(int enabled);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCounter();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)]
+    private delegate int GetProductAsyncItemNotificationIdentity(int index,
+        [MarshalAs(UnmanagedType.LPWStr)] StringBuilder buffer, uint capacity);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCounterForColumn(uint column);
     [StructLayout(LayoutKind.Sequential)] private struct NativePropertyKey(Guid formatId, uint propertyId)
     {

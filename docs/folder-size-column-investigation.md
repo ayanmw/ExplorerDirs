@@ -2639,3 +2639,11 @@ HostProbe Release build 0 警告/错误。没有可见窗口、没有产品行�
 为了排除观察器 hook 互相截断消息，每个 `SHChangeNotifyRegister` 现在使用各自的窗口消息号；结果仍为 11/16，因此共用消息号不是当前差额的根因。之前在 15 秒后对缺项直接重发时，Shell 通知数增长 10，观察到缺项相关事件；该操作会污染原始送达计数，已从正式探针路径移除，不能用它断定原始事件是延迟还是被 Shell 合并。当前边界已经收窄到 adapter 已调用 16 次，但 Shell 注册观察器只在 30 秒内收到 11 个 distinct item event；下一步要检查未收到事件对应的原始 PIDL 身份，并以独立窗口监听复验，确定差异发生在 PIDL构造、Shell 通知投递或同 HWND 的多注册语义。
 
 两项表头点击仍能最终排序正确，但 `IFolderView`、原生 ListView 与导出均观测到暂时 0 行，完整 HostProbe 按保护门槛以失败码退出。两项默认场景在 2/2 通知到达后保持 2 行并通过。HostProbe Release build 0 警告/错误；diagnostic adapter 位于 `bin/native-product-diagnostics-x64`，不进入产品发布。
+
+### 2026-11-02：独立 HWND 与逐项 PIDL 名称对照
+
+HostProbe 的 Desktop 通知观察器现使用独立、不可见的 `HwndSource` HWND，不再与 ExplorerBrowser 宿主共用消息队列；其注册仍使用独立消息号。diagnostic adapter 在每次 `SHChangeNotify` 前记录目标 PIDL 的 Desktop-absolute parsing name。2 项场景发出并收到的两个 PIDL 名称完全一致，2/2 通过。
+
+16 项场景中，adapter 记录的 16 个 PIDL 名称解码后正好对应夹具的 16 个不同目录，没有重复或缺失；独立 HWND 的 Desktop 观察器在 30 秒内仍只收到 `folder-extra-00` 至 `folder-extra-10` 共 11 个事件。将隐藏视图高度从 360 增至 1000 像素也没有改变这个子集。由此排除了同一 HWND 的 hook 截断、视图高度不足和明显的 provider parsing-name 重复这几项解释；它还不能证明 Shell 全局投递层丢弃事件，因为 Desktop 范围观察器不等同于当前 ExplorerBrowser 视图的内部通知接收器。下一步应对照独立 Desktop HWND 与 ExplorerBrowser 内部 `SFVM_FSNOTIFY`/视图回调的收件情况，并进一步比对发送与接收 PIDL 的二进制身份。
+
+HostProbe Release build 0 警告/错误；2 项场景通过，16 项差异场景按门槛退出失败。没有可见窗口、产品功能改动或 release 更新。
