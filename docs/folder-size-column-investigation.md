@@ -2551,4 +2551,12 @@ App 生命周期接线位置仍是：在 `FolderOpenRouter.TryStart` 成功后�
 
 此前产品 DLL 虽将 Recursive Size 作为默认大小列，但扫描默认值仍为立即递归；EnumObjects 因此可能在首次枚举目录时逐个扫描子目录，造成目录打开延迟。本次将产品变体默认设为按列值请求后异步扫描，并启用人类可读大小文本；NativeProbe 的同步、按需及 A/B 默认值保持不变。
 
-产品构建的纯诊断 InterlockedIncrement/Add 现在编译为空操作，列元数据跟踪也仅保留在 NativeProbe。COM 引用/对象存活、服务器锁、`DllGetClassObject` 在途调用标记及异步 worker 活跃数仍保留，因为这些计数参与卸载安全或并发上限。当前 product build smoke 仍验证 DLL 加载、Shell folder 激活及默认列标题；该 smoke 不创建 Shell view，也不验证可见的异步行回填。产品 DLL 尚未接入 App 或 release。
+产品构建的纯诊断 InterlockedIncrement/Add/Add64 在产品构建中编译为空操作，列元数据跟踪与原生阶段日志也仅保留在 NativeProbe。COM 引用/对象存活、服务器锁、`DllGetClassObject` 在途调用标记及异步 worker 活跃数仍保留，因为这些计数参与卸载安全或并发上限。当前 product build smoke 仍验证 DLL 加载、Shell folder 激活及默认列标题；该 smoke 不创建 Shell view，也不验证可见的异步行回填。产品 DLL 尚未接入 App 或 release。
+
+### 2026-11-02：产品 adapter 的隐藏 ExplorerBrowser 按需列验证
+
+新增 HostProbe 参数 shell-provider-product-async，直接加载产品 DLL，经临时 volatile HKCU CLSID 与 NameSpace 注册，由生产 ExplorerBrowserHost 创建不可见 Shell view，浏览两个临时文件夹。探针读回递归值 5 B 与 29 B，确认产品 path provider、默认递归列与真实 ExplorerBrowser 列值链可协同；父 HWND 确认不可见、foreground HWND 前后不变，退出时明确删除临时注册和目录。产品版 C++ /W4 /WX 与 HostProbe Release build 通过。
+
+产品变体改为对已完成的目录行发送 SHCNE_UPDATEITEM。HostProbe 连续六轮检查，递归值均正确；异步填值后只有 1 轮自动按大小排序，另 5 轮仍按名称排序。当自动排序未发生时，重新应用 Shell 的 sortdescending 和 sortascending 命令可在同一视图中恢复正确顺序，无需调用会短暂清空列表的 IShellView.Refresh。因此逐行通知不能保证异步排序状态自动更新；通知粒度是否减少行重枚举尚未由本 HostProbe 测量。六轮的 foreground 守卫均通过，volatile 注册和目录均清理；未验证可见像素、焦点/选区及真实目录大负载。产品 DLL 仍未接入 App 或 release。
+
+下一步评估在异步值完成后复用 ExplorerBrowserHost 的延迟虚拟排序策略，并用同一 HostProbe 检查重排时的行枚举、焦点和选区保持。

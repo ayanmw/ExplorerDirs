@@ -32,6 +32,8 @@ internal static class Program
                 args[4], sessionChildIgnoreFolderSort);
         if (args is ["--column-header-focus"]) return ColumnHeaderFocusProbe.Run();
         if (args is ["--shell-provider-location"]) return ShellProviderLocationProbe.Run();
+        if (args is ["--shell-provider-product-async"])
+            return ShellProviderLocationProbe.RunProductAdapterOnDemandAsync();
         if (args is ["--shell-provider-location-no-desktop-namespace"])
             return ShellProviderLocationProbe.Run(registerDesktopNamespace: false);
         if (args is ["--shell-provider-location-descending"]) return ShellProviderLocationProbe.Run(descending: true);

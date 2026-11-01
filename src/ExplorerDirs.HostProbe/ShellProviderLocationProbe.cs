@@ -14,6 +14,154 @@ using System.Windows.Threading;
 // Exercises the production ExplorerBrowserHost against a disposable Shell folder provider.
 internal static class ShellProviderLocationProbe
 {
+    internal static int RunProductAdapterOnDemandAsync()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ExplorerDirs-ProductAsyncHost-" + Guid.NewGuid().ToString("N"));
+        var fallbackRoot = Path.Combine(root, "fallback-root");
+        var viewRoot = Path.Combine(root, "view-root");
+        var smallFolder = Path.Combine(viewRoot, "folder-small");
+        var largeFolder = Path.Combine(viewRoot, "folder-large");
+        var classId = Guid.NewGuid();
+        var classKeyPath = $@"Software\Classes\CLSID\{{{classId:D}}}";
+        var namespaceKeyPath = $@"Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{{{classId:D}}}";
+        nint adapter = 0;
+        var classRegistered = false;
+        var namespaceRegistered = false;
+        var stage = "fixture";
+        HwndSource? source = null;
+        HwndHost? host = null;
+        var foregroundBefore = GetForegroundWindow();
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(fallbackRoot, "fallback-only"));
+            Directory.CreateDirectory(smallFolder);
+            Directory.CreateDirectory(largeFolder);
+            File.WriteAllBytes(Path.Combine(smallFolder, "payload.bin"), new byte[5]);
+            File.WriteAllBytes(Path.Combine(largeFolder, "payload.bin"), new byte[29]);
+
+            var adapterPath = FindProductAdapterLibrary();
+            stage = "load-product-adapter";
+            adapter = NativeLibrary.Load(adapterPath);
+            var configure = GetExport<ConfigureShellNamespaceRoot>(adapter, "ConfigureShellNamespaceRoot");
+            Check(configure(ref classId, fallbackRoot));
+            RegisterVolatileClass(classKeyPath, adapterPath);
+            classRegistered = true;
+            RegisterVolatileNamespace(namespaceKeyPath);
+            namespaceRegistered = true;
+
+            stage = "construct-view-state";
+            var targetIdentity = $"::{{{classId:D}}}\\edpath:{EncodePath(viewRoot)}";
+            var appAssembly = Assembly.Load("ExplorerDirs.App");
+            var viewStateType = appAssembly.GetType("ExplorerDirs.App.ViewState", throwOnError: true)!;
+            var propertyKeyType = appAssembly.GetType("ExplorerDirs.App.PropertyKeyState", throwOnError: true)!;
+            var sortColumnType = appAssembly.GetType("ExplorerDirs.App.SortColumnState", throwOnError: true)!;
+            var displayColumnType = appAssembly.GetType("ExplorerDirs.App.DisplayColumnState", throwOnError: true)!;
+            var recursiveSortKey = Activator.CreateInstance(propertyKeyType,
+                Guid.Parse("9E5E05AC-1936-4A75-94F7-4704B8B01923"), 1u)!;
+            var sorts = Array.CreateInstance(sortColumnType, 1);
+            sorts.SetValue(Activator.CreateInstance(sortColumnType, [recursiveSortKey, 1]), 0);
+            var displayColumns = Array.CreateInstance(displayColumnType, 2);
+            displayColumns.SetValue(Activator.CreateInstance(displayColumnType, [recursiveSortKey, 180]), 0);
+            displayColumns.SetValue(Activator.CreateInstance(displayColumnType,
+                [Activator.CreateInstance(propertyKeyType, new Guid("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 10u)!, 240]), 1);
+            var viewStateConstructor = viewStateType.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                .Single(constructor => constructor.GetParameters().Length == 6);
+            var viewState = viewStateConstructor.Invoke([4u, -1, sorts, null, true, displayColumns]);
+
+            var hostType = appAssembly.GetType("ExplorerDirs.App.ExplorerBrowserHost", throwOnError: true)!;
+            host = (HwndHost)Activator.CreateInstance(hostType, targetIdentity, viewState)!;
+            var grid = new Grid { Width = 640, Height = 360 };
+            grid.Children.Add(host);
+            source = new HwndSource(new HwndSourceParameters("ExplorerDirs product async HostProbe")
+            {
+                WindowStyle = unchecked((int)0x80000000), Width = 640, Height = 360
+            });
+            source.RootVisual = grid;
+            grid.Measure(new Size(640, 360));
+            grid.Arrange(new Rect(0, 0, 640, 360));
+            grid.UpdateLayout();
+            if (source.Handle == 0 || IsWindowVisible(source.Handle))
+                throw new InvalidOperationException("The product Shell HostProbe parent window became visible.");
+
+            stage = "wait-for-navigation";
+            var navigatedField = hostType.GetField("_hasNavigated", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var viewWindowField = hostType.GetField("_viewWindow", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            WaitUntil(() => Equals(navigatedField.GetValue(host), true) && (nint)viewWindowField.GetValue(host)! != 0,
+                TimeSpan.FromSeconds(15), "the product Shell view did not navigate to the temporary registered root");
+            stage = "wait-for-enumeration";
+            WaitUntil(() =>
+            {
+                var counts = hostType.GetMethod("ReadItemCounts", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .Invoke(host, [false, false]);
+                return counts is not null && (int)counts.GetType().GetProperty("Total")!.GetValue(counts)! == 2;
+            }, TimeSpan.FromSeconds(15), "the product Shell view did not enumerate the two test folders");
+
+            stage = "async-values";
+            var readValues = typeof(ShellProviderLocationProbe).GetMethod("ReadRecursiveValues",
+                BindingFlags.Static | BindingFlags.NonPublic)!;
+            string[] values = [];
+            WaitUntil(() =>
+            {
+                values = (string[])readValues.Invoke(null, [hostType, host, 2])!;
+                return values.Length == 2 && values.Select(value => TryReadBytes(value, out var bytes) ? bytes : ulong.MaxValue)
+                    .Order().SequenceEqual([5UL, 29UL]);
+            }, TimeSpan.FromSeconds(20), "the product Shell view did not fill both recursive values asynchronously");
+
+            stage = "capture-sort";
+            var capture = hostType.GetMethod("CaptureFileViewExportSnapshot", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var readRows = typeof(ShellProviderLocationProbe).GetMethod("ReadExportRows", BindingFlags.Static | BindingFlags.NonPublic)!;
+            var snapshot = capture.Invoke(host, null)!;
+            var rows = readRows.Invoke(null, [snapshot])!;
+            var orderedRows = (string[][])rows.GetType().GetField("Item2")!.GetValue(rows)!;
+            var columns = (string[])rows.GetType().GetField("Item1")!.GetValue(rows)!;
+            var nameColumn = Array.FindIndex(columns, name => name.Equals("Name", StringComparison.OrdinalIgnoreCase) || name == "名称");
+            if (nameColumn < 0) throw new InvalidOperationException("The product Shell view export did not expose the Name column.");
+            var names = orderedRows.Select(row => Path.GetFileName(row[nameColumn]) ?? row[nameColumn]).ToArray();
+            var orderAfterAsyncFill = names;
+            var autoResorted = names.SequenceEqual(["folder-small", "folder-large"], StringComparer.OrdinalIgnoreCase);
+            if (!autoResorted)
+            {
+                var sortCommand = typeof(ShellProviderLocationProbe).GetMethod("InvokeBackgroundShellVerb",
+                    BindingFlags.Static | BindingFlags.NonPublic)!;
+                Check((int)sortCommand.Invoke(null, [hostType, host, "sortdescending"])!);
+                PumpDispatcher(TimeSpan.FromMilliseconds(100));
+                Check((int)sortCommand.Invoke(null, [hostType, host, "sortascending"])!);
+            }
+            WaitUntil(() =>
+            {
+                snapshot = capture.Invoke(host, null)!;
+                rows = readRows.Invoke(null, [snapshot])!;
+                orderedRows = (string[][])rows.GetType().GetField("Item2")!.GetValue(rows)!;
+                names = orderedRows.Select(row => Path.GetFileName(row[nameColumn]) ?? row[nameColumn]).ToArray();
+                return names.SequenceEqual(["folder-small", "folder-large"], StringComparer.OrdinalIgnoreCase);
+            }, TimeSpan.FromSeconds(10), "reapplying the recursive-size Shell sort did not order the populated values");
+
+            Console.WriteLine($"shell-provider-product-async: product-dll=True; volatile-registration=True; hidden-shell-view=True; rows=2; recursive-values=[{string.Join('|', values)}]; order-after-async-fill=[{string.Join('|', orderAfterAsyncFill)}]; auto-resorted={autoResorted}; ascending-sort-after-reapply=[{string.Join('|', names)}]; class={classId:D}; foreground-unchanged=True");
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"shell-provider-product-async: failed-stage={stage}; exception={exception}");
+            return 1;
+        }
+        finally
+        {
+            if (source is not null)
+            {
+                source.RootVisual = null;
+                source.Dispose();
+            }
+            else if (host is IDisposable disposable)
+                disposable.Dispose();
+            PumpDispatcher(TimeSpan.FromMilliseconds(150));
+            if (namespaceRegistered) Registry.CurrentUser.DeleteSubKeyTree(namespaceKeyPath, throwOnMissingSubKey: false);
+            if (classRegistered) Registry.CurrentUser.DeleteSubKeyTree(classKeyPath, throwOnMissingSubKey: false);
+            if (adapter != 0) NativeLibrary.Free(adapter);
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+            HostProbeForegroundGuard.EnsureUnchanged(foregroundBefore, GetForegroundWindow(), "product async Shell view probe");
+        }
+    }
+
     internal static int Run(bool descending = false, bool ignoreFolderSizeForSort = false,
         bool registerDesktopNamespace = true)
     {
@@ -701,6 +849,51 @@ internal static class ShellProviderLocationProbe
         }
     }
 
+    private static void RegisterVolatileClass(string path, string adapterPath)
+    {
+        if (Registry.CurrentUser.OpenSubKey(path) is not null)
+            throw new InvalidOperationException("The generated product Shell CLSID unexpectedly already exists.");
+        try
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(path,
+                RegistryKeyPermissionCheck.ReadWriteSubTree, RegistryOptions.Volatile)
+                ?? throw new InvalidOperationException("Could not create the temporary volatile Shell CLSID.");
+            key.SetValue(null, "ExplorerDirs product HostProbe isolated Shell folder", RegistryValueKind.String);
+            using var inproc = key.CreateSubKey("InprocServer32",
+                RegistryKeyPermissionCheck.ReadWriteSubTree, RegistryOptions.Volatile)
+                ?? throw new InvalidOperationException("Could not create the temporary volatile InprocServer32 registration.");
+            inproc.SetValue(null, adapterPath, RegistryValueKind.String);
+            inproc.SetValue("ThreadingModel", "Apartment", RegistryValueKind.String);
+            using var shellFolder = key.CreateSubKey("ShellFolder",
+                RegistryKeyPermissionCheck.ReadWriteSubTree, RegistryOptions.Volatile)
+                ?? throw new InvalidOperationException("Could not create the temporary volatile ShellFolder attributes.");
+            shellFolder.SetValue("Attributes", unchecked((int)0xA0000000), RegistryValueKind.DWord);
+        }
+        catch
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(path, throwOnMissingSubKey: false);
+            throw;
+        }
+    }
+
+    private static void RegisterVolatileNamespace(string path)
+    {
+        if (Registry.CurrentUser.OpenSubKey(path) is not null)
+            throw new InvalidOperationException("The generated product Desktop namespace key unexpectedly already exists.");
+        try
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(path,
+                RegistryKeyPermissionCheck.ReadWriteSubTree, RegistryOptions.Volatile)
+                ?? throw new InvalidOperationException("Could not create the temporary volatile Desktop namespace registration.");
+            key.SetValue(null, "ExplorerDirs product HostProbe isolated Shell folder", RegistryValueKind.String);
+        }
+        catch
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(path, throwOnMissingSubKey: false);
+            throw;
+        }
+    }
+
     private static string EncodePath(string path) => string.Concat(path.Select(character =>
         ((ushort)character).ToString("X4", CultureInfo.InvariantCulture)));
 
@@ -713,6 +906,17 @@ internal static class ShellProviderLocationProbe
             if (File.Exists(path)) return path;
         }
         throw new FileNotFoundException("Build ExplorerDirs.NativeProbe's static Shell folder adapter first.");
+    }
+
+    private static string FindProductAdapterLibrary()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        {
+            var path = Path.Combine(directory.FullName, "ExplorerDirs.NativeProbe", "bin", "native-product-x64",
+                "ExplorerDirs.ShellNamespace.dll");
+            if (File.Exists(path)) return path;
+        }
+        throw new FileNotFoundException("Build ExplorerDirs.NativeProbe's product Shell folder adapter first.");
     }
 
     private static void WaitUntil(Func<bool> condition, TimeSpan timeout, string failure)
@@ -1261,6 +1465,8 @@ internal static class ShellProviderLocationProbe
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)]
     private delegate int SetPath([MarshalAs(UnmanagedType.LPWStr)] string path);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)]
+    private delegate int ConfigureShellNamespaceRoot(ref Guid classId, [MarshalAs(UnmanagedType.LPWStr)] string path);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetClassId(ref Guid classId);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetFlag(int enabled);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCounter();

@@ -41,11 +41,15 @@ namespace
 {
     void TraceSyntheticSortStage(const char* stage)
     {
+#if defined(EXPLORERDIRS_NATIVEPROBE)
         const auto output = GetStdHandle(STD_OUTPUT_HANDLE);
         if (!output || output == INVALID_HANDLE_VALUE) return;
         DWORD written = 0;
         WriteFile(output, stage, static_cast<DWORD>(strlen(stage)), &written, nullptr);
         WriteFile(output, "\r\n", 2, &written, nullptr);
+#else
+        (void)stage;
+#endif
     }
 
     void TraceSyntheticFolderStage(const char* stage, const std::wstring& backingPath, HRESULT result)
@@ -1849,8 +1853,13 @@ namespace
     volatile LONG g_syntheticAsyncRecursiveSizeNotificationsSentForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeItemNotificationsSentForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeDirectoryNotificationsSentForProbe = 0;
-    // NativeProbe-only A/B switch: target the completed directory row instead of invalidating its parent view.
+    // Product notifications target the completed folder row so Shell can refresh that value directly.
+#if defined(EXPLORERDIRS_NATIVEPROBE)
+    // NativeProbe-only A/B default preserves the parent-directory baseline unless explicitly enabled.
     volatile LONG g_syntheticAsyncRecursiveSizeItemNotificationForProbe = 0;
+#else
+    volatile LONG g_syntheticAsyncRecursiveSizeItemNotificationForProbe = 1;
+#endif
     volatile LONG g_syntheticAsyncRecursiveSizeNotificationInvalidatedReservationsForProbe = 0;
     volatile LONG g_syntheticTraceNotificationPidlsForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeQueueRejectedScanCountForProbe = 0;
