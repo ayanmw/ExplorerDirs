@@ -2156,9 +2156,10 @@ internal static class ShellViewHostFilterProbe
             var secondarySelectedRow = projection.Rows.Single(row => row.Name == "size-2");
             var selectedIndex = projection.Rows.IndexOf(selectedRow);
             SetPeerListItemState(listView, selectedIndex, 0x0003, 0x0003);
-            VerifyPeerShellCommandMenu(shellView, shellFolder, parent, [selectedRow.RelativePidl], ["cut", "copy", "delete", "rename", "properties"]);
+            VerifyPeerShellCommandMenu(shellView, shellFolder, listView,
+                [selectedRow.RelativePidl], ["cut", "copy", "delete", "rename", "properties"]);
             SetPeerListItemState(listView, projection.Rows.IndexOf(secondarySelectedRow), 0x0002, 0x0002);
-            VerifyPeerShellCommandMenu(shellView, shellFolder, parent,
+            VerifyPeerShellCommandMenu(shellView, shellFolder, listView,
                 [selectedRow.RelativePidl, secondarySelectedRow.RelativePidl], ["cut", "copy", "delete"]);
             VerifyPeerMultiSelectionCopy(shellFolder, parent, listView, initialIds: ReadPeerListRowIds(listView),
                 selectedRowId: selectedRow.Id, secondarySelectedRowId: secondarySelectedRow.Id,
@@ -2775,6 +2776,7 @@ internal static class ShellViewHostFilterProbe
                 in menuId, 0, out contextMenu));
             if (contextMenu == 0) throw new InvalidOperationException("The selected Shell row did not provide an IContextMenu.");
             contextObject = Marshal.GetObjectForIUnknown(contextMenu);
+            VerifyPeerContextMenuPopup(contextMenu, owner, relativePidls.Count);
         }
         finally
         {
@@ -2786,7 +2788,7 @@ internal static class ShellViewHostFilterProbe
         var enabledVerbs = requiredVerbs.Where(commands.IsEnabled).ToArray();
         if (enabledVerbs.Length != requiredVerbs.Count)
             throw new InvalidOperationException($"The product Shell command adapter did not expose all selected-row verbs: enabled=[{string.Join(',', enabledVerbs)}].");
-        Console.WriteLine($"ishellview-peer-selected-context-menu: selected-count={relativePidls.Count}; source=IShellFolder.GetUIObjectOf; adapter=NativeShellCommandMenu; enabled=[{string.Join(',', enabledVerbs)}]; popup-shown=False; command-invoked=False");
+        Console.WriteLine($"ishellview-peer-selected-context-menu: selected-count={relativePidls.Count}; source=IShellFolder.GetUIObjectOf; adapter=NativeShellCommandMenu; enabled=[{string.Join(',', enabledVerbs)}]; popup-tracked-and-cancelled=True; command-invoked=False");
 
         var commandStates = ShellFileCommands.Query(background => OpenPeerShellCommandMenu(
             background, shellView, shellFolder, owner, relativePidls));
@@ -2794,7 +2796,30 @@ internal static class ShellViewHostFilterProbe
             !commandStates.GetValueOrDefault(ShellFileCommand.Delete) ||
             !commandStates.GetValueOrDefault(ShellFileCommand.NewFolder))
             throw new InvalidOperationException($"The product ShellFileCommands query did not combine selected and background verbs correctly: {string.Join(',', commandStates.Select(pair => $"{pair.Key}={pair.Value}"))}.");
-        Console.WriteLine($"ishellview-peer-command-matrix: selected-count={relativePidls.Count}; copy={commandStates[ShellFileCommand.Copy]}; delete={commandStates[ShellFileCommand.Delete]}; new-folder={commandStates[ShellFileCommand.NewFolder]}; query=ShellFileCommands.Query; popup-shown=False");
+        Console.WriteLine($"ishellview-peer-command-matrix: selected-count={relativePidls.Count}; copy={commandStates[ShellFileCommand.Copy]}; delete={commandStates[ShellFileCommand.Delete]}; new-folder={commandStates[ShellFileCommand.NewFolder]}; query=ShellFileCommands.Query; popup-tracked-and-cancelled=True");
+    }
+
+    private static void VerifyPeerContextMenuPopup(nint contextMenu, nint owner, int selectedCount)
+    {
+        const int EnforceDefault = 0x0010;
+        const int ExtendedVerbs = 0x0100;
+        var menu = CreatePopupMenu();
+        if (menu == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create the isolated peer context menu.");
+        try
+        {
+            var queryHr = At<QueryContextMenu>(contextMenu, 3)(contextMenu, menu, 0, 1, 0x7fff,
+                EnforceDefault | ExtendedVerbs);
+            Check(queryHr);
+            var itemCount = GetMenuItemCount(menu);
+            if (itemCount <= 0) throw new InvalidOperationException("The selected Shell context menu returned no popup items.");
+
+            var popup = TrackPopupMenuAndCancel(owner, menu, contextMenu);
+            if (popup.SelectedCommand != 0 || popup.InitPopupCount != 1 ||
+                (popup.InitResult != 0 && !popup.ForwardedToOwnerProc))
+                throw new InvalidOperationException($"The selected Shell context menu did not enter and leave the native popup loop cleanly: selected={popup.SelectedCommand}; init-count={popup.InitPopupCount}; init-hr=0x{popup.InitResult:X8}; forwarded={popup.ForwardedToOwnerProc}.");
+            Console.WriteLine($"ishellview-peer-selected-context-menu-popup: selected-count={selectedCount}; query-hr=0x{queryHr:X8}; items={itemCount}; init-popup-count={popup.InitPopupCount}; init-hr=0x{popup.InitResult:X8}; context-menu3-query=0x{popup.ContextMenu3QueryHr:X8}; context-menu2-query=0x{popup.ContextMenu2QueryHr:X8}; context-menu3-message=0x{popup.ContextMenu3MessageHr:X8}; context-menu2-attempted={popup.ContextMenu2Attempted}; context-menu2-message=0x{popup.ContextMenu2MessageHr:X8}; forwarded-to-owner-proc={popup.ForwardedToOwnerProc}; popup-cancelled=True; command-invoked=False");
+        }
+        finally { _ = DestroyMenu(menu); }
     }
 
     private static void VerifyPeerMultiSelectionCopy(nint shellFolder, nint owner, nint listView,
@@ -3438,7 +3463,10 @@ internal static class ShellViewHostFilterProbe
         Console.WriteLine($"ishellview-column-header-menu: owner=0x{capturedPopupOwner:X}; owner-chain=[{capturedPopupOwnerChain}]; items=[{string.Join('|', capturedItems.Select(item => item.Text))}]; canonical-submenu-verbs=[{string.Join(',', canonicalSubmenuVerbs)}]; canonical-leaf-verbs=[{string.Join(',', mappedVerbs)}]; mapped-submenus=[{string.Join(',', mappedSubmenuRows)}]; popup-command-id-base-offset={strongestOffset.Key}; popup-cancelled=True");
     }
 
-    internal static (uint SelectedCommand, int InitPopupCount, int InitResult, bool UsedContextMenu3) TrackPopupMenuAndCancel(nint owner, nint menu, nint contextMenu)
+    internal static (uint SelectedCommand, int InitPopupCount, int InitResult, bool UsedContextMenu3,
+        int ContextMenu3QueryHr, int ContextMenu2QueryHr, int ContextMenu3MessageHr, int ContextMenu2MessageHr,
+        bool ContextMenu2Attempted, bool ForwardedToOwnerProc)
+        TrackPopupMenuAndCancel(nint owner, nint menu, nint contextMenu)
     {
         const uint WmInitMenuPopup = 0x0117;
         const int ENotImpl = unchecked((int)0x80004001);
@@ -3448,13 +3476,19 @@ internal static class ShellViewHostFilterProbe
         var initPopupCount = 0;
         var initResult = ENotImpl;
         var usedContextMenu3 = false;
+        var contextMenu3QueryHr = 0;
+        var contextMenu2QueryHr = 0;
+        var contextMenu3MessageHr = ENotImpl;
+        var contextMenu2MessageHr = ENotImpl;
+        var contextMenu2Attempted = false;
+        var forwardedToOwnerProc = false;
         HookProc? hookCallback = null;
         SubclassProc? windowCallback = null;
         var subclassId = (nuint)0xE7D1;
         try
         {
-            _ = Marshal.QueryInterface(contextMenu, in contextMenu3Id, out context3);
-            _ = Marshal.QueryInterface(contextMenu, in contextMenu2Id, out context2);
+            contextMenu3QueryHr = Marshal.QueryInterface(contextMenu, in contextMenu3Id, out context3);
+            contextMenu2QueryHr = Marshal.QueryInterface(contextMenu, in contextMenu2Id, out context2);
             windowCallback = (window, messageId, wParam, lParam, id, referenceData) =>
             {
                 if (messageId == WmInitMenuPopup && wParam == menu)
@@ -3462,15 +3496,20 @@ internal static class ShellViewHostFilterProbe
                     initPopupCount++;
                     if (context3 != 0)
                     {
-                        initResult = At<MenuMessage2>(context3, 7)(context3, WmInitMenuPopup, menu, lParam, out var handledResult);
+                        contextMenu3MessageHr = At<MenuMessage2>(context3, 7)(context3, WmInitMenuPopup, menu, lParam, out var handledResult);
+                        initResult = contextMenu3MessageHr;
                         usedContextMenu3 = initResult == 0;
                         if (usedContextMenu3) return handledResult;
                     }
                     if (context2 != 0 && (!usedContextMenu3 && initResult is 1 or ENotImpl))
                     {
-                        initResult = At<MenuMessage>(context2, 6)(context2, WmInitMenuPopup, menu, lParam);
+                        contextMenu2Attempted = true;
+                        contextMenu2MessageHr = At<MenuMessage>(context2, 6)(context2, WmInitMenuPopup, menu, lParam);
+                        initResult = contextMenu2MessageHr;
                         if (initResult == 0) return 0;
                     }
+                    // Preserve the peer window's native menu-message chain when an extension returns an error.
+                    forwardedToOwnerProc = true;
                 }
                 return DefSubclassProc(window, messageId, wParam, lParam);
             };
@@ -3489,7 +3528,9 @@ internal static class ShellViewHostFilterProbe
             hook = SetWindowsHookExW(12, hookCallback, 0, GetCurrentThreadId()); // WH_CALLWNDPROCRET, this probe thread only.
             if (hook == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not observe the isolated menu loop.");
             var selected = TrackPopupMenu(menu, 0x0100, 80, 80, 0, owner, 0); // TPM_RETURNCMD; the hook cancels at first initialization.
-            return (selected, initPopupCount, initResult, usedContextMenu3);
+            return (selected, initPopupCount, initResult, usedContextMenu3,
+                contextMenu3QueryHr, contextMenu2QueryHr, contextMenu3MessageHr, contextMenu2MessageHr,
+                contextMenu2Attempted, forwardedToOwnerProc);
         }
         finally
         {
