@@ -2532,3 +2532,9 @@ NativeProbe Release 构建 0 警告/错误；Private Desktop watchdog exit 0，�
 `QuickLinkStore` 现接收当前 profile CLSID；当目标 identity 属于该 provider 时，仍创建标准 `.lnk`，并原子写入相邻的 `<link>.lnk.identity` UTF-8 sidecar。读取快速链接时仅在 sidecar CLSID 与当前 profile 相符、且 Shell identity 格式有效时优先返回该 parsing name；普通文件、文件夹和其它 Shell 位置维持原 Shell Link 解析路径。创建 sidecar 失败会清理对应 `.lnk`，避免留下看似成功但克隆后不可迁移的链接。隔离发布仅复制每个 `.lnk` 与其 sidecar，并对副本的文本身份替换 provider CLSID。
 
 SettingsSmoke 完整运行通过，包含 profile CLSID 重写后读取 sidecar 的用例；`scripts/publish-smoke.ps1` 验证 sidecar 被复制、改写且源 fixture hash 不变；App Release build 0 警告/错误。没有产品 provider 注册、真实 profile 发布或 GUI 验收。该改动只为未来 app-owned provider 快速链接提供迁移数据；旧链接仍按原 Shell PIDL/Path 行为读取。下一步推进 App 级 namespace owner 生命周期，随后把 Native adapter 接到现有 ExplorerBrowserHost，并在可见验收中验证列排序、异步值回填、导航历史与文件操作。
+
+### 2026-11-02：profile owner 强杀后的 volatile namespace 恢复
+
+新增 `--shell-namespace-owner-crash-recovery-private-desktop`，隔离子进程先读取 profile INI 的稳定 CLSID、取得生产 `FolderOpenRouter` 单实例锁、建立 volatile CLSID/COM/NameSpace 注册，再打开 ExplorerBrowser 并验证 profile 专属根内容。协调进程确认第二个同 profile owner 被锁拒绝后强杀子进程；两棵 volatile key 仍然存在，随后协调进程取得释放的 profile 锁，按稳定 CLSID删除并重建本 profile 的 volatile 注册，重新打开 ExplorerBrowser，验证根项目和递归大小列后清理注册。NativeProbe Release 构建 0 警告/错误，watchdog exit 0；Private Desktop 前台、last-input 与隔离清理守卫均通过。
+
+这补上了“强杀遗留键 + 单实例锁释放 + 同身份 owner 重启恢复”的隔离证据，并在真实 ExplorerBrowser 中验证恢复目标。它仍不证明 App 已调用 owner、窗口正常退出时的全部 WPF/COM 顺序、Explorer 进程缓存或 Desktop 默认枚举像素，也不启用产品列或修改 release。首次夹具曾留下一处仅含 profile lock 文件的临时目录；执行策略拒绝删除操作，目录仍留在用户 Temp。后续接 App 前仍要把注册 owner 放在正确的 App 生命周期位置，并验证复制 profile 的身份重映射与构建产物载荷。

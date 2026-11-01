@@ -34,6 +34,10 @@ internal static class Program
             return ShellLinkProfileCloneProbe.RunChild(args[1], args[2], args[3]);
         if (args.Length == 9 && args[0] == "--shell-namespace-owner-profile-child")
             return ShellNamespaceOwnerProbe.RunChild(args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8]);
+        if (args.Length == 4 && args[0] == "--shell-namespace-owner-crash-child")
+            return ShellNamespaceOwnerProbe.RunCrashChild(args[1], args[2], args[3]);
+        if (args.Length == 1 && args[0] == "--shell-namespace-owner-crash-recovery-private-desktop")
+            return PrivateDesktopShellProbe.RunShellNamespaceOwnerCrashRecovery();
         if (args.Length == 5 && args[0] == "--registered-path-pidl-child")
             return RegisteredMultiRootPidlProbe.RunChild(args[1], args[2], args[3], args[4]);
         if (args.Length == 1 && args[0] == "--search-virtual-scopes")

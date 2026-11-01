@@ -51,6 +51,7 @@
     <Compile Include="../ExplorerDirs.App/ViewStyle.cs" Link="ViewStyle.cs" />
     <Compile Include="../ExplorerDirs.App/SessionStore.cs" Link="SessionStore.cs" />
     <Compile Include="../ExplorerDirs.App/ShellNamespaceProfileStore.cs" Link="ShellNamespaceProfileStore.cs" />
+    <Compile Include="../ExplorerDirs.App/FolderOpenRouter.cs" Link="FolderOpenRouter.cs" />
     <Compile Include="../ExplorerDirs.App/ShellLocationIdentity.cs" Link="ShellLocationIdentity.cs" />
     <Compile Include="../ExplorerDirs.App/ShellQuickFilter.cs" Link="ShellQuickFilter.cs" />
     <Compile Include="../ExplorerDirs.App/ShellColumnValueFilterReader.cs" Link="ShellColumnValueFilterReader.cs" />

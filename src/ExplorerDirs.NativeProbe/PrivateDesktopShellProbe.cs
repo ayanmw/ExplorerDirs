@@ -311,6 +311,10 @@ internal static class PrivateDesktopShellProbe
     internal static int RunSyntheticShellTwoViewTargetSync() =>
         Run("synthetic-shell-two-view-target-sync", () => SyntheticShellSortProbe.Run(twoViewDistinctLocations: true), TimeSpan.FromSeconds(45), initializeOle: true);
 
+    internal static int RunShellNamespaceOwnerCrashRecovery() =>
+        Run("shell-namespace-owner-crash-recovery", ShellNamespaceOwnerProbe.RunCrashRecovery,
+            TimeSpan.FromSeconds(45), initializeOle: false);
+
     internal static int RunSyntheticShellPathIdentityTwoView() =>
         Run("synthetic-shell-path-identity-two-view", () => SyntheticShellSortProbe.Run(
             twoViewDistinctLocations: true, twoViewPathIdentityLocations: true),

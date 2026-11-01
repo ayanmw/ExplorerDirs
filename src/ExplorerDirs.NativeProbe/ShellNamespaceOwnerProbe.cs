@@ -156,6 +156,133 @@ internal static class ShellNamespaceOwnerProbe
         }
     }
 
+    // Isolated startup spike: the per-profile lock is the handoff boundary after an
+    // owner is killed, while its volatile Shell keys remain in the user hive.
+    internal static int RunCrashRecovery()
+    {
+        var fixture = Path.Combine(Path.GetTempPath(), "ExplorerDirs-NamespaceCrashRecovery-" + Guid.NewGuid().ToString("N"));
+        var profile = Path.Combine(fixture, "profile");
+        var root = Path.Combine(fixture, "root");
+        var ready = Path.Combine(fixture, "owner.ready");
+        Process? child = null;
+        FolderOpenRouter? replacementOwner = null;
+        Guid classId = Guid.Empty;
+        var registered = false;
+        var oleInitialized = false;
+        try
+        {
+            var oleResult = OleInitialize(0);
+            if (oleResult < 0) Marshal.ThrowExceptionForHR(oleResult);
+            oleInitialized = true;
+            Directory.CreateDirectory(profile);
+            Directory.CreateDirectory(root);
+            File.WriteAllText(Path.Combine(root, "recovered-profile.txt"), "recovered");
+            Directory.CreateDirectory(Path.Combine(root, "shared-folder"));
+            File.WriteAllBytes(Path.Combine(root, "shared-folder", "payload.bin"), []);
+            classId = new ShellNamespaceProfileStore(Path.Combine(profile, "ShellNamespace.ini")).LoadOrCreate()
+                ?? throw new InvalidOperationException("Crash-recovery profile did not produce a stable CLSID.");
+
+            var start = new ProcessStartInfo("dotnet")
+            {
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+                WorkingDirectory = AppContext.BaseDirectory
+            };
+            start.ArgumentList.Add(typeof(ShellNamespaceOwnerProbe).Assembly.Location);
+            start.ArgumentList.Add("--shell-namespace-owner-crash-child");
+            start.ArgumentList.Add(Path.Combine(profile, "ShellNamespace.ini"));
+            start.ArgumentList.Add(root);
+            start.ArgumentList.Add(ready);
+            child = Process.Start(start) ?? throw new InvalidOperationException("Could not start crash-recovery owner child.");
+            WaitForFile(ready, child, "Crash-recovery owner did not acquire the profile and register its Shell namespace.", ready + ".stage");
+            if (File.ReadAllText(ready) != classId.ToString("D"))
+                throw new InvalidOperationException("Crash-recovery child registered a different profile CLSID.");
+
+            using (var blockedOwner = FolderOpenRouter.TryStart(Path.Combine(profile, "ShellNamespace.ini"), _ => Task.FromResult(true)))
+            {
+                if (blockedOwner is not null)
+                    throw new InvalidOperationException("A second process acquired the profile lock while the first owner was alive.");
+            }
+
+            child.Kill(entireProcessTree: true);
+            if (!child.WaitForExit(5000)) throw new TimeoutException("Killed crash-recovery owner did not exit.");
+            child.Dispose();
+            child = null;
+            var classPath = ClassKeyPath(classId);
+            var namespacePath = NamespaceKeyPath(classId);
+            using (var staleClass = Registry.CurrentUser.OpenSubKey(classPath))
+            using (var staleNamespace = Registry.CurrentUser.OpenSubKey(namespacePath))
+            {
+                if (staleClass is null || staleNamespace is null)
+                    throw new InvalidOperationException("The forced-exit fixture did not leave both expected volatile registrations behind.");
+            }
+
+            replacementOwner = FolderOpenRouter.TryStart(Path.Combine(profile, "ShellNamespace.ini"), _ => Task.FromResult(true))
+                ?? throw new InvalidOperationException("The replacement owner could not acquire the released profile lock.");
+            // The profile lock excludes another app owner; rebuild this exact profile identity
+            // before restoring any Shell view so stale volatile keys cannot block activation.
+            DeleteNamespace(classId);
+            RegisterVolatileNamespace(classId, FindAdapterLibrary());
+            registered = true;
+            using (var adapter = new AdapterModule(classId, root))
+            using (var browser = BrowserInstance.Open(classId, adapter.Module,
+                       "recovered-profile.txt", "missing-profile.txt", 0))
+            {
+                browser.Verify("recovered-profile.txt", "missing-profile.txt", 0);
+            }
+            DeleteNamespace(classId);
+            registered = false;
+            replacementOwner.Dispose();
+            replacementOwner = null;
+            WaitForProfileLockRelease(Path.Combine(profile, "ShellNamespace.ini"));
+            Console.WriteLine($"shell-namespace-owner-crash-recovery: profile-lock-released-after-kill=True; stale-volatile-keys-observed=True; same-profile-clsid-reused=True; restored-browser-content=True; registrations-cleaned=True; profile={classId:D}");
+            return 0;
+        }
+        finally
+        {
+            if (child is { HasExited: false })
+            {
+                try { child.Kill(entireProcessTree: true); child.WaitForExit(5000); } catch (InvalidOperationException) { }
+            }
+            child?.Dispose();
+            replacementOwner?.Dispose();
+            if (replacementOwner is not null)
+                WaitForProfileLockRelease(Path.Combine(profile, "ShellNamespace.ini"));
+            if (registered || classId != Guid.Empty && HasProbeRegistrationMarkers(classId)) DeleteNamespace(classId);
+            if (Directory.Exists(fixture)) Directory.Delete(fixture, recursive: true);
+            if (classId != Guid.Empty &&
+                (Registry.CurrentUser.OpenSubKey(ClassKeyPath(classId)) is not null ||
+                 Registry.CurrentUser.OpenSubKey(NamespaceKeyPath(classId)) is not null))
+                throw new InvalidOperationException("The crash-recovery spike left profile Shell registration behind.");
+            if (oleInitialized) OleUninitialize();
+        }
+    }
+
+    internal static int RunCrashChild(string profileIni, string backingPath, string ready)
+    {
+        ReportStage(ready, "ole-initialize-enter");
+        var oleResult = OleInitialize(0);
+        if (oleResult < 0) Marshal.ThrowExceptionForHR(oleResult);
+        ReportStage(ready, "ole-initialize-done");
+        using var owner = FolderOpenRouter.TryStart(profileIni, _ => Task.FromResult(true))
+            ?? throw new InvalidOperationException("Crash child could not acquire the profile lock.");
+        ReportStage(ready, "profile-lock-acquired");
+        var classId = new ShellNamespaceProfileStore(profileIni).LoadOrCreate()
+            ?? throw new InvalidOperationException("Crash child profile provider identity is invalid.");
+        RegisterVolatileNamespace(classId, FindAdapterLibrary());
+        ReportStage(ready, "volatile-registration-created");
+        using var adapter = new AdapterModule(classId, backingPath);
+        using var browser = BrowserInstance.Open(classId, adapter.Module,
+            "recovered-profile.txt", "missing-profile.txt", 0, stage => ReportStage(ready, stage));
+        browser.Verify("recovered-profile.txt", "missing-profile.txt", 0);
+        File.WriteAllText(ready, classId.ToString("D"));
+        // The parent deliberately terminates this owner to model a crash while a view exists.
+        Thread.Sleep(Timeout.Infinite);
+        return 0;
+    }
+
     internal static int RunChild(string profileIni, string backingPath, string ready,
         string verify, string verified, string verifyAgain, string verifiedAgain, string stop)
     {
@@ -239,6 +366,16 @@ internal static class ShellNamespaceOwnerProbe
         Registry.CurrentUser.DeleteSubKeyTree(ClassKeyPath(classId), throwOnMissingSubKey: false);
     }
 
+    private static bool HasProbeRegistrationMarkers(Guid classId)
+    {
+        using var classKey = Registry.CurrentUser.OpenSubKey(ClassKeyPath(classId));
+        using var namespaceKey = Registry.CurrentUser.OpenSubKey(NamespaceKeyPath(classId));
+        return classKey?.GetValue(null) is string classOwner &&
+               classOwner == "ExplorerDirs profile-owned Shell namespace probe" &&
+               namespaceKey?.GetValue(null) is string namespaceOwner &&
+               namespaceOwner == classOwner;
+    }
+
     private static string ClassKeyPath(Guid classId) => $@"Software\Classes\CLSID\{{{classId:D}}}";
     private static string NamespaceKeyPath(Guid classId) => $@"Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{{{classId:D}}}";
 
@@ -267,6 +404,24 @@ internal static class ShellNamespaceOwnerProbe
             Thread.Sleep(10);
         }
         if (!File.Exists(path)) throw new TimeoutException($"Timed out waiting for owner signal '{Path.GetFileName(path)}'.");
+    }
+
+    private static void WaitForProfileLockRelease(string profileIni)
+    {
+        var lockPath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(profileIni))!,
+            FolderOpenRouter.PipeName(profileIni) + ".lock");
+        var deadline = Environment.TickCount64 + 5000;
+        while (Environment.TickCount64 < deadline)
+        {
+            try
+            {
+                using var released = new FileStream(lockPath, FileMode.OpenOrCreate,
+                    FileAccess.ReadWrite, FileShare.None);
+                return;
+            }
+            catch (IOException) { Thread.Sleep(10); }
+        }
+        throw new TimeoutException("The profile owner did not release its single-instance lock after disposal.");
     }
 
     private static void ReportStage(string readyPath, string stage) =>
