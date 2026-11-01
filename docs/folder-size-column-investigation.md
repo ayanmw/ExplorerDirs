@@ -1482,3 +1482,9 @@ Native adapter `/W4 /WX` 与 NativeProbe Release 均构建成功，0 警告/错�
 墙钟包含合成 fixture、排队门闩、等待 8 项完成和取消分支，不是纯扫描时间。累计扫描时间相近；view-batch 的单 task 串行处理让 50/200 ms 样本的总等待分别约为逐项模式的 1.73/1.89 倍，0 ms 时也多约 134 ms，显示当前 25/50 ms 合并等待和单 worker 串行的成本。逐项模式的两个 worker 则能并行延迟任务。另一方面，该 smoke 只有 8 项且没有制造队列压力，不能反驳四个 80 项 view 的隔离 Shell 探针中“324 个逐项任务产生 66 次拒绝，而四个 view-batch task 零拒绝”的结果。
 
 因此当前证据不支持把单 worker 全 view 串行批次直接作为最终策略。后续原型应评估按 view 合并入口、再以有界小块利用共享两 worker 队列的调度，并在真实隐藏 `IShellView` 中对照队列拒绝、值最终就绪和状态保持。此处只测了无窗口 provider task；未验证 DefView 消息泵、视图关闭时的活动扫描、磁盘/网络 I/O 特征、可见体验或产品接线。日志：`src/.state/native-probe-watchdog/20261101-async-no-view-per-row-0ms.stdout.log`、`...-50ms.stdout.log`、`...-200ms.stdout.log` 与对应 `view-batch` 日志。
+
+### 2026-11-01：无窗口 500 项 view-batch 回读与缓存上限
+
+扩展 `--synthetic-async-on-demand-recursive-size-column-smoke`，可在 view-batch 模式请求 500 个目录大小项，并对全数验证回读、对另 500 项验证 provider 释放后的取消；同时打印请求数和扫描计时。首轮探针按 500 项读取后值为空，定位到 smoke 直接构造的 `SyntheticSortFolder` 没有应用 `SetSyntheticRecursiveSizeCacheCapacityForProbe` 配置，仍沿用 256 项默认缓存。修正构造路径后，两轮 500 项缓存容量 smoke 通过：500/500 扫描及值回读成功，第二批取消且未启动扫描，view-batch 峰值 worker 1；扫描累计 324.623/328.490 ms，完整 smoke 墙钟 1,932.757/2,247.827 ms（含夹具、门闩、全值校验与取消）。同轮 8 项 view-batch 与逐项模式分别通过，峰值 worker 为 1 与 2。
+
+该结果证明一个 provider 的 500 项按需批次不会因 256 个队列槽位而拒绝请求，但全批串行工作约 328 ms；墙钟不等于用户等待时间或实际磁盘性能。它没有解决 50/200 ms 注入下 view-batch 比逐项双 worker 更慢的已知结果，也没有验证慢磁盘、Private Desktop DefView、多窗格、排序回填或可见体验。因此尚无证据将单 worker batch 作为最终调度策略；有限并行 chunk 仍需单独修正并完成缓存回读合同后才可继续。没有产品接线或 UI 窗口。

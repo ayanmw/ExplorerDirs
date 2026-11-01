@@ -108,11 +108,12 @@ public static class SyntheticShellSortProbe
         var delayMilliseconds = string.IsNullOrWhiteSpace(delayText) ? 0 :
             int.TryParse(delayText, out var parsedDelayMilliseconds) ? parsedDelayMilliseconds : -1;
         var batchByView = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_BATCH_BY_VIEW") == "1";
+        var requestedScanCount = batchByView && Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_BATCH_COUNT") == "500" ? 500 : 8;
         if (delayMilliseconds is < 0 or > 1000)
             throw new ArgumentOutOfRangeException(nameof(delayText), "Async scan latency injection must be between 0 and 1000 milliseconds.");
         try
         {
-            for (var index = 0; index < 16; index++)
+            for (var index = 0; index < requestedScanCount * 2; index++)
             {
                 var child = Path.Combine(fixture, $"child-{index:D2}");
                 Directory.CreateDirectory(Path.Combine(child, "nested-folder"));
@@ -126,10 +127,12 @@ public static class SyntheticShellSortProbe
                     "SetSyntheticAsyncRecursiveSizeScanDelayForProbe"))(delayMilliseconds));
                 Check(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
                     "SetSyntheticAsyncRecursiveSizeBatchByViewForProbe"))(batchByView ? 1 : 0));
-                var check = Marshal.GetDelegateForFunctionPointer<FolderTreeContractSmoke>(
+                Check(Marshal.GetDelegateForFunctionPointer<SetCacheCapacity>(NativeLibrary.GetExport(module,
+                    "SetSyntheticRecursiveSizeCacheCapacityForProbe"))(Math.Max(256, requestedScanCount)));
+                var check = Marshal.GetDelegateForFunctionPointer<AsyncRecursiveSizeBatchSmoke>(
                     NativeLibrary.GetExport(module, "RunSyntheticAsyncOnDemandRecursiveSizeColumnSmoke"));
                 var wallClock = Stopwatch.StartNew();
-                Check(check(fixture));
+                Check(check(fixture, requestedScanCount));
                 wallClock.Stop();
                 var peakWorkers = Marshal.GetDelegateForFunctionPointer<GetCounter>(
                     NativeLibrary.GetExport(module, "GetSyntheticAsyncRecursiveSizePeakWorkerCountForProbe"))();
@@ -137,7 +140,7 @@ public static class SyntheticShellSortProbe
                 if (peakWorkers != expectedWorkerCount)
                     throw new InvalidOperationException($"Expected the async scanner to use {expectedWorkerCount} worker slot(s), got {peakWorkers}.");
                 var scanElapsedMicroseconds = ReadCounter64(module, "GetSyntheticOnDemandSizeScanMicroseconds");
-                Console.WriteLine($"synthetic-async-recursive-size-latency: completed-scan-count=8; accumulated-scan-ms={scanElapsedMicroseconds / 1000.0:F3}; average-scan-ms={scanElapsedMicroseconds / 8000.0:F3}; probe-wall-ms={wallClock.Elapsed.TotalMilliseconds:F3}");
+                Console.WriteLine($"synthetic-async-recursive-size-latency: completed-scan-count={requestedScanCount}; accumulated-scan-ms={scanElapsedMicroseconds / 1000.0:F3}; average-scan-ms={scanElapsedMicroseconds / (requestedScanCount * 1000.0):F3}; probe-wall-ms={wallClock.Elapsed.TotalMilliseconds:F3}");
             }
             finally
             {
@@ -147,7 +150,7 @@ public static class SyntheticShellSortProbe
                     "SetSyntheticAsyncRecursiveSizeScanDelayForProbe"))(0);
                 NativeLibrary.Free(module);
             }
-            Console.WriteLine($"synthetic-async-on-demand-recursive-size-column-smoke: queue-mode={(batchByView ? "view-batch" : "per-row")}; first-value-read-returns-before-scan=True; worker-publishes-10-bytes=True; repeated-value-read-uses-cache=True; scan-delay-ms={delayMilliseconds}; shell-view-created=False");
+            Console.WriteLine($"synthetic-async-on-demand-recursive-size-column-smoke: queue-mode={(batchByView ? "view-batch" : "per-row")}; requested-scan-count={requestedScanCount}; first-value-read-returns-before-scan=True; worker-publishes-10-bytes=True; repeated-value-read-uses-cache=True; scan-delay-ms={delayMilliseconds}; shell-view-created=False");
             return 0;
         }
         finally { Directory.Delete(fixture, recursive: true); }
@@ -4418,6 +4421,7 @@ public static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int VerifySyntheticShellActivatedRecursiveSizeSnapshotCache(nint rootPidl, ulong sentinelBytes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int ParseDisplayName(nint self, nint hwnd, nint bindContext, [MarshalAs(UnmanagedType.LPWStr)] string displayName, nint eaten, out nint childPidl, nint attributes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int FolderTreeContractSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingRoot);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int AsyncRecursiveSizeBatchSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingRoot, int requestCount);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int FolderEnumerationScanMetrics(
         [MarshalAs(UnmanagedType.LPWStr)] string backingRoot, int recursiveSizeEnabled, out int directRows, out int metricCalls,
         out int entriesVisited, out ulong elapsedMicroseconds);

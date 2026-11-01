@@ -2351,7 +2351,8 @@ namespace
     {
     public:
         explicit SyntheticSortFolder(SyntheticRecursiveSizeSnapshotStore* recursiveSizeStore = nullptr)
-            : _recursiveSizeStore(recursiveSizeStore ? recursiveSizeStore : new (std::nothrow) SyntheticRecursiveSizeSnapshotStore())
+            : _recursiveSizeStore(recursiveSizeStore ? recursiveSizeStore : new (std::nothrow) SyntheticRecursiveSizeSnapshotStore(
+                static_cast<size_t>(InterlockedCompareExchange(&g_syntheticRecursiveSizeCacheCapacityForProbe, 0, 0))))
         {
             if (recursiveSizeStore) _recursiveSizeStore->AddRef();
             InterlockedIncrement(&g_syntheticLiveObjects);
@@ -5104,12 +5105,13 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticOnDemandRecursiveSiz
     return result;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticAsyncOnDemandRecursiveSizeColumnSmoke(PCWSTR backingPath)
+extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticAsyncOnDemandRecursiveSizeColumnSmoke(PCWSTR backingPath, LONG requestCount)
 {
-    if (!backingPath || !*backingPath) return E_INVALIDARG;
+    if (!backingPath || !*backingPath || requestCount < 1 || requestCount > 2048) return E_INVALIDARG;
     const bool batchByView = InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeBatchByViewForProbe, 0, 0) != 0;
     const auto expectedWorkerCount = batchByView ? 1L : static_cast<LONG>(SyntheticAsyncRecursiveSizeQueue::kWorkerCount);
     const auto expectedTaskCount = batchByView ? 1L : 8L;
+    const auto expectedFolderCount = static_cast<size_t>(requestCount) * 2;
     const auto previousDemandSetting = InterlockedExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, 1);
     const auto previousAsyncSetting = InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanForProbe, 1);
     const auto previousCustomColumnSetting = InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 1);
@@ -5157,9 +5159,9 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticAsyncOnDemandRecursi
         try { items.push_back(item); }
         catch (const std::bad_alloc&) { CoTaskMemFree(item); result = E_OUTOFMEMORY; break; }
     }
-    if (SUCCEEDED(result) && items.size() != 16) { TraceSyntheticSortStage("async-queue-smoke: unexpected-folder-count"); result = E_FAIL; }
+    if (SUCCEEDED(result) && items.size() != expectedFolderCount) { TraceSyntheticSortStage("async-queue-smoke: unexpected-folder-count"); result = E_FAIL; }
 
-    for (size_t index = 0; SUCCEEDED(result) && index < 8; ++index)
+    for (size_t index = 0; SUCCEEDED(result) && index < static_cast<size_t>(requestCount); ++index)
     {
         auto item = items[index];
         SHELLDETAILS pendingDetails{};
@@ -5186,21 +5188,34 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticAsyncOnDemandRecursi
         InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0, 0) < expectedTaskCount &&
         GetTickCount64() < deadline) Sleep(1);
     const bool workerCompleted = InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0, 0) == expectedTaskCount &&
-        InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanCompletedForProbe, 0, 0) == 8 &&
-        InterlockedCompareExchange(&g_syntheticOnDemandSizeScanCount, 0, 0) == 8 &&
-        InterlockedCompareExchange(&g_syntheticDirectoryMetricsCallCount, 0, 0) == 16 &&
-        InterlockedCompareExchange(&g_syntheticDirectoryMetricsEntryCount, 0, 0) == 24;
+        InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanCompletedForProbe, 0, 0) == requestCount &&
+        InterlockedCompareExchange(&g_syntheticOnDemandSizeScanCount, 0, 0) == requestCount &&
+        InterlockedCompareExchange(&g_syntheticDirectoryMetricsCallCount, 0, 0) == requestCount * 2 &&
+        InterlockedCompareExchange(&g_syntheticDirectoryMetricsEntryCount, 0, 0) == requestCount * 3;
     if (SUCCEEDED(result) && !workerCompleted) { TraceSyntheticSortStage("async-queue-smoke: first-batch-incomplete"); result = HRESULT_FROM_WIN32(ERROR_TIMEOUT); }
 
-    for (size_t index = 0; SUCCEEDED(result) && index < 8; ++index)
+    for (size_t index = 0; SUCCEEDED(result) && index < static_cast<size_t>(requestCount); ++index)
     {
         auto item = items[index];
         SHELLDETAILS completedDetails{};
         const auto detailsResult = root->GetDetailsOf(item, 1, &completedDetails);
         const bool completedValueMatches = SUCCEEDED(detailsResult) && completedDetails.str.uType == STRRET_WSTR &&
             completedDetails.str.pOleStr && _wcsicmp(completedDetails.str.pOleStr, L"10") == 0;
+        if (FAILED(detailsResult) || !completedValueMatches)
+        {
+            TraceSyntheticSortStage("async-queue-smoke: completed-value-mismatch");
+            if (completedDetails.str.uType == STRRET_WSTR && completedDetails.str.pOleStr)
+            {
+                char actualText[128]{};
+                WideCharToMultiByte(CP_UTF8, 0, completedDetails.str.pOleStr, -1, actualText,
+                    static_cast<int>(sizeof(actualText)), nullptr, nullptr);
+                TraceSyntheticSortStage(actualText);
+            }
+            if (completedDetails.str.uType == STRRET_WSTR && completedDetails.str.pOleStr) CoTaskMemFree(completedDetails.str.pOleStr);
+            result = FAILED(detailsResult) ? detailsResult : E_FAIL;
+            break;
+        }
         if (completedDetails.str.uType == STRRET_WSTR && completedDetails.str.pOleStr) CoTaskMemFree(completedDetails.str.pOleStr);
-        if (FAILED(detailsResult) || !completedValueMatches) { TraceSyntheticSortStage("async-queue-smoke: completed-value-mismatch"); result = FAILED(detailsResult) ? detailsResult : E_FAIL; break; }
     }
 
     HANDLE cancellationGate = nullptr;
@@ -5218,7 +5233,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticAsyncOnDemandRecursi
         InterlockedExchange(&g_syntheticOnDemandSizeScanCount, 0);
         InterlockedExchange(&g_syntheticDirectoryMetricsCallCount, 0);
         InterlockedExchange(&g_syntheticDirectoryMetricsEntryCount, 0);
-        for (size_t index = 8; index < items.size(); ++index)
+        for (size_t index = static_cast<size_t>(requestCount); index < items.size(); ++index)
         {
             SHELLDETAILS pendingDetails{};
             const auto detailsResult = root->GetDetailsOf(items[index], 1, &pendingDetails);
@@ -5255,7 +5270,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticAsyncOnDemandRecursi
     InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, previousCustomColumnSetting);
     if (SUCCEEDED(result))
         TraceSyntheticSortStage(batchByView
-            ? "synthetic-async-on-demand-size: mode=view-batch; callbacks-returned-empty; 8-reads-coalesced; peak-active-workers=1; 8-snapshots-published; released-view-cancelled-batch; repeated-reads-cached"
+            ? "synthetic-async-on-demand-size: mode=view-batch; callbacks-returned-empty; reads-coalesced; peak-active-workers=1; snapshots-published; released-view-cancelled-batch; repeated-reads-cached"
             : "synthetic-async-on-demand-size: mode=per-row; callbacks-returned-empty; 8-reads-queued; peak-active-workers=2; 8-snapshots-published; released-view-cancelled-8-queued-reads; repeated-reads-cached");
     return result;
 }
