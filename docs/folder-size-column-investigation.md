@@ -1722,3 +1722,9 @@ NativeProbe 的 `SFVM_FSNOTIFY` 现在可报告通知 PIDL 解析名称、文件
 隔离 ExplorerBrowser 注册 namespace 探针已能取得背景 `IContextMenu` 并成功查询 21 个菜单项，但 QueryContextMenu 成功不代表命令可执行。新增隐藏 Private Desktop 对照，分别对真实 filesystem `IShellFolder` 和包装 namespace folder 查询规范 `newfolder` 动词并调用 `IContextMenu::InvokeCommand`；两条路径均返回 `E_FAIL`，没有创建夹具目录。相同探针中的包装文件项 Delete 动词仍成功执行，且重命名、复制、通知、导航等既有断言通过。
 
 这次负向结果不能归因于 wrapper：未显示/路由菜单的直接 `InvokeCommand` 对照同样失败，说明当前无交互调用不足以验证背景新建命令的完整宿主路由。后续需经实际 Shell view 菜单消息路由做独立验证；在此之前不将背景菜单命令执行计为已通过迁移门槛。Private Desktop 前台/输入守卫和临时注册清理通过；产品与 release 未修改。
+
+### 2026-11-01：使用产品菜单适配器执行 namespace 背景 New Folder
+
+回看发现，上述直接 `IContextMenu::InvokeCommand` 对照没有走项目生产路径：`NativeShellCommandMenu` 会初始化 “New” 子菜单（`WM_INITMENUPOPUP`）后才判定/执行 `NewFolder` 动词。现改为在注册 namespace 的 `IShellView` 上通过 `GetItemObject(SVGIO_BACKGROUND)` 取得菜单，并调用产品 `ShellFileCommands.Invoke`/`NativeShellCommandMenu`。命令在真实 backing 目录中创建了一个“新建文件夹”，活动 Shell view 行数从 6 增至 7；探针检测并取消可选的行内重命名编辑，最终由夹具整体清理。执行前先等待 Shell 行数和磁盘项目数一致，避免将前一轮文件操作尚未收敛的刷新误当作新建命令结果。
+
+NativeProbe Release 构建 0 警告/错误；`--explorerbrowser-registered-namespace-private-desktop` 退出码 0，原有菜单查询、文件项删除/重命名、复制/移动、通知和层级导航合同通过。Private Desktop 前台/输入守卫、临时 CLSID/NameSpace 清理通过。它证明生产命令适配器能通过隔离 ExplorerBrowser namespace 的 Shell view 创建目录；不等同于可见菜单弹出/点击、快捷键、提示与进度 UI 或产品窗格接线验收。此前 no-UI 直接调用结果仅是调用方式负向对照，不作为 wrapper 命令能力失败证据。

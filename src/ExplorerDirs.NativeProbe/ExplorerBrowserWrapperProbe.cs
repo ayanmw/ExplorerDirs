@@ -399,21 +399,10 @@ internal static class ExplorerBrowserWrapperProbe
 
             PrivateDesktopShellProbe.ReportStage("namespace-probe: invoke-native-background-new-folder");
             Marshal.ThrowExceptionForHR(At<GetWindow>(shellView, 3)(shellView, out var nativeShellViewWindow));
-            Marshal.ThrowExceptionForHR(SHParseDisplayName(fixture, 0, out var backingRootPidl, 0, out _));
-            var backingFolderId = ShellFolder2Id;
-            Marshal.ThrowExceptionForHR(SHBindToObject(0, backingRootPidl, 0, ref backingFolderId, out var backingRootFolder));
-            string backingNewFolderResult;
-            try
-            {
-                backingNewFolderResult = TryInvokeNativeBackgroundVerbWithoutUi(backingRootFolder, nativeShellViewWindow, fixture, "newfolder");
-            }
-            finally
-            {
-                Marshal.Release(backingRootFolder);
-                Marshal.FreeCoTaskMem(backingRootPidl);
-            }
-            var wrappedNewFolderResult = TryInvokeNativeBackgroundVerbWithoutUi(viewFolder, nativeShellViewWindow, fixture, "newfolder");
-            Console.WriteLine($"explorerbrowser-registered-namespace: background-newfolder-direct-filesystem={backingNewFolderResult}; wrapped-namespace={wrappedNewFolderResult}; diagnostic-only=True");
+            var createdFolder = InvokeBackgroundNewFolderViaProductCommand(shellView, folderView, nativeShellViewWindow, fixture);
+            Console.WriteLine($"explorerbrowser-registered-namespace: background-newfolder-view-route=True; created={createdFolder.Name}; filesystem-created=True; shell-row-count={createdFolder.Before}->{createdFolder.After}; row-updated={createdFolder.After == createdFolder.Before + 1}");
+            if (createdFolder.After != createdFolder.Before + 1)
+                throw new InvalidOperationException("The native New Folder command created the backing directory but the active Shell view did not add exactly one row.");
             return 0;
         }
         finally
@@ -629,59 +618,72 @@ internal static class ExplorerBrowserWrapperProbe
         }
     }
 
-    private static string TryInvokeNativeBackgroundVerbWithoutUi(nint folder, nint ownerWindow, string backingPath, string expectedVerb)
+    private static (string Name, int Before, int After) InvokeBackgroundNewFolderViaProductCommand(nint view,
+        nint folderView, nint ownerWindow, string backingPath)
     {
+        var expectedInitialRowCount = Directory.EnumerateFileSystemEntries(backingPath).Count();
+        var initialDeadline = Environment.TickCount64 + 5000;
+        var initialRowCount = -1;
+        while (initialRowCount != expectedInitialRowCount && Environment.TickCount64 < initialDeadline)
+        {
+            Application.DoEvents();
+            Marshal.ThrowExceptionForHR(At<GetItemCount>(folderView, 7)(folderView, 2, out initialRowCount)); // SVGIO_ALLVIEW.
+            if (initialRowCount != expectedInitialRowCount) Thread.Sleep(50);
+        }
+        if (initialRowCount != expectedInitialRowCount)
+            throw new InvalidOperationException($"The Shell view was not settled before New Folder: rows={initialRowCount}; backing-items={expectedInitialRowCount}.");
         var existingDirectories = Directory.EnumerateDirectories(backingPath)
             .Select(Path.GetFullPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        nint contextMenu = 0, menu = 0, verbBuffer = 0;
-        try
+        var invokeResult = ShellFileCommands.Invoke(ShellFileCommand.NewFolder, background =>
         {
+            if (!background) return null;
             var iid = ContextMenuId;
-            Marshal.ThrowExceptionForHR(CreateViewObject(folder, iid, out contextMenu));
-            menu = CreatePopupMenu();
-            if (menu == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-            var queryResult = At<QueryContextMenu>(contextMenu, 3)(contextMenu, menu, 0, 1, 0x7FFF, 0);
-            Marshal.ThrowExceptionForHR(queryResult);
-            var commandCount = queryResult & 0xFFFF;
-            verbBuffer = Marshal.AllocHGlobal(512);
-            for (uint commandOffset = 0; commandOffset < commandCount; commandOffset++)
+            Marshal.ThrowExceptionForHR(At<GetItemObject>(view, 15)(view, 0, ref iid, out var contextMenu)); // SVGIO_BACKGROUND.
+            try
             {
-                Marshal.WriteInt16(verbBuffer, 0);
-                if (At<GetCommandString>(contextMenu, 5)(contextMenu, commandOffset, 4, 0, verbBuffer, 256) != 0)
-                    continue;
-                var verb = Marshal.PtrToStringUni(verbBuffer);
-                if (!string.Equals(verb, expectedVerb, StringComparison.OrdinalIgnoreCase)) continue;
-
-                var invokeInfo = new NativeInvokeInfo
-                {
-                    Size = Marshal.SizeOf<NativeInvokeInfo>(),
-                    Mask = 0x00004400, // CMIC_MASK_FLAG_NO_UI | CMIC_MASK_UNICODE.
-                    Window = ownerWindow,
-                    Verb = (nint)commandOffset,
-                    VerbW = (nint)commandOffset,
-                    Show = 0
-                };
-                var invokeHr = At<InvokeCommand>(contextMenu, 4)(contextMenu, ref invokeInfo);
-                if (invokeHr < 0) return $"invoke-hr=0x{invokeHr:X8}";
-                var createdDirectories = Directory.EnumerateDirectories(backingPath)
-                    .Select(Path.GetFullPath)
-                    .Where(path => !existingDirectories.Contains(path))
-                    .ToArray();
-                if (createdDirectories.Length != 1)
-                    return $"invoke-hr=0x{invokeHr:X8}; created-directories={createdDirectories.Length}";
-                var createdPath = createdDirectories[0];
-                var createdName = Path.GetFileName(createdPath);
-                Directory.Delete(createdPath);
-                return $"invoke-hr=0x{invokeHr:X8}; created={createdName}; cleanup=True";
+                return new NativeShellCommandMenu(Marshal.GetObjectForIUnknown(contextMenu), ownerWindow);
             }
-            return $"canonical-verb-missing:{expectedVerb}";
-        }
-        finally
+            finally { Marshal.Release(contextMenu); }
+        });
+        if (invokeResult is null)
+            throw new InvalidOperationException("The production Shell command adapter did not enable New Folder on the isolated writable folder.");
+        Marshal.ThrowExceptionForHR(invokeResult.Value);
+
+        var deadline = Environment.TickCount64 + 5000;
+        string[] createdDirectories;
+        do
         {
-            if (verbBuffer != 0) Marshal.FreeHGlobal(verbBuffer);
-            if (menu != 0) DestroyMenu(menu);
-            if (contextMenu != 0) Marshal.Release(contextMenu);
+            Application.DoEvents();
+            createdDirectories = Directory.EnumerateDirectories(backingPath)
+                .Select(Path.GetFullPath)
+                .Where(path => !existingDirectories.Contains(path))
+                .ToArray();
+            if (createdDirectories.Length > 1)
+                throw new InvalidOperationException($"The native New Folder command created {createdDirectories.Length} new backing directories; expected one.");
+            if (createdDirectories.Length == 0) Thread.Sleep(50);
+        } while (createdDirectories.Length == 0 && Environment.TickCount64 < deadline);
+        if (createdDirectories.Length != 1)
+            throw new InvalidOperationException("The native New Folder command returned without creating a backing directory.");
+
+        var rowDeadline = Environment.TickCount64 + 5000;
+        var updatedRowCount = initialRowCount;
+        while (updatedRowCount != initialRowCount + 1 && Environment.TickCount64 < rowDeadline)
+        {
+            Application.DoEvents();
+            Marshal.ThrowExceptionForHR(At<GetItemCount>(folderView, 7)(folderView, 2, out updatedRowCount));
+            if (updatedRowCount != initialRowCount + 1) Thread.Sleep(50);
         }
+
+        // Native New Folder may start inline rename; cancel it before leaving the isolated fixture.
+        var edit = FindChildByClass(ownerWindow, "Edit");
+        if (edit != 0)
+        {
+            _ = SendMessageW(edit, 0x0100, (nint)0x1B, (nint)0x00010001); // WM_KEYDOWN / VK_ESCAPE.
+            _ = SendMessageW(edit, 0x0101, (nint)0x1B, unchecked((nint)0xC0010001u)); // WM_KEYUP / VK_ESCAPE.
+            Application.DoEvents();
+            if (IsWindow(edit)) throw new InvalidOperationException("The inline New Folder rename editor remained open after Escape.");
+        }
+        return (Path.GetFileName(createdDirectories[0]), initialRowCount, updatedRowCount);
     }
 
     private static (bool Copy, bool Move, bool CopySourcePreserved, bool MoveSourceRemoved, bool DestinationsVerified)
@@ -999,6 +1001,7 @@ internal static class ExplorerBrowserWrapperProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int BrowseToIdList(nint self, nint pidl, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetDetailsOf(nint self, nint item, uint column, nint details);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetWindow(nint self, out nint window);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemObject(nint self, uint scope, ref Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int ParseDisplayNameNative(nint self, nint owner, nint bindContext, [MarshalAs(UnmanagedType.LPWStr)] string name, out uint eaten, out nint item, ref uint attributes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetUiObjectOfNative(nint self, nint owner, uint count, nint items, ref Guid iid, ref uint reserved, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewObjectNative(nint self, nint owner, ref Guid iid, out nint value);
