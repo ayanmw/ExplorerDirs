@@ -1808,3 +1808,9 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 延续上一节 burst 场景，探针在 worker 已打开目标目录后暂停扫描；此时将 payload 从 20 B 改为 30 B 并发送新 Shell 更新通知。更新到达时递增本地扫描代次，释放 worker 后即使该轮读取到 30 B，也按已过期代次丢弃，不写入 peer/cache；随后启动的 worker 才发布最终 30 B。两次 Private Desktop 运行均通过，peer 行 ID、选择焦点、前台窗口保持，NativeProbe Release build 0 警告/错误，watchdog exit 0，隔离清理通过。
 
 本轮只验证探针内的代次失效语义；被丢弃的 worker 因在通知之后才读取目录，数据本身也可能已是最新，因此它不是“扫描结果必然陈旧”的证明。产品没有逐行递归列，也没有接入此代次机制。剩余门槛包括与实际行模型/取消关闭生命周期接线、真实多窗格并发和可见刷新验收。
+
+### 2026-11-01：被取代扫描取消不清除新缓存
+
+在扫描代次切片后，探针再次将 worker 暂停于目录句柄打开点，先建立 30 B 的较新缓存，再递增代次、取消旧扫描并释放 worker。捕获到 `OperationCanceledException` 后，30 B 缓存、peer 行 ID 和选中/焦点仍保留。两次 Private Desktop 运行均通过，NativeProbe Release build 0 警告/错误，watchdog exit 0，前台/输入/临时目录清理守卫通过。
+
+这是行模型外的探针局部取消合同；没有实际关闭 `IShellView` 或 Pane，没有验证应用 UI 线程错误报告、共享 worker 生命周期或多窗格并发。产品接线仍需用真实 scan identity/generation 验证，不能以此切片代替关闭生命周期验收。
