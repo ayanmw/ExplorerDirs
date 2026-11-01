@@ -2131,6 +2131,14 @@ NativeProbe Release build 0 警告/错误，Private Desktop watchdog exit 0，�
 NativeProbe 给 `SyntheticFolder::CompareIDs` 增加仅用于观测的逐列调用计数。在最后的原样复验中，Name 槽 0 的比较调用由 42 增至 48；Type 相关槽 2 由 0 增至 5；递归 PropertyKey 所在标题槽 3 虽让 `GetSortColumns` 读回该 key 与方向 `-1`，比较调用仍为 `0→0`，实际行序不变。一次临时原型把第 3 个 provider detail 也声明成递归大小，意外令 Shell 多出一个重复列（header 4→5、快照递归列索引 3→4），已撤回该显示变更；它说明必须区分 provider 原生 detail ordinal 与 `IColumnManager` 后加列索引，不能把重复标题当作修复。
 
 与既有已通过的合成 `IShellView` 直接 provider 探针相比，当前失败路径使用 view-state 恢复后追加到 `IColumnManager` 的自定义列；Shell 接受排序状态，但不把该列点击路由进 provider `CompareIDs`。这把问题收敛到自定义列注册/列身份与 Shell comparator 的连接，而不是递归扫描值本身。下一步对照成功探针的原生列定义与当前追加列快照，验证能否在不重复列、不更换 ExplorerBrowser 产品架构的隔离 provider 中让递归 PropertyKey 对应到原生 detail ordinal，并要求比较器计数和实际行序同时通过。Release NativeProbe/C++ adapter build 通过，Private Desktop watchdog exit 0、输入/前台/清理守卫通过；日志：`src/.state/native-probe-watchdog/20261101-231123-8721fa6e.stdout.log`。产品与 release 未改。
+
+### 2026-11-01：更正递归排序根因——Shell 原生排序键与数据 PropertyKey 不同
+
+继续逐项读取真实标题文本、provider `IShellFolder2::GetDetailsOf` 与 `MapColumnToSCID` 后，确认第 1 列标题为 `Recursive Size`，provider 数据键为 `{7e1f84b7-c052-4e51-8a3c-869254a6b910}:1`；同一 view 的 `IColumnManager::GetColumns` 却将该标题关联到 Shell 原生排序键 `{9e5e05ac-1936-4a75-94f7-4704b8b01923}:1`。先前探针强行把数据键 `7e1f…` 写入排序快照时，Shell 将其追加成无标题列，导致点击可见列不会进入对应 `CompareIDs`。因此上节“追加列没有进入比较器”的观察成立，但真正原因是快照使用了错误的 sort identity，而不是递归比较器不能工作。
+
+隔离探针改用 live `IColumnManager` 中对应 `Recursive Size` 标题的 `{9e5e…}:1` 作为 `ViewState.SortColumns` 键，同时保留原 provider 数据键只用于 `GetDetailsEx`/值读取。共享 `ShellViewStateRestore` 随后不再添加重复列，header 标题稳定为 `Name|Recursive Size|Type`，快照列数为 3；root 行实际按递归值 `2|3|4|17|25` B 升序排列，`GetSortColumns` 读回该 Shell 键且 `order-matches-saved-sort=True`。Child view 的 `7|10` B 行序与 TravelLog Back 重建后均按快照排序；同一 NativeProbe 的原生列标题升/降序基线也分别为 `small.bin|child` 与 `child|small.bin`，比较器每方向调用一次。NativeProbe Release build 0 警告/错误，Private Desktop watchdog exit 0，前台/输入/清理守卫通过；隔离结果日志为 `src/.state/native-probe-watchdog/20261101-231548-ba6207c2.stdout.log` 和 `src/.state/native-probe-watchdog/20261101-231718-0faa1b56.stdout.log`。
+
+这只是 `IShellView` synthetic namespace 原型结论，产品仍使用 ExplorerBrowser，未接入递归列。数据键与 Shell 排序键的稳定映射、语言/列布局变化、INI 持久化跨进程、Shell 菜单切换排序方向、刷新/通知、四窗格多视图及文件操作/拖放仍需验证；NativeProbe 当前以英文列标题识别示范列，不能复制该启发式到生产实现。更早的“按 7e 数据键排序未重排”结论由本节修正为错误排序键导致的重复列/路由失配。
 ### 2026-11-01：递归列身份的标签快照与 INI 往返核对
 
 生产 `OnNavigationPending` 在当前已导航标签上调用 `CaptureViewState`；捕获流程使用同一 Browser 与 view generation 读取模式、列布局、排序和分组，只有完整且仍当前的结果才替换缓存。`PaneControl`/`SessionStore` 以每标签 `ViewState` 保存这些字段。现有跨进程 `ColumnLayoutProcessSmoke` 使用与 NativeProbe provider 完全相同的递归列 PropertyKey（`7E1F84B7-C052-4E51-8A3C-869254A6B910:1`），核对列宽、排序方向、分组方向和路径从 INI 子进程读回；SettingsSmoke 全量运行 exit 0，view-state restore smoke 通过。此项是既有通用快照/INI代码对该 key 的持久化证据，不代表产品物理目录能生成此属性，或该 key 已在用户配置中提供列菜单入口。

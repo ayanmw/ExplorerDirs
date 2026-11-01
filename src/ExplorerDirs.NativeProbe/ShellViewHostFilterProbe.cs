@@ -254,11 +254,19 @@ internal static class ShellViewHostFilterProbe
         var captureResult = ShellColumnManager.Capture(view, out var columns);
         Check(captureResult);
         if (columns is null) throw new InvalidOperationException("Shell returned no display-column snapshot for the recursive-size state probe.");
-        var stateColumns = columns.Any(column => column.Key.FormatId == key.FormatId && column.Key.PropertyId == key.PropertyId)
+        var nativeSortKey = new PropertyKeyState(key.FormatId, key.PropertyId);
+        if (columns.Count > 1 && ReadShellDetail(folder, 0, 1, out var title) >= 0 &&
+            string.Equals(title, "Recursive Size", StringComparison.OrdinalIgnoreCase))
+        {
+            // The native DefView sort key can differ from the provider's property key; persist the key attached to its live header slot.
+            nativeSortKey = new PropertyKeyState(columns[1].Key.FormatId, columns[1].Key.PropertyId);
+        }
+        Console.WriteLine($"ishellview-native-column-state: provider-key={key.FormatId:B}:{key.PropertyId}; sort-key={nativeSortKey.FormatId:B}:{nativeSortKey.PropertyId}; columns=[{string.Join('|', columns.Select(column => $"{column.Key.FormatId:B}:{column.Key.PropertyId}"))}]");
+        var stateColumns = columns.Any(column => column.Key.FormatId == nativeSortKey.FormatId && column.Key.PropertyId == nativeSortKey.PropertyId)
             ? columns
-            : columns.Append(new DisplayColumnState(new PropertyKeyState(key.FormatId, key.PropertyId), 160)).ToArray();
+            : columns.Append(new DisplayColumnState(nativeSortKey, 160)).ToArray();
         return new ViewState(4, -1,
-            [new SortColumnState(new PropertyKeyState(key.FormatId, key.PropertyId), 1)],
+            [new SortColumnState(nativeSortKey, 1)],
             null, true, stateColumns);
     }
 
@@ -287,13 +295,12 @@ internal static class ShellViewHostFilterProbe
         var listViewForHeader = FindChildByClass(viewWindow, "SysListView32");
         var headerForDiagnostics = listViewForHeader == 0 ? 0 : SendMessageW(listViewForHeader, 0x101F, 0, 0);
         var headerCount = headerForDiagnostics == 0 ? -1 : SendMessageW(headerForDiagnostics, 0x1200, 0, 0).ToInt32();
+        var nativeHeaderTitles = headerForDiagnostics == 0 ? [] : ReadNativeHeaderTitles(headerForDiagnostics, headerCount);
         var listViewMode = listViewForHeader == 0 ? -1 : SendMessageW(listViewForHeader, 0x108F, 0, 0).ToInt32(); // LVM_GETVIEW.
         var modeResult = At<GetViewModeAndIconSize>(view, 36)(view, out var currentMode, out var currentIconSize);
         var listViewStyle = listViewForHeader == 0 ? 0 : GetWindowLongPtrW(listViewForHeader, GwlStyle).ToInt64();
-        string nativeDetailTitles;
-        try { nativeDetailTitles = string.Join('|', ReadShellDetailColumnTitles(folder)); }
-        catch (Exception ex) { nativeDetailTitles = $"unavailable:{ex.GetType().Name}:{ex.Message}"; }
-        var headerDiagnostics = $"view-mode-hr=0x{modeResult:X8}; mode={currentMode}; icon-size={currentIconSize}; list-view-mode={listViewMode}; list-style=0x{listViewStyle:X}; list-visible={(listViewForHeader != 0 && IsWindowVisible(listViewForHeader))}; header-visible={(headerForDiagnostics != 0 && IsWindowVisible(headerForDiagnostics))}; header-count={headerCount}; native-detail-titles=[{nativeDetailTitles}]; recursive-column-index={recursiveColumnIndex}; column-keys=[{(columns is null ? "" : string.Join('|', columns.Select(column => $"{column.Key.FormatId:B}:{column.Key.PropertyId}")))}]";
+        var nativeColumns = ReadNativeColumnDiagnostics(folder);
+        var headerDiagnostics = $"view-mode-hr=0x{modeResult:X8}; mode={currentMode}; icon-size={currentIconSize}; list-view-mode={listViewMode}; list-style=0x{listViewStyle:X}; list-visible={(listViewForHeader != 0 && IsWindowVisible(listViewForHeader))}; header-visible={(headerForDiagnostics != 0 && IsWindowVisible(headerForDiagnostics))}; header-count={headerCount}; header-titles=[{string.Join('|', nativeHeaderTitles)}]; native-columns=[{nativeColumns}]; recursive-column-index={recursiveColumnIndex}; column-keys=[{(columns is null ? "" : string.Join('|', columns.Select(column => $"{column.Key.FormatId:B}:{column.Key.PropertyId}")))}]";
         var countResult = At<GetSortColumnCount>(view, 26)(view, out var sortCount);
         var sortReadbackResult = countResult;
         NativeSortColumn[] sorts = [];
@@ -430,6 +437,51 @@ internal static class ShellViewHostFilterProbe
         return readHr < 0
             ? $"read-hr=0x{readHr:X8}"
             : string.Join('|', columns.Select(column => $"{column.Key.FormatId:B}:{column.Key.PropertyId}:{column.Direction}"));
+    }
+
+    private static string ReadNativeColumnDiagnostics(nint folder)
+    {
+        var columns = new List<string>();
+        for (uint index = 0; index < 8; index++)
+        {
+            try
+            {
+                var hr = ReadShellDetail(folder, 0, index, out var title);
+                if (hr < 0)
+                {
+                    columns.Add($"{index}:details-hr=0x{hr:X8}");
+                    continue;
+                }
+                var mapHr = At<MapColumnToScid>(folder, 19)(folder, index, out var key);
+                var mapping = mapHr < 0 ? $"map-hr=0x{mapHr:X8}" : $"key={key.FormatId:B}:{key.PropertyId}";
+                columns.Add($"{index}:title={title};{mapping}");
+            }
+            catch (Exception ex)
+            {
+                columns.Add($"{index}:error={ex.GetType().Name}:0x{Marshal.GetHRForException(ex):X8}");
+            }
+        }
+        return string.Join('|', columns);
+    }
+
+    private static string[] ReadNativeHeaderTitles(nint header, int count)
+    {
+        if (count < 0 || count > 64) return [$"invalid-count:{count}"];
+        var buffer = Marshal.AllocHGlobal(512);
+        try
+        {
+            var titles = new string[count];
+            for (var index = 0; index < count; index++)
+            {
+                Marshal.WriteInt16(buffer, 0);
+                var item = new NativeHeaderItem { Mask = 2, Text = buffer, TextCapacity = 256 };
+                if (SendHeaderMessage(header, 0x120B, index, ref item) == 0)
+                    titles[index] = $"{index}:<read-failed>";
+                else titles[index] = Marshal.PtrToStringUni(buffer) ?? string.Empty;
+            }
+            return titles;
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
     }
 
     private static int ReadSyntheticCompareCount(int column)
@@ -4527,6 +4579,22 @@ internal static class ShellViewHostFilterProbe
         public int Direction;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeHeaderItem
+    {
+        public uint Mask;
+        public int Width;
+        public nint Text;
+        public nint Bitmap;
+        public int TextCapacity;
+        public int Format;
+        public nint Param;
+        public int Image;
+        public int Order;
+        public uint Type;
+        public nint Filter;
+    }
+
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct NativeListViewItem
     {
@@ -4824,6 +4892,7 @@ internal static class ShellViewHostFilterProbe
     [DllImport("user32.dll")] private static extern nint SetFocus(nint window);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool MoveWindow(nint window, int x, int y, int width, int height, bool repaint);
     [DllImport("user32.dll")] private static extern nint SendMessageW(nint window, uint message, nint wParam, nint lParam);
+    [DllImport("user32.dll", EntryPoint = "SendMessageW")] private static extern nint SendHeaderMessage(nint window, uint message, nint wParam, ref NativeHeaderItem item);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtrW(nint window, int index);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] private static extern nint SetWindowLongPtrW(nint window, int index, nint value);
     [DllImport("user32.dll")] private static extern bool GetKeyboardState([Out] byte[] state);
