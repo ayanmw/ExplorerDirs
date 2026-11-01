@@ -25,7 +25,13 @@ internal static class CommonListViewColorBaseline
     private const int LvmSortItemsEx = 0x1051;
     private const int LvmSetItemState = 0x102B;
     private const int LvmGetItemState = 0x102C;
-    private const int LvmSetView = 0x108E;
+    private const int GwlStyle = -16;
+    private const long LvsTypeMask = 0x0003;
+    private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoMove = 0x0002;
+    private const uint SwpNoZOrder = 0x0004;
+    private const uint SwpNoActivate = 0x0010;
+    private const uint SwpFrameChanged = 0x0020;
     private const int LvmRedrawItems = 0x1015;
     private const uint LvisFocused = 0x0001;
     private const uint LvisSelected = 0x0002;
@@ -90,10 +96,11 @@ internal static class CommonListViewColorBaseline
 
             var colorProjectionPassed = true;
             var selectedRuleDelegationCount = 0;
+            // LVM_SETVIEW is rejected by this probe's control context, so switch the four classic modes through LVS_TYPEMASK.
             foreach (var style in new[]
             {
                 (Name: "Icon", View: 0), (Name: "Details", View: 1), (Name: "SmallIcon", View: 2),
-                (Name: "List", View: 3), (Name: "Tile", View: 4), (Name: "Content", View: 6)
+                (Name: "List", View: 3)
             })
             {
                 _prepaint = 0;
@@ -105,7 +112,10 @@ internal static class CommonListViewColorBaseline
                 LabelBounds.Clear();
                 _drawSelection = ShellListSelectionSnapshot.Capture(
                     SendMessageW(listView, LvmGetItemCount, 0, 0).ToInt32(), index => GetItemState(listView, index));
-                SendMessageW(listView, LvmSetView, style.View, 0);
+                var currentStyle = (long)GetWindowLongPtrW(listView, GwlStyle);
+                SetWindowLongPtrW(listView, GwlStyle, (nint)((currentStyle & ~LvsTypeMask) | (long)style.View));
+                _ = SetWindowPos(listView, 0, 0, 0, 0, 0,
+                    SwpNoSize | SwpNoMove | SwpNoZOrder | SwpNoActivate | SwpFrameChanged);
                 for (var index = 0; index < 2; index++)
                     if (TryGetItemRect(listView, index, 2, out var labelBounds))
                         LabelBounds[(nuint)index] = labelBounds;
@@ -119,13 +129,14 @@ internal static class CommonListViewColorBaseline
                     .Select(pair => $"{pair.Key}:{pair.Value}"));
                 var rects = string.Join(',', LabelBounds.OrderBy(pair => pair.Key)
                     .Select(pair => $"{pair.Key}={pair.Value.Left},{pair.Value.Top},{pair.Value.Right},{pair.Value.Bottom}"));
-                var stylePolicyPassed = Writes.ContainsKey(0) && !Writes.ContainsKey(1) && _nativeSelectionDelegations > 0 &&
+                var modeApplied = ((long)GetWindowLongPtrW(listView, GwlStyle) & LvsTypeMask) == style.View;
+                var stylePolicyPassed = modeApplied && Writes.ContainsKey(0) && !Writes.ContainsKey(1) && _nativeSelectionDelegations > 0 &&
                     (GetItemState(listView, 1) & LvisSelected) != 0;
                 colorProjectionPassed &= stylePolicyPassed;
                 if (stylePolicyPassed) selectedRuleDelegationCount++;
                 report.Add($"{style.Name}:view={style.View};prepaint={_prepaint};item-prepaint={_itemPrepaint};item-postpaint={_itemPostpaint};" +
                     $"pixels={pixels};fields={fields};selected-native={((GetItemState(listView, 1) & LvisSelected) != 0)};" +
-                    $"native-selection-delegations={_nativeSelectionDelegations};" +
+                    $"native-selection-delegations={_nativeSelectionDelegations};mode-applied={modeApplied};" +
                     $"rule-projection={stylePolicyPassed};label-rects={rects};visible={IsWindowVisible(listView)}");
             }
 
@@ -441,6 +452,39 @@ internal static class CommonListViewColorBaseline
                     GetItemParam(listView, 1) == 2 && GetItemState(listView, 1) == (LvisSelected | LvisFocused);
                 var relativeSizeSorted = initialRelativeSortRows == "small-folder:2,large-folder:1" &&
                     relativeSizeSortedRows == "large-folder:1,small-folder:2";
+                var expectedSmallSizeText = GetItemText(listView, FindItemIndexByParam(listView, 2), 1);
+                var expectedSmallRelativeText = GetItemText(listView, FindItemIndexByParam(listView, 2), 3);
+                var viewModeTransitions = new List<string>();
+                var viewModesPreservedRows = true;
+                // LVM_SETVIEW returns FALSE on this probe control; exercise the four classic LVS_TYPEMASK modes directly.
+                // This checks row-state survival only. Tile and visible layout behavior need a supported v6 control/UI pass.
+                foreach (var mode in new[]
+                {
+                    (Name: "Icon", Value: 0), (Name: "Details", Value: 1), (Name: "SmallIcon", Value: 2),
+                    (Name: "List", Value: 3)
+                })
+                {
+                    var currentStyle = (long)GetWindowLongPtrW(listView, GwlStyle);
+                    SetWindowLongPtrW(listView, GwlStyle, (nint)((currentStyle & ~LvsTypeMask) | (long)mode.Value));
+                    _ = SetWindowPos(listView, 0, 0, 0, 0, 0,
+                        SwpNoSize | SwpNoMove | SwpNoZOrder | SwpNoActivate | SwpFrameChanged);
+                    var actualView = (long)GetWindowLongPtrW(listView, GwlStyle) & LvsTypeMask;
+                    var modeRowsPreserved = actualView == mode.Value &&
+                        SendMessageW(listView, LvmGetItemCount, 0, 0).ToInt32() == 2 &&
+                        Enumerable.Range(0, 2).Select(index => GetItemParam(listView, index)).Order().SequenceEqual([1L, 2L]) &&
+                        Enumerable.Range(0, 2).Any(index => GetItemParam(listView, index) == 2 &&
+                            GetItemState(listView, index) == (LvisSelected | LvisFocused));
+                    viewModesPreservedRows &= modeRowsPreserved;
+                    viewModeTransitions.Add($"{mode.Name}:style-{actualView}/{modeRowsPreserved}");
+                }
+                var detailsStyle = (long)GetWindowLongPtrW(listView, GwlStyle);
+                SetWindowLongPtrW(listView, GwlStyle, (nint)((detailsStyle & ~LvsTypeMask) | 1L));
+                _ = SetWindowPos(listView, 0, 0, 0, 0, 0,
+                    SwpNoSize | SwpNoMove | SwpNoZOrder | SwpNoActivate | SwpFrameChanged);
+                var detailsViewRestored = ((long)GetWindowLongPtrW(listView, GwlStyle) & LvsTypeMask) == 1 &&
+                    GetItemText(listView, FindItemIndexByParam(listView, 2), 1) == expectedSmallSizeText &&
+                    GetItemText(listView, FindItemIndexByParam(listView, 2), 3) == expectedSmallRelativeText &&
+                    GetItemState(listView, FindItemIndexByParam(listView, 2)) == (LvisSelected | LvisFocused);
                 var relativeContractPassed = initialRelativeSizes && updatedRelativeSizes &&
                     initialScanRanOffOwnerThread && updateScanRanOffOwnerThread &&
                     initialScanReturnedToOwnerThread && updateScanReturnedToOwnerThread &&
@@ -453,7 +497,8 @@ internal static class CommonListViewColorBaseline
                     descendingRelativeSortFocusPreserved && ascendingSortRestoredAfterDirectionChange &&
                     fileChangeObserved && updateApplied &&
                     initialRelativeSortFocusPreserved && updatedRelativeSortFocusPreserved &&
-                    relativeSizeSorted && !IsWindowVisible(parent) && !IsWindowVisible(listView) &&
+                    relativeSizeSorted && viewModesPreservedRows && detailsViewRestored &&
+                    !IsWindowVisible(parent) && !IsWindowVisible(listView) &&
                     GetForegroundWindow() == foregroundBefore;
                 Console.WriteLine($"common-listview-relative-size-contract: initial={initialRelativeSizeRows};" +
                     $"updated={updatedRelativeSizeRows};initial-values-correct={initialRelativeSizes};" +
@@ -471,6 +516,7 @@ internal static class CommonListViewColorBaseline
                     $"relative-sort-correct={relativeSizeSorted};file-change-observed={fileChangeObserved};" +
                     $"update-applied={updateApplied};" +
                     $"focus-preserved={initialRelativeSortFocusPreserved}/{updatedRelativeSortFocusPreserved};" +
+                    $"view-modes=[{string.Join(',', viewModeTransitions)}];details-restored={detailsViewRestored};" +
                     $"visible=False;foreground-unchanged={GetForegroundWindow() == foregroundBefore};passed={relativeContractPassed}");
                 return relativeContractPassed ? 0 : 1;
             }
@@ -1275,6 +1321,9 @@ internal static class CommonListViewColorBaseline
     [DllImport("comctl32.dll")] private static extern bool SetWindowSubclass(nint window, DrawProc callback, nuint id, nuint data);
     [DllImport("comctl32.dll")] private static extern bool RemoveWindowSubclass(nint window, DrawProc callback, nuint id);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern nint CreateWindowExW(uint ex, string cls, string title, uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint param);
+    [DllImport("user32.dll")] private static extern nint GetWindowLongPtrW(nint window, int index);
+    [DllImport("user32.dll")] private static extern nint SetWindowLongPtrW(nint window, int index, nint value);
+    [DllImport("user32.dll")] private static extern bool SetWindowPos(nint window, nint insertAfter, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint SendMessageW(nint window, int message, nint wParam, nint lParam);
     [DllImport("user32.dll")] private static extern bool InvalidateRect(nint window, nint rect, bool erase);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bindContext, out nint pidl, uint attributes, out uint attributesOut);

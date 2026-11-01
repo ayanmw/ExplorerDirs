@@ -1238,3 +1238,13 @@ NativeProbe 增加三种状态模式，仅对隔离合成 view 的列 3（Relati
 这说明在该 Windows 合成 `IShellView`/DefView 场景下，列 3 的三个类型状态位没有改变可观察的显示、排序或列管理器布局；它没有证明其它 provider、ExplorerBrowser 产品宿主或用户配置文件中的列状态也相同。当前没有理由为追求该探针的差异而改产品元数据。
 
 第一次整数对照使用旧的 `STATIC` parent 路径：列内容和排序读回正确，但 worker 在销毁 parent 时超时，wait-chain 含 COM activation / `ChsIME`，前台和输入守卫未变化。该轮不纳入清理成功的 A/B 集；watchdog 终止进程后仍留有仅属于该轮随机 CLSID `{f2be1c4d-259f-42e7-9389-343c0d1123f0}` 的 HKCU Shell 注册，以及 `%TEMP%\ExplorerDirs-SyntheticShellSort-f2be1c4d259f42e79389343c0d1123f0` 和 `%TEMP%\ExplorerDirs-SyntheticShellSort-Copy-f2be1c4d259f42e79389343c0d1123f0` 夹具。递归清理被本机执行策略拒绝，没有换用其它删除路径。随后相同整数模式改用 WPF Private Desktop parent 复验成功并清理。该超时没有证据表明是列实验或产品卡死。
+
+### 2026-11-01：自有 ListView 递归列的经典查看模式往返合同
+
+将隐藏 `--common-listview-relative-size-contract` 扩展为视图样式往返：递归扫描并异步发布新值、按相对大小排序后，逐一把标准 `SysListView32` 的 `LVS_TYPEMASK` 切换到 Icon、Details、SmallIcon、List，再回到 Details。每一步都核对两行仍在、稳定 Shell row ID 不变、small-folder 的选中/焦点仍跟随该 row ID；返回 Details 后又核对其递归大小与相对百分比文本和切换前一致。
+
+探针开始时尝试 `LVM_SETVIEW`，但该 NativeProbe 控件对消息返回 FALSE，`LVM_GETVIEW` 也一直读作默认 Icon；为避免该 API 失败造成假阳性，本合同改用四种经典视图对应的 `LVS_TYPEMASK` 样式位，并逐步回读样式、行身份和状态。Tile 未纳入。NativeProbe Release build 0 警告/错误；隐藏相对大小合同输出 `Icon/Details/SmallIcon/List=True`、`details-restored=True`、`passed=True`，窗口不可见且前台未变。
+
+这只验证标准 ListView 控件保存行数据、子项文本和状态的合同，不采样客户区像素，不能证明这些模式实际绘制正确或满足 Q-Dir 的布局；也不覆盖 Shell 原生菜单、文件操作、拖放、通知或产品 ExplorerBrowser。它补齐自有行模型的一项模式切换门槛，但不改变“自有行视图需完整兼容验证后才评估迁移”的结论。
+
+发现相邻 common-listview-color-baseline-private-desktop 探针也用 LVM_SETVIEW 后，顺手改为切换并读回四种经典样式；本轮输出四种模式的 custom-draw 回调与像素断言均为真，但 Private Desktop watchdog 在探针完整返回/清理前超时。超时时 foreground HWND 与 last-input tick 未变，wait-chain 经 COM activation / ChsIME 且 cycle=False。因此这里只记录模式设置与断言日志，不把该颜色探针判为完整通过；Tile/Content 模式及退出时序仍需独立处理。
