@@ -2105,3 +2105,6 @@ Child view 初始也不含 Recursive Size 列；测试调用 `ShellColumnManager
 ### 2026-11-01：以生产 Loaded 优先级运行 ExplorerBrowser 列状态恢复
 
 将上面的 child 与 TravelLog Forward 状态恢复调用排入 WPF `DispatcherPriority.Loaded`，由 DispatcherFrame 泵送执行，以对齐 `ExplorerBrowserHost.PublishNavigationLocation` 在 `OnNavigationComplete` 后调用 `ApplyViewState` 的调度优先级。两处均恢复成功：新 view 初始无递归列，恢复后列可见，nested 值为 `10`。NativeProbe Release build 0 警告/错误；Private Desktop watchdog exit 0，前台、last-input 与清理守卫通过。日志：`src/.state/native-probe-watchdog/20261101-223408-7e6b70d7.stdout.log`。本验证只复现 Loaded 调度等级，不加载 `ExplorerBrowserHost`，也没有真实标签快照捕获、导航代次退休门控或生产 UI 的重入/布局时序；仍属隔离 Shell 原型。
+### 2026-11-01：递归列身份的标签快照与 INI 往返核对
+
+生产 `OnNavigationPending` 在当前已导航标签上调用 `CaptureViewState`；捕获流程使用同一 Browser 与 view generation 读取模式、列布局、排序和分组，只有完整且仍当前的结果才替换缓存。`PaneControl`/`SessionStore` 以每标签 `ViewState` 保存这些字段。现有跨进程 `ColumnLayoutProcessSmoke` 使用与 NativeProbe provider 完全相同的递归列 PropertyKey（`7E1F84B7-C052-4E51-8A3C-869254A6B910:1`），核对列宽、排序方向、分组方向和路径从 INI 子进程读回；SettingsSmoke 全量运行 exit 0，view-state restore smoke 通过。此项是既有通用快照/INI代码对该 key 的持久化证据，不代表产品物理目录能生成此属性，或该 key 已在用户配置中提供列菜单入口。

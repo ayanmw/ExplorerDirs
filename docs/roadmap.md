@@ -5872,3 +5872,4 @@ peer SysListView32 现读取 Shell 文件夹的名称、大小、项目类型、
 
 2026-11-01 ExplorerBrowser 递归列状态恢复：NativeProbe 改为调用产品共用 `ShellViewStateRestore`，child 视图和 TravelLog Forward 均在 Shell 创建的默认列集上恢复已保存的 Recursive Size 列，并读回 nested 值 `10`；Private Desktop watchdog 与隔离守卫通过。产品/release 未改。下一步仍在隔离原型中对齐 `ExplorerBrowserHost` 的导航完成时序与状态来源，再评估递归值 provider 是否能在物理目录路径上稳定映射；不能将此视作产品列已经可用。详见 `docs/folder-size-column-investigation.md`。
 2026-11-01 递归列恢复调度时序：隔离 ExplorerBrowser 探针把共享 `ShellViewStateRestore` 排入与生产导航回调相同的 WPF `DispatcherPriority.Loaded`，child 与 TravelLog Forward 均恢复列并读回递归值 `10`；Release build 与 Private Desktop 隔离守卫通过。此处只验证恢复器和调度优先级，未运行生产 `ExplorerBrowserHost` 或标签状态捕获/代次门控。详见 `docs/folder-size-column-investigation.md`。
+2026-11-01 递归列保存链路核对：生产导航开始前捕获当前标签完整 Shell view state，快照含列/排序/分组且按标签写入 profile INI；现有跨进程 smoke 用 NativeProbe 相同递归 PropertyKey 验证列宽、排序和分组读回。SettingsSmoke exit 0。运行时生产列 provider 与物理目录映射仍未验证。详见 `docs/folder-size-column-investigation.md`。
