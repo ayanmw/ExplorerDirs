@@ -409,6 +409,23 @@ public static class SyntheticShellSortProbe
                     ? SortByHeader(module, sizeListView, columnIndex: 1, expectedCount: expectedInitialCount, stage: "header-sort-descending")
                     : SortAndRead(module, folderView, view, sizeListView, direction: -1, expectedCount: expectedInitialCount);
                 var descendingComparisons = ReadCounter(module, "GetSyntheticSizeCompareCount");
+                var menuSortAscending = Array.Empty<string>();
+                var menuSortDescending = Array.Empty<string>();
+                var menuAscendingSortState = Array.Empty<NativeSortColumn>();
+                var menuDescendingSortState = Array.Empty<NativeSortColumn>();
+                int? menuAscendingHr = null;
+                int? menuDescendingHr = null;
+                if (customSizeColumn)
+                {
+                    menuAscendingHr = InvokeBackgroundMenuVerb(view, parent, "sortascending");
+                    Pump(250);
+                    menuSortAscending = ReadNames(sizeListView, module, expectedCount: expectedInitialCount);
+                    menuAscendingSortState = CaptureNativeSortColumns(folderView);
+                    menuDescendingHr = InvokeBackgroundMenuVerb(view, parent, "sortdescending");
+                    Pump(250);
+                    menuSortDescending = ReadNames(sizeListView, module, expectedCount: expectedInitialCount);
+                    menuDescendingSortState = CaptureNativeSortColumns(folderView);
+                }
                 Console.WriteLine($"synthetic-recursive-directory-size-view: filesystem-attributes-masked={maskFilesystemAttributes}; self-owned-attributes={selfOwnedAttributes}; custom-size-column={customSizeColumn}; custom-size-column-slow={slowCustomSizeColumn}; initial=[{FormatProbeRows(initialNames)}]; size-text=[{FormatProbeRows(initialSizes)}]; standard-details-ex={detailsExRequests}(folder={detailsExFolderRequests},file={detailsExFileRequests}); custom-details-ex={customDetailsExRequests}(folder={customDetailsExFolderRequests},file={customDetailsExFileRequests}); details-of-items={detailsOfItemRequests}; details-of-size={detailsOfSizeRequests}; property-store-factory-requests={propertyStoreFactoryRequests}; property-store-requests={propertyStoreRequests}; get-attributes-of={attributeRequests}(filesystem-flags={filesystemAttributeRequests}); ascending=[{FormatProbeRows(ascendingNames)}]; descending=[{FormatProbeRows(descendingNames)}]; compare-counts={ascendingComparisons}/{descendingComparisons}; foreground-unchanged={GetForegroundWindow() == foreground}");
                 var childIndex = Array.FindIndex(initialNames, name => string.Equals(name, "child", StringComparison.OrdinalIgnoreCase));
                 // Require the full value; substring matching would accept unrelated values such as "1200".
@@ -416,9 +433,17 @@ public static class SyntheticShellSortProbe
                 if (!displayedDirectorySize ||
                     (!shellWindowScrollProbe && !ascendingNames.SequenceEqual(new[] { "small.bin", "child" }, StringComparer.OrdinalIgnoreCase)) ||
                     (!shellWindowScrollProbe && !descendingNames.SequenceEqual(new[] { "child", "small.bin" }, StringComparer.OrdinalIgnoreCase)) ||
+                    (customSizeColumn && (!menuSortAscending.SequenceEqual(new[] { "small.bin", "child" }, StringComparer.OrdinalIgnoreCase) ||
+                        !menuSortDescending.SequenceEqual(new[] { "child", "small.bin" }, StringComparer.OrdinalIgnoreCase) ||
+                        menuAscendingSortState.Length != 1 || menuDescendingSortState.Length != 1 ||
+                        menuAscendingSortState[0].Key.FormatId != menuDescendingSortState[0].Key.FormatId ||
+                        menuAscendingSortState[0].Key.PropertyId != menuDescendingSortState[0].Key.PropertyId ||
+                        menuAscendingSortState[0].Direction != 1 || menuDescendingSortState[0].Direction != -1)) ||
                     (shellWindowScrollProbe && (!ascendingNames.Contains("child", StringComparer.OrdinalIgnoreCase) || !descendingNames.Contains("small.bin", StringComparer.OrdinalIgnoreCase))) ||
                     (!shellWindowScrollProbe && (ascendingComparisons == 0 || descendingComparisons == 0)) || GetForegroundWindow() != foreground)
                     return 1;
+                if (customSizeColumn)
+                    Console.WriteLine($"synthetic-recursive-size-background-menu-sort: ascending-hr=0x{menuAscendingHr:X8}; ascending=[{FormatProbeRows(menuSortAscending)}]; ascending-state=[{FormatSortColumns(menuAscendingSortState)}]; descending-hr=0x{menuDescendingHr:X8}; descending=[{FormatProbeRows(menuSortDescending)}]; descending-state=[{FormatSortColumns(menuDescendingSortState)}]; passed=True");
                 if (exerciseUpdateNotifications)
                     ProbeSizeUpdateNotifications(module, folder, folderView, view, rootPidl, backingFolder, copyDestination,
                         sizeUpdateStrategy, customSizeColumn, host, hostPointer);
@@ -2403,6 +2428,52 @@ public static class SyntheticShellSortProbe
         return ReadNames(listView, module, expectedCount);
     }
 
+    private static int InvokeBackgroundMenuVerb(nint view, nint owner, string expectedVerb)
+    {
+        var contextMenuId = ContextMenuId;
+        Check(At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out var contextMenu)); // SVGIO_BACKGROUND.
+        try
+        {
+            var menu = CreatePopupMenu();
+            if (menu == 0) throw new InvalidOperationException("Could not create the synthetic view's in-memory Shell menu.");
+            try
+            {
+                var queryHr = At<QueryContextMenu>(contextMenu, 3)(contextMenu, menu, 0, 1, 0x7fff, 0x10 | 0x800);
+                Check(queryHr);
+                var commandCount = Math.Min(queryHr & 0xffff, 0x7fff);
+                var buffer = Marshal.AllocHGlobal(512);
+                uint? commandOffset = null;
+                try
+                {
+                    var getCommandString = At<GetCommandString>(contextMenu, 5);
+                    for (uint offset = 0; offset < commandCount; offset++)
+                    {
+                        Marshal.WriteInt16(buffer, 0);
+                        if (getCommandString(contextMenu, offset, 4, 0, buffer, 256) == 0 &&
+                            string.Equals(Marshal.PtrToStringUni(buffer), expectedVerb, StringComparison.OrdinalIgnoreCase))
+                        {
+                            commandOffset = offset;
+                            break;
+                        }
+                    }
+                }
+                finally { Marshal.FreeHGlobal(buffer); }
+                if (commandOffset is null)
+                    throw new InvalidOperationException($"The synthetic Shell view background menu did not expose '{expectedVerb}'.");
+                var invoke = new NativeInvokeInfo
+                {
+                    Size = Marshal.SizeOf<NativeInvokeInfo>(),
+                    Window = owner,
+                    Verb = (nint)commandOffset.Value,
+                    Show = 1
+                };
+                return At<InvokeCommand>(contextMenu, 4)(contextMenu, ref invoke);
+            }
+            finally { DestroyMenu(menu); }
+        }
+        finally { Marshal.Release(contextMenu); }
+    }
+
     private static string[] SortByHeader(nint module, nint listView, int columnIndex, int expectedCount, string stage)
     {
         ReportProbeStage(stage + "-begin");
@@ -3100,6 +3171,13 @@ public static class SyntheticShellSortProbe
     }
 
     [StructLayout(LayoutKind.Sequential)] private struct NativeSortColumn { public ShellColumnManager.NativeKey Key; public int Direction; }
+    [StructLayout(LayoutKind.Sequential)] private struct NativeInvokeInfo
+    {
+        public int Size; public uint Mask; public nint Window; public nint Verb; public nint Parameters;
+        public nint Directory; public int Show; public uint HotKey; public nint Icon; public nint Title;
+        public nint VerbW; public nint ParametersW; public nint DirectoryW; public nint TitleW;
+        public int InvokePointX; public int InvokePointY;
+    }
     [StructLayout(LayoutKind.Sequential)] private struct NativeRect { public int Left; public int Top; public int Right; public int Bottom; }
     [StructLayout(LayoutKind.Sequential)] private struct NativeHeaderItem
     {
@@ -3184,6 +3262,7 @@ public static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryGetData(nint self, in FormatEtc format);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetData(nint self, ref FormatEtc format, out StorageMedium medium);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCommandString(nint self, uint command, uint type, nint reserved, nint name, uint maxCount);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int InvokeCommand(nint self, ref NativeInvokeInfo info);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SelectItem(nint self, int index, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemCount(nint self, uint scope, out int count);
     private delegate bool EnumChildProcedure(nint child, nint parameter);

@@ -1248,3 +1248,9 @@ NativeProbe 增加三种状态模式，仅对隔离合成 view 的列 3（Relati
 这只验证标准 ListView 控件保存行数据、子项文本和状态的合同，不采样客户区像素，不能证明这些模式实际绘制正确或满足 Q-Dir 的布局；也不覆盖 Shell 原生菜单、文件操作、拖放、通知或产品 ExplorerBrowser。它补齐自有行模型的一项模式切换门槛，但不改变“自有行视图需完整兼容验证后才评估迁移”的结论。
 
 发现相邻 common-listview-color-baseline-private-desktop 探针也用 LVM_SETVIEW 后，顺手改为切换并读回四种经典样式；本轮输出四种模式的 custom-draw 回调与像素断言均为真，但 Private Desktop watchdog 在探针完整返回/清理前超时。超时时 foreground HWND 与 last-input tick 未变，wait-chain 经 COM activation / ChsIME 且 cycle=False。因此这里只记录模式设置与断言日志，不把该颜色探针判为完整通过；Tile/Content 模式及退出时序仍需独立处理。
+
+### 2026-11-01：递归大小列的原生背景排序命令
+
+扩展 WPF Private Desktop 下的 synthetic filesystem `IShellView` 探针：初始 Details view 显示递归大小 `child=10`、`small.bin=4`；先经递归大小列标题建立 Shell 原生 sort key，再从该 view 的 `GetItemObject(SVGIO_BACKGROUND)` 获取背景 `IContextMenu`，查询 canonical `sortascending` / `sortdescending` 后以 `InvokeCommand` 执行。两条命令 HRESULT 均为 `S_OK`；`IFolderView2.GetSortColumns` 读回相同键 `{9e5e05ac-1936-4a75-94f7-4704b8b01923}:1`，方向分别 `+1/-1`，项目顺序分别 `small.bin|child` 与 `child|small.bin`。NativeProbe Release build 0 警告/错误，Private Desktop watchdog exit 0，前台 HWND、输入 tick 与隔离清理守卫通过。
+
+这补齐的是 synthetic view 将原生背景排序命令路由到其自有递归大小列的程序化合同；未显示 popup 或模拟用户选菜单，未覆盖普通 ExplorerBrowser、其它 provider、交互命中/焦点，也没有解决更新通知后 DefView 不重新读取派生列的问题。产品仍为 ExplorerBrowser，派生列仍是隔离原型。
