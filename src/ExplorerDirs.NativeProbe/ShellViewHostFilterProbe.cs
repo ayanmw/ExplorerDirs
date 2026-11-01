@@ -1727,26 +1727,66 @@ internal static class ShellViewHostFilterProbe
                 Console.WriteLine($"ishellview-peer-recursive-size-change: kind={description}; operation=IFileOperation; natural-shell-notification=True; events=[{string.Join('|', watcher.ChangeEvents.Skip(eventIndex).Select(change => $"0x{change.EventId:X8}:{change.FirstPath}->{change.SecondPath}"))}]; invalidated-roots={invalidated.Length}; shared-scans={scanStarts}; bytes={expectedBytes}; row-ids-stable=True; selection-focus-preserved=True");
             }
 
-            var addedPayload = Path.Combine(changedDirectory, "added.bin");
+            bool WaitForShellPathsSince(int eventIndex, uint eventId, IReadOnlyCollection<string> expectedPaths, TimeSpan timeout)
+            {
+                var expected = expectedPaths.Select(Path.GetFullPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var deadline = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
+                while (Environment.TickCount64 < deadline)
+                {
+                    Application.DoEvents();
+                    var observed = watcher.ChangeEvents.Skip(eventIndex)
+                        .Where(change => change.EventId == eventId && change.FirstPath is not null)
+                        .Select(change => Path.GetFullPath(change.FirstPath!)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    if (expected.IsSubsetOf(observed)) return true;
+                    Thread.Sleep(10);
+                }
+                return expected.IsSubsetOf(watcher.ChangeEvents.Skip(eventIndex)
+                    .Where(change => change.EventId == eventId && change.FirstPath is not null)
+                    .Select(change => Path.GetFullPath(change.FirstPath!)).ToHashSet(StringComparer.OrdinalIgnoreCase));
+            }
+
+            var addedPayloads = new[]
+            {
+                Path.Combine(changedDirectory, "added-1.bin"),
+                Path.Combine(changedDirectory, "added-2.bin"),
+                Path.Combine(changedDirectory, "added-3.bin")
+            };
+            var addedPayloadSizes = new[] { 1, 2, 3 };
             var createEventIndex = watcher.Events.Count;
             var createParentItem = GetShellItem(changedDirectory);
             try
             {
-                PerformShellFileOperation(operation => Marshal.ThrowExceptionForHR(At<NewItem>(operation, 20)(operation,
-                    createParentItem, 0x00000080, "added.bin", null, 0)));
+                PerformShellFileOperation(operation =>
+                {
+                    foreach (var path in addedPayloads)
+                        Marshal.ThrowExceptionForHR(At<NewItem>(operation, 20)(operation, createParentItem,
+                            0x00000080, Path.GetFileName(path), null, 0));
+                });
             }
             finally { Marshal.Release(createParentItem); }
-            File.WriteAllBytes(addedPayload, new byte[3]);
-            RescanAfterNotification(createEventIndex, [ShellChangeCreated, ShellChangeUpdatedDirectory], 23, 6, "create");
+            for (var index = 0; index < addedPayloads.Length; index++)
+                File.WriteAllBytes(addedPayloads[index], new byte[addedPayloadSizes[index]]);
+            if (!WaitForShellPathsSince(createEventIndex, ShellChangeCreated, addedPayloads, TimeSpan.FromSeconds(5)))
+                throw new TimeoutException($"The batched Shell create did not deliver one CREATE event for each file: events=[{string.Join('|', watcher.ChangeEvents.Skip(createEventIndex).Select(change => $"0x{change.EventId:X8}:{change.FirstPath}"))}].");
+            RescanAfterNotification(createEventIndex, [ShellChangeCreated, ShellChangeUpdatedDirectory], 26, 6, "create-burst");
 
             var deleteEventIndex = watcher.Events.Count;
-            var deleteShellItem = GetShellItem(addedPayload);
+            var deleteShellItems = addedPayloads.Select(GetShellItem).ToArray();
             try
             {
-                PerformShellFileOperation(operation => Marshal.ThrowExceptionForHR(At<DeleteItem>(operation, 18)(operation, deleteShellItem, 0)));
+                PerformShellFileOperation(operation =>
+                {
+                    foreach (var item in deleteShellItems)
+                        Marshal.ThrowExceptionForHR(At<DeleteItem>(operation, 18)(operation, item, 0));
+                });
             }
-            finally { Marshal.Release(deleteShellItem); }
-            RescanAfterNotification(deleteEventIndex, [ShellChangeDeleted, ShellChangeUpdatedDirectory], 20, 7, "delete");
+            finally
+            {
+                foreach (var item in deleteShellItems) Marshal.Release(item);
+            }
+            if (!WaitForShellPathsSince(deleteEventIndex, ShellChangeDeleted, addedPayloads, TimeSpan.FromSeconds(5)))
+                throw new TimeoutException($"The batched Shell delete did not deliver one DELETE event for each file: events=[{string.Join('|', watcher.ChangeEvents.Skip(deleteEventIndex).Select(change => $"0x{change.EventId:X8}:{change.FirstPath}"))}].");
+            RescanAfterNotification(deleteEventIndex, [ShellChangeDeleted, ShellChangeUpdatedDirectory], 20, 7, "delete-burst");
 
             var renamedPayload = Path.Combine(changedDirectory, "renamed.bin");
             var renameEventIndex = watcher.Events.Count;

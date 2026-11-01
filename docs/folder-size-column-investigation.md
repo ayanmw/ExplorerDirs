@@ -1,5 +1,11 @@
 # 逐行文件夹大小与子项计数列调查
 
+## 2026-11-01：Shell 多项文件通知合并失效
+
+将多项 `IFileOperation.NewItem`/`DeleteItem` 排入单个 Shell 操作，在 `size-10` 中分别创建三个文件（1/2/3 B）和删除这三个文件。探针先等到三个不同路径的 `SHCNE_CREATE`/`SHCNE_DELETE` 都抵达，再将整批通知送入一次缓存失效处理：两组都只失效一个递归根；两视图各请求一次并共享单次重扫，结果由 20 B 到 26 B 再回到 20 B。每批通知没有造成三次重复扫描；行 ID、排序、选择和焦点保持。
+
+Release NativeProbe build 0 警告/错误；三轮 Private Desktop watchdog exit 0。日志：`20261101-203234-7a75f2cb`、`20261101-203244-cd986f58`、`20261101-203251-8752c7fb`。这验证探针将已到达的通知批次合并后失效，不代表生产 watcher 的时间窗/去抖策略、Shell 通知丢失补偿、通知持续风暴或产品接线。
+
 ## 2026-11-01：同路径目录替换时拒绝旧扫描结果
 
 双 `IShellView` 递归列原型先缓存 `nested` 子目录 4 B；`HandleBoundRecursiveDirectoryScanner` 完成旧目录枚举后，在仍持有旧根目录句柄时暂停返回。`IFileOperation.DeleteItem` 删除该目录后，旧子目录缓存代次递增，父级重新扫描为 20 B。接着在相同路径用 `IFileOperation.NewItem` 创建新目录并写入 6 B 文件，系统自然发送 `SHCNE_MKDIR`；新子目录文件 ID 与旧目录不同，两个视图共享新路径 6 B 缓存，父级共享扫描为 26 B。最后释放旧扫描：它带着旧身份和 4 B 摘要返回，但旧代次不匹配，发布被拒绝，新目录的 6 B 与父级 26 B 缓存都保持不变。
