@@ -1400,3 +1400,11 @@ Shell 通知现由有界队列合并：首个待发送更新后等待最多 200m
 将异步按需递归大小列置于 500 个同级目录的实际隐藏 DefView 排序场景：目录 `folder-400` 与 `folder-401` 在初始可视请求范围之外，初始两者仍按名称顺序（400 在 401 前）；`folder-400` 的递归大小为 20 B，`folder-401` 为 10 B。探针先点击自定义大小列头建立升序并选中/聚焦 `folder-400`，再请求整列、让后台扫描回填。连续两轮均完成 501 个目录快照，Shell 重新枚举 1 次，分别发送 5/6 次合并更新通知；排序正确变为 `folder-401` 在 `folder-400` 前、`folder-400` 在 30 B 的 `child` 前，原选中和焦点仍落在 `folder-400`。峰值 worker 均为 2，Private Desktop watchdog 均 exit 0，前台/输入与隔离清理守卫通过；100 目录/256 缓存异步基准、NativeProbe Release build 及静态无窗口合同也通过。
 
 500 目录轮的快照载荷统计为 151,292 字节（不含 map 节点/分配器开销）；进程 Private Bytes 与 Working Set 同时受 Shell/WPF/托管运行时影响，不能把本轮增量当作产品缓存实占。该排序结果证明本机隐藏合成 `IShellView` 可在通知驱动的整视图更新中用已回填值重新排序并保持选中/焦点身份；没有采样可见像素，不能证明无闪烁。仍是 NativeProbe，不是 ExplorerBrowser 产品接线；多窗格共享队列竞争、慢磁盘/网络、不同排序/分组及用户可见体验待验证。日志：`src/.state/native-probe-watchdog/20261101-121924-6b1aa3c1.stdout.log`、`src/.state/native-probe-watchdog/20261101-121947-50643c10.stdout.log`、常规回归 `src/.state/native-probe-watchdog/20261101-122014-b2b03f5f.stdout.log`。
+
+### 2026-11-01：双活动 Shell view 共享异步递归大小队列
+
+在现有隐藏 WPF `IShellView` 探针中新增双 view 模式：两个 view 同时绑定同一 synthetic 根目录，各自选中/聚焦不同目录，再分别读取 502 行递归大小列。500 个同级目录、512 条缓存容量下四轮复测均通过：两 view 都读回正确值，共扫描 501 个唯一目录（child 与 500 个同级目录），重复扫描 0，峰值 worker 2，发送 5–6 次合并 `SHCNE_UPDATEDIR`，两 view 聚合 `EnumObjects` 增量 2–3，原选中/焦点分别保留。典型单 view 100 目录/256 缓存对照通过（101 扫描、2 通知、枚举增量 1）。两 view 每次 watchdog exit 0；前台 HWND/最后输入 tick 不变，隔离注册和 fixture 清理通过；NativeProbe Release build 0 警告/错误，无窗口静态 Shell 合同通过。
+
+结果说明在该同进程 synthetic provider 中，两 view 的 provider 对象复用同一个有界快照 store；重叠读取没有重复递归扫描。通知会送达共享根下的多个 view；四次复测记录 5–6 次合并通知与 2–3 次聚合枚举增量，均高于单 view 对照的 2 次通知与 1 次枚举。该探针是两个同进程隐藏 view 的合成 filesystem 证据，不能外推到四窗格产品、多窗口独立进程、网络路径、第三方 namespace、真实用户可见闪烁或 ExplorerBrowser。下一步把同一压力扩展到四个活动 view，并观察每个 view 的状态恢复和枚举量；仍不因此接入产品列。
+
+日志：`src/.state/native-probe-watchdog/20261101-122213-7b0225b8.stdout.log`、`src/.state/native-probe-watchdog/20261101-122240-d97f55f2.stdout.log`、`src/.state/native-probe-watchdog/20261101-122434-05b9957c.stdout.log`、`src/.state/native-probe-watchdog/20261101-122525-965e7b93.stdout.log`；单 view 对照：`src/.state/native-probe-watchdog/20261101-122308-e547e558.stdout.log`。
