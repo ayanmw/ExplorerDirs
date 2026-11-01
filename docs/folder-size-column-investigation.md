@@ -2345,3 +2345,9 @@ HostProbe Release 构建通过，四种隐藏合成视图场景（正常/忽略�
 运行现有 `ExplorerBrowserWrapperProbe` 的独立 Private Desktop 验证：`IExplorerBrowser::BrowseToObject` 对包装后的物理文件夹返回 `S_OK`，但 `IFolderView2.GetFolder` 返回的身份不是包装对象，当前路径已解析回原文件系统目录。Private Desktop 前台守卫、输入状态与隔离清理均通过。微软接口说明该方法会从传入对象取得 IDList 并按 PIDL 导航，因此 `BrowseToObject` 成功本身不能证明 Shell 保留了传入的 provider 对象。[IExplorerBrowser::BrowseToObject](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-iexplorerbrowser-browsetoobject)
 
 该结果排除了“把普通文件系统 `IShellFolder` 包一层后直接交给现有 ExplorerBrowser，即可在无注册情况下保留逐行派生列”的简单接法；不排除可解析的虚拟 CLSID namespace 对象导航，也不等同于完整测试自定义 provider。结合上节无 Desktop NameSpace 时应用 parsing name 恢复失败，若要在绿色部署中继续保留 ExplorerBrowser，仍需有 Shell 可解析的注册 namespace；免注册方案更适合转向应用直接承载 `IShellView`、由应用恢复自有位置身份的隔离迁移原型。产品 Host 尚未改变。
+
+### 2026-11-02：免注册直接 IShellView 原型门槛
+
+新增隔离 NativeProbe：先在随机 HKCU CLSID/Desktop NameSpace 下解析应用路径 PIDL，随后立即删除这两项注册，再由进程内 NativeAdapter 直接构造 `SyntheticSortFolder`，并将已取得的 PIDL 传给 folder 初始化。Shell folder 对象本身创建成功，但其 `CreateViewObject(IID_IShellView)` 调用 `SHCreateShellFolderView` 返回 `REGDB_E_CLASSNOTREG (0x80040154)`；探针验证两项注册均已删除后才调用，并将此 HRESULT 作为可重复的预期门槛通过。Private Desktop 前台/输入守卫及退出隔离清理通过。
+
+另一个使用物理文件系统 PIDL 的尝试可以创建 DefView 窗口，且 `IFolderView2.GetFolder` 仍返回直接创建的 provider 对象；但视图有 3 个空行，provider `EnumObjects` 计数为 0。该路由不能显示文件系统内容或派生列。两条结果合起来说明：现有 synthetic provider + Windows DefView 无法靠进程内直接 `IShellFolder` 创建同时避开 Shell 注册并正常呈现行。若免注册仍是硬要求，后续需评估不依赖 `SHCreateShellFolderView` 的自有 `IShellView` 实现及其排序、键盘、菜单、文件操作、拖放和通知成本；这属于宿主/视图架构迁移，尚无产品接线或用户体验验收。

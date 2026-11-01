@@ -131,6 +131,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunRelativePercentColumnMetadata(0x0);
         if (args.Length == 1 && args[0] == "--synthetic-shell-factory-snapshot-cache-private-desktop")
             return PrivateDesktopShellProbe.RunSyntheticShellFactorySnapshotCache();
+        if (args.Length == 1 && args[0] == "--synthetic-direct-ishellview-no-registration-private-desktop")
+            return PrivateDesktopShellProbe.RunDirectIshellViewNoRegistrationPrototype();
         if (args.Length == 1 && args[0] == "--synthetic-shell-folder-tree-smoke")
             return SyntheticShellSortProbe.RunFolderTreeContractSmoke();
         if (args.Length == 1 && args[0] == "--synthetic-on-demand-recursive-size-column-smoke")

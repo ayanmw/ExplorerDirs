@@ -5159,6 +5159,27 @@ extern "C" __declspec(dllexport) HRESULT WINAPI CreateSyntheticSortShellView(PCI
     return result;
 }
 
+extern "C" __declspec(dllexport) HRESULT WINAPI CreateSyntheticSortShellViewDirectForProbe(
+    PCIDLIST_ABSOLUTE rootPidl, const CLSID* classId, IShellFolder2** folder, IShellView** view)
+{
+    if (!rootPidl || !classId || !folder || !view) return E_INVALIDARG;
+    *folder = nullptr;
+    *view = nullptr;
+    auto* directFolder = new (std::nothrow) SyntheticSortFolder(nullptr, *classId);
+    if (!directFolder) return E_OUTOFMEMORY;
+    auto result = directFolder->Initialize(rootPidl);
+    if (SUCCEEDED(result))
+        result = directFolder->CreateViewObject(nullptr, IID_IShellView, reinterpret_cast<void**>(view));
+    if (FAILED(result))
+    {
+        if (*view) { (*view)->Release(); *view = nullptr; }
+        directFolder->Release();
+        return result;
+    }
+    *folder = directFolder;
+    return S_OK;
+}
+
 extern "C" __declspec(dllexport) HRESULT WINAPI VerifySyntheticShellActivatedRecursiveSizeSnapshotCache(
     PCIDLIST_ABSOLUTE rootPidl, ULONGLONG sentinelBytes)
 {

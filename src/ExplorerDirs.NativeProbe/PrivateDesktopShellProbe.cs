@@ -256,6 +256,10 @@ internal static class PrivateDesktopShellProbe
     internal static int RunSyntheticShellSizeSort() =>
         Run("synthetic-shell-size-sort", () => SyntheticShellSortProbe.Run(), TimeSpan.FromSeconds(45), initializeOle: true);
 
+    internal static int RunDirectIshellViewNoRegistrationPrototype() =>
+        Run("synthetic-direct-ishellview", () => SyntheticShellSortProbe.RunDirectIshellViewNoRegistrationPrototype(),
+            TimeSpan.FromSeconds(45), initializeOle: true);
+
     internal static int RunSyntheticShellTwoViewTargetSync() =>
         Run("synthetic-shell-two-view-target-sync", () => SyntheticShellSortProbe.Run(twoViewDistinctLocations: true), TimeSpan.FromSeconds(45), initializeOle: true);
 

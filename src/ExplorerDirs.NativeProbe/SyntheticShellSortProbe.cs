@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.Win32;
 using System.Windows.Threading;
 using ExplorerDirs.App;
+using ExplorerDirs.NativeProbe;
 
 public static class SyntheticShellSortProbe
 {
@@ -27,6 +28,109 @@ public static class SyntheticShellSortProbe
     private const int LvmGetItemState = LvmFirst + 44;
     private const int LvmGetTopIndex = LvmFirst + 39;
     private const int LvmGetItemTextW = LvmFirst + 115;
+
+    internal static int RunDirectIshellViewNoRegistrationPrototype()
+    {
+        var fixture = Path.Combine(Path.GetTempPath(), $"ExplorerDirs-DirectShellView-{Guid.NewGuid():N}");
+        var smallFolder = Path.Combine(fixture, "folder-small");
+        var largeFolder = Path.Combine(fixture, "folder-large");
+        var classId = Guid.NewGuid();
+        var classKeyPath = $@"Software\Classes\CLSID\{{{classId:D}}}";
+        var namespaceKeyPath = $@"Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{{{classId:D}}}";
+        nint module = 0, folder = 0, view = 0, parent = 0, browserPointer = 0, folderView = 0, viewFolder = 0, rootPidl = 0;
+        nint directIdentity = 0, activeIdentity = 0;
+        var classRegistered = false;
+        var namespaceRegistered = false;
+        var viewWindowCreated = false;
+        StreamViewHost? host = null;
+        try
+        {
+            Directory.CreateDirectory(smallFolder);
+            Directory.CreateDirectory(largeFolder);
+            File.WriteAllBytes(Path.Combine(smallFolder, "payload.bin"), new byte[5]);
+            File.WriteAllBytes(Path.Combine(largeFolder, "payload.bin"), new byte[29]);
+            File.WriteAllBytes(Path.Combine(fixture, "file-middle.bin"), new byte[12]);
+
+            module = NativeLibrary.Load(FindAdapterLibrary());
+            Check(Marshal.GetDelegateForFunctionPointer<SetSyntheticFolderClassId>(
+                NativeLibrary.GetExport(module, "SetSyntheticFolderClassIdForProbe"))(ref classId));
+            Check(Marshal.GetDelegateForFunctionPointer<SetBackingPath>(
+                NativeLibrary.GetExport(module, "SetSyntheticSortBackingPath"))(fixture));
+            Check(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
+                "SetSyntheticCustomSizeColumnForProbe"))(1));
+            Check(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
+                "SetSyntheticRecursiveSizeScanOnDemandForProbe"))(1));
+            RegisterSyntheticFolder(classKeyPath, classId);
+            classRegistered = true;
+            RegisterSyntheticNamespace(namespaceKeyPath);
+            namespaceRegistered = true;
+            Check(SHParseDisplayName(CreatePathIdentityParsingName(classId, fixture), 0, out rootPidl, 0, out _));
+            Registry.CurrentUser.DeleteSubKeyTree(namespaceKeyPath, throwOnMissingSubKey: false);
+            namespaceRegistered = false;
+            Registry.CurrentUser.DeleteSubKeyTree(classKeyPath, throwOnMissingSubKey: false);
+            classRegistered = false;
+
+            var createDirect = Marshal.GetDelegateForFunctionPointer<CreateDirectShellViewForProbe>(
+                NativeLibrary.GetExport(module, "CreateSyntheticSortShellViewDirectForProbe"));
+            var createViewResult = createDirect(rootPidl, ref classId, out folder, out view);
+            if (createViewResult == unchecked((int)0x80040154) && folder == 0 && view == 0)
+            {
+                Console.WriteLine("synthetic-direct-ishellview: clsid-registered=False; desktop-namespace-registered=False; direct-folder-created=True; shell-view-create-hr=0x80040154; expected-shell-activation-block=True");
+                return 0;
+            }
+            Check(createViewResult);
+
+            if (Registry.CurrentUser.OpenSubKey(classKeyPath) is not null ||
+                Registry.CurrentUser.OpenSubKey(namespaceKeyPath) is not null)
+                throw new InvalidOperationException("The direct Shell view prototype unexpectedly registered its CLSID or Desktop NameSpace.");
+
+            parent = CreateWindowExW(0, "STATIC", "ExplorerDirs direct IShellView no-registration probe",
+                0x80000000, 20, 20, 900, 600, 0, 0, 0, 0);
+            if (parent == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            host = new StreamViewHost(parent, []) { View = view, BrowserSite = new ShellBrowserSite() };
+            browserPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+            var settings = new StreamProbeSettings { Mode = 4 };
+            var bounds = new StreamProbeRect { Right = 900, Bottom = 600 };
+            Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, browserPointer, ref bounds, out _));
+            viewWindowCreated = true;
+            Check(At<ActivateView>(view, 7)(view, 2));
+            _ = ShowWindow(parent, 4); // SW_SHOWNOACTIVATE on the isolated Private Desktop.
+            Check(At<RefreshView>(view, 8)(view));
+            Pump(350);
+            Marshal.ThrowExceptionForHR(Marshal.QueryInterface(view, in FolderView2Id, out folderView));
+            Marshal.ThrowExceptionForHR(At<GetFolder>(folderView, 5)(folderView, in ShellFolder2Id, out viewFolder));
+            Marshal.ThrowExceptionForHR(Marshal.QueryInterface(folder, in UnknownId, out directIdentity));
+            Marshal.ThrowExceptionForHR(Marshal.QueryInterface(viewFolder, in UnknownId, out activeIdentity));
+            var providerRetained = directIdentity == activeIdentity;
+            var listView = FindListView(view);
+            var rowCount = checked((int)SendMessageW(listView, LvmGetItemCount, 0, 0));
+            var names = ReadColumnTexts(listView, module, 0, expectedCount: 3);
+            if (!names.Contains("folder-small", StringComparer.OrdinalIgnoreCase) ||
+                !names.Contains("folder-large", StringComparer.OrdinalIgnoreCase) ||
+                !names.Contains("file-middle.bin", StringComparer.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"The directly hosted Shell view returned unexpected rows: provider-retained={providerRetained}; count={rowCount}; names=[{string.Join('|', names)}]; enum-calls={ReadCounter(module, "GetSyntheticEnumObjectsCount")}; enumerated={ReadCounter(module, "GetSyntheticEnumeratedItemCount")}.");
+            Console.WriteLine($"synthetic-direct-ishellview: clsid-registered=False; desktop-namespace-registered=False; view-window-created=True; provider-retained={providerRetained}; row-count={rowCount}; rows=[{string.Join('|', names)}]; parent-visible={IsWindowVisible(parent)}");
+            return 0;
+        }
+        finally
+        {
+            if (viewWindowCreated && view != 0) _ = At<DestroyViewWindow>(view, 10)(view);
+            if (browserPointer != 0) Marshal.Release(browserPointer);
+            host?.Dispose();
+            if (parent != 0) _ = DestroyWindow(parent);
+            if (activeIdentity != 0) Marshal.Release(activeIdentity);
+            if (directIdentity != 0) Marshal.Release(directIdentity);
+            if (viewFolder != 0) Marshal.Release(viewFolder);
+            if (folderView != 0) Marshal.Release(folderView);
+            if (view != 0) Marshal.Release(view);
+            if (folder != 0) Marshal.Release(folder);
+            if (rootPidl != 0) Marshal.FreeCoTaskMem(rootPidl);
+            if (namespaceRegistered) Registry.CurrentUser.DeleteSubKeyTree(namespaceKeyPath, throwOnMissingSubKey: false);
+            if (classRegistered) Registry.CurrentUser.DeleteSubKeyTree(classKeyPath, throwOnMissingSubKey: false);
+            if (module != 0) NativeLibrary.Free(module);
+            if (Directory.Exists(fixture)) Directory.Delete(fixture, recursive: true);
+        }
+    }
     private const int WmSetRedraw = 0x000B;
     private const uint RdwErase = 0x0004;
     private const uint RdwFrame = 0x0400;
@@ -4865,6 +4969,8 @@ public static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSizeDisplayOptions(int unit, int decimalPlaces, int thousandsSeparator);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetRelativePercentColumnType(int enabled, uint type);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSyntheticFolderClassId(ref Guid classId);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int CreateDirectShellViewForProbe(
+        nint rootPidl, ref Guid classId, out nint folder, out nint view);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSyntheticSizeOverrideDelegate(long size);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateSyntheticView(nint rootPidl, out nint folder, out nint view);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int VerifySyntheticShellActivatedRecursiveSizeSnapshotCache(nint rootPidl, ulong sentinelBytes);
