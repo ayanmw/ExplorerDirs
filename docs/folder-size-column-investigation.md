@@ -1980,3 +1980,11 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 同一活动 `IShellView` 上查询 `IShellFolderView` 并调用 `Rearrange(1)` 后，provider 的比较器收到 5 次比较，真实 Shell 行序变为 `child-small|root.txt|child|rename-source.txt`，与 2、4、10、25 B 数值顺序一致。Release NativeProbe 构建 0 警告/错误，注册 namespace Private Desktop 全流程 exit 0；临时注册清理、前台及 last-input 守卫通过。
 
 该切片证明 ExplorerBrowser 承载的注册 namespace 可以用旧式列索引触发自定义递归数值排序；没有验证用户鼠标点击表头如何到达该排序入口、排序指示器/升降序状态、真实物理目录的 child PIDL 身份，也没有可见 UI 验收。普通 ExplorerBrowser 文件系统路径与产品仍未接入该 provider；NativeProbe 夹具是临时 backing 目录。下一步应在隔离 `IShellView` 宿主里验证表头排序事件和排序状态恢复，再决定如何映射到产品窗格导航与标签会话。
+
+### 2026-11-01：表头点击递归排序及宿主清理对照
+
+使用已有的 WPF `HwndSource` 根宿主分支，在 Private Desktop 重新运行注册 namespace 探针。该探针通过真实 `SysHeader32` 列标题鼠标事件验证升降序：显示值为目录 `child=10 B`、文件 `small.bin=4 B`，升序成为 `small.bin|child`，降序恢复 `child|small.bin`；比较回调各 1 次，排序期间递归指标扫描为 0。独立背景列菜单的升序/降序状态也分别读回 `1`、`-1`，行序正确。
+
+与此前原生 `STATIC` 宿主在 `DestroyWindow(parent)` 阶段超时的运行对照，本次 WPF 根宿主完整退出，watchdog exit 0，Private Desktop 前台 HWND 与 last-input tick 均未变化；watchdog 确认隔离进程、临时 CLSID/NameSpace 注册和两个夹具目录均已清理。`DllCanUnloadNow` 返回 `S_FALSE`，NativeProbe 将原生模块留到隔离进程退出时回收。该对照说明 WPF 宿主分支可完成原型生命周期，但尚未解析 STATIC 宿主挂起的根因，也不能据此认定 WPF 是唯一可用的产品宿主。
+
+日志：`src/.state/native-probe-watchdog/20261101-204535-42696297.stdout.log`、`.stderr.log`。该结论仅覆盖隔离 `IShellView`/ExplorerBrowser 注册 namespace 原型；产品仍使用 ExplorerBrowser，逐行递归大小列未接入产品，未验证产品菜单、操作、拖放、通知、焦点或可见 UI。
