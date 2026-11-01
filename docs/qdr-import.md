@@ -300,6 +300,6 @@ Q-Dir 导入器现在只在 `[Filter2]` 区段内识别数字索引规则，并�
 
 ### 2026-11-01 递归大小自定义列的 Q-Dir 视图流往返
 
-`QdrExportSmoke` 新增 prototype Recursive Size 列合同：以非标准 property GUID 作为 `ColsAndSort` 的排序、分组与显示列键，导出 Q-Dir 原生 `CODEMODE1` 视图流；分别剥离应用扩展后重新导入基础字段，并解析完整导出后的应用扩展，核对列顺序/宽度、排序和分组方向。完整 SettingsSmoke 通过。
+`QdrExportSmoke` 现用原型的实际键结构验证 Recursive Size：Shell 排序/显示键 `{9e5e…}:1` 与递归数据/分组键 `{7e1f…}:1` 分开保存，三列按非默认 `Type(160) → Name(240) → Recursive Size(176)` 顺序写入 `ColsAndSort`。用例分别剥离应用扩展后导入 Q-Dir 基础字段，并导入含应用扩展的完整 `.qdr`，逐项核对列顺序、宽度、排序键/方向、分组键/方向。旧的合并键/两列断言先按预期失败；使用实际映射后，`--qdr-location-roundtrip-only` 定向 SettingsSmoke 通过。
 
 此验证使用本项目依据已观察格式实现的 reader/writer，不代表第三方 Q-Dir 12.79 实际保留或应用未知自定义 GUID；真实 Q-Dir 读取/保存及用户可见列仍待互操作验收。
