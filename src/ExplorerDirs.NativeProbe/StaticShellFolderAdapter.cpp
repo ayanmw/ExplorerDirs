@@ -1594,6 +1594,7 @@ namespace
     volatile LONG g_syntheticAsyncRecursiveSizeScanFinishedForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeActiveWorkersForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizePeakWorkersForProbe = 0;
+    volatile LONG g_syntheticAsyncRecursiveSizeNotificationsSentForProbe = 0;
     HANDLE g_syntheticAsyncRecursiveSizeScanGateForProbe = nullptr;
     volatile LONG g_syntheticExtendedMetadataColumnsForProbe = 0;
     volatile LONG g_syntheticRelativePercentColumnTypeForProbe = SHCOLSTATE_TYPE_INT;
@@ -1604,6 +1605,7 @@ namespace
     public:
         static constexpr size_t kWorkerCount = 2;
         static constexpr size_t kMaximumQueuedTasks = 256;
+        static constexpr DWORD kShellUpdateCoalesceMilliseconds = 200;
 
         SyntheticAsyncRecursiveSizeQueue()
         {
@@ -3298,11 +3300,7 @@ namespace
                             if (SUCCEEDED(scanResult))
                                 scanResult = self->_recursiveSizeStore->Set(parsingName.c_str(), afterScan, metrics.bytes);
                             if (SUCCEEDED(scanResult))
-                            {
                                 InterlockedIncrement(&g_syntheticAsyncRecursiveSizeScanCompletedForProbe);
-                                if (InterlockedCompareExchange(&self->_asyncNotificationsEnabled, 0, 0) && self->_backingRoot)
-                                    SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_IDLIST, self->_backingRoot, nullptr);
-                            }
                             else if (scanResult != HRESULT_FROM_WIN32(ERROR_CANCELLED))
                                 TraceSyntheticSortStage("synthetic-on-demand-size: asynchronous-scan-failed");
                         }
@@ -3319,6 +3317,7 @@ namespace
                         std::lock_guard<std::mutex> lock(self->_asyncSizeScanMutex);
                         self->_asyncSizeScansPending.erase(parsingName);
                     }
+                    if (SUCCEEDED(scanResult)) self->ScheduleAsyncViewUpdateNotification();
                     InterlockedIncrement(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe);
                     self->Release();
                 };
@@ -3334,6 +3333,36 @@ namespace
                 return enqueueResult;
             }
             return S_OK;
+        }
+        void ScheduleAsyncViewUpdateNotification() const
+        {
+            auto* self = const_cast<SyntheticSortFolder*>(this);
+            if (!InterlockedCompareExchange(&self->_asyncNotificationsEnabled, 0, 0) || !self->_backingRoot ||
+                InterlockedCompareExchange(&self->_asyncViewUpdatePending, 1, 0)) return;
+            self->AddRef();
+            HRESULT enqueueResult = E_FAIL;
+            try
+            {
+                std::function<void()> task = [self]
+                {
+                    Sleep(SyntheticAsyncRecursiveSizeQueue::kShellUpdateCoalesceMilliseconds);
+                    if (InterlockedCompareExchange(&self->_asyncNotificationsEnabled, 0, 0) && self->_backingRoot)
+                    {
+                        InterlockedIncrement(&g_syntheticAsyncRecursiveSizeNotificationsSentForProbe);
+                        SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_IDLIST, self->_backingRoot, nullptr);
+                    }
+                    InterlockedExchange(&self->_asyncViewUpdatePending, 0);
+                    self->Release();
+                };
+                enqueueResult = GetSyntheticAsyncRecursiveSizeQueue().Enqueue(std::move(task));
+            }
+            catch (const std::bad_alloc&) { enqueueResult = E_OUTOFMEMORY; }
+            catch (const std::system_error&) { enqueueResult = E_FAIL; }
+            if (FAILED(enqueueResult))
+            {
+                InterlockedExchange(&self->_asyncViewUpdatePending, 0);
+                self->Release();
+            }
         }
         ULONGLONG SizeForItem(PCUITEMID_CHILD item) const
         {
@@ -3692,6 +3721,7 @@ namespace
         mutable std::set<std::wstring, ShellParsingNameLess> _asyncSizeScansPending;
         volatile LONG _asyncScansCancelled = 0;
         volatile LONG _asyncNotificationsEnabled = 0;
+        volatile LONG _asyncViewUpdatePending = 0;
         SyntheticChild _pendingFocused{};
         bool _pendingHasFocused = false;
         volatile LONG _refreshPending = 0;
@@ -5659,6 +5689,8 @@ extern "C" __declspec(dllexport) void WINAPI ResetSyntheticOnDemandSizeMetricsFo
     InterlockedExchange(&g_syntheticDirectoryMetricsEntryCount, 0);
     InterlockedExchange(&g_syntheticOnDemandSizeScanCount, 0);
     InterlockedExchange64(&g_syntheticOnDemandSizeScanMicroseconds, 0);
+    InterlockedExchange(&g_syntheticAsyncRecursiveSizeNotificationsSentForProbe, 0);
+    InterlockedExchange(&g_syntheticAsyncRecursiveSizePeakWorkersForProbe, 0);
 }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticDirectoryMetricsCallCount()
@@ -5675,6 +5707,9 @@ extern "C" __declspec(dllexport) LONG64 WINAPI GetSyntheticOnDemandSizeScanMicro
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizePeakWorkerCountForProbe()
 { return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizePeakWorkersForProbe, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizeNotificationCountForProbe()
+{ return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeNotificationsSentForProbe, 0, 0); }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticRecursiveSizeCacheMissesDuringCompareCount()
 { return InterlockedCompareExchange(&g_syntheticRecursiveSizeCacheMissesDuringCompareCount, 0, 0); }

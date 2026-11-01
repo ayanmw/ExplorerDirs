@@ -125,7 +125,7 @@ if (-not [string]::IsNullOrWhiteSpace($timeoutDumpPath) -and -not [IO.Path]::IsP
 if (-not $TestTimeoutPath -and -not [string]::IsNullOrWhiteSpace($timeoutDumpPath)) {
     if ($Probe -in @('synthetic-recursive-directory-size-private-desktop', 'synthetic-recursive-directory-size-slow-column-private-desktop', 'synthetic-recursive-directory-size-wpf-host-private-desktop', 'synthetic-recursive-directory-size-on-demand-column-wpf-host-private-desktop', 'synthetic-recursive-directory-size-async-on-demand-column-wpf-host-private-desktop')) {
         # These hidden view probes have an internal deadline; capture first so the outer watchdog owns the dump.
-        $internalDeadlineSeconds = if ($Probe -eq 'synthetic-recursive-directory-size-async-on-demand-column-wpf-host-private-desktop') { 45 } else { 30 }
+        $internalDeadlineSeconds = if ($Probe -eq 'synthetic-recursive-directory-size-async-on-demand-column-wpf-host-private-desktop') { 90 } else { 30 }
         $runTimeoutSeconds = [Math]::Min($runTimeoutSeconds, $internalDeadlineSeconds - 5)
     }
     else {

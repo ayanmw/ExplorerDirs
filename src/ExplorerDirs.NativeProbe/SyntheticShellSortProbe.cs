@@ -209,7 +209,8 @@ public static class SyntheticShellSortProbe
 
     internal static int RunRecursiveDirectorySizeSortWithAsyncOnDemandColumnWpfHost() =>
         Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
-            useWpfParent: true, onDemandRecursiveSize: true, asyncOnDemandRecursiveSize: true, onDemandFolderCount: 1);
+            useWpfParent: true, onDemandRecursiveSize: true, asyncOnDemandRecursiveSize: true,
+            onDemandFolderCount: GetOnDemandFolderCount());
 
     internal static int RunRecursiveDirectorySizeLargeBackgroundRefreshWpfHost()
         => Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
@@ -560,20 +561,37 @@ public static class SyntheticShellSortProbe
                 var initialSizes = ReadColumnTexts(sizeListView, module, 1, expectedCount: expectedInitialCount);
                 if (asyncOnDemandRecursiveSize)
                 {
-                    // Prove the directory-change notification makes the real Shell view re-query its row value.
-                    var deadline = Environment.TickCount64 + 10_000;
+                    // Fill every requested row to expose bounded-queue overflow and retry behavior under Shell notifications.
+                    var deadline = Environment.TickCount64 + 60_000;
                     var childIndexForAsync = Array.FindIndex(initialNames, name => string.Equals(name, "child", StringComparison.OrdinalIgnoreCase));
-                    while (childIndexForAsync >= 0 && Environment.TickCount64 < deadline &&
-                        !string.Equals(initialSizes[childIndexForAsync], "10", StringComparison.Ordinal))
+                    var initialEnumerationCount = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+                    bool AllAsyncColumnValuesReady()
+                    {
+                        if (initialSizes.Length != initialNames.Length) return false;
+                        for (var index = 0; index < initialNames.Length; index++)
+                        {
+                            var expectedSize = string.Equals(initialNames[index], "small.bin", StringComparison.OrdinalIgnoreCase) ? "4" : "10";
+                            if (!string.Equals(initialSizes[index], expectedSize, StringComparison.Ordinal)) return false;
+                        }
+                        return true;
+                    }
+                    var allAsyncColumnValuesReady = AllAsyncColumnValuesReady();
+                    while (!allAsyncColumnValuesReady && Environment.TickCount64 < deadline)
                     {
                         Pump(25);
                         initialSizes = ReadColumnTexts(sizeListView, module, 1, expectedCount: expectedInitialCount);
+                        allAsyncColumnValuesReady = AllAsyncColumnValuesReady();
                     }
                     var asyncViewRequeryObserved = childIndexForAsync >= 0 &&
                         string.Equals(initialSizes[childIndexForAsync], "10", StringComparison.Ordinal);
-                    Console.WriteLine($"synthetic-async-recursive-size-shell-view: shell-notification-requery={asyncViewRequeryObserved}; child-size={(childIndexForAsync >= 0 ? initialSizes[childIndexForAsync] : "<missing>")}; scans={ReadCounter(module, "GetSyntheticOnDemandSizeScanCount")}; details-of-size={ReadCounter(module, "GetSyntheticSizeDetailsOfItemCount")}");
-                    if (!asyncViewRequeryObserved)
-                        throw new IOException("The hidden Shell view did not re-query the recursive-size value after the worker published its snapshot.");
+                    var asyncEnumDelta = ReadCounter(module, "GetSyntheticEnumObjectsCount") - initialEnumerationCount;
+                    var asyncScans = ReadCounter(module, "GetSyntheticOnDemandSizeScanCount");
+                    var asyncNotificationCount = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeNotificationCountForProbe");
+                    var asyncPeakWorkers = ReadCounter(module, "GetSyntheticAsyncRecursiveSizePeakWorkerCountForProbe");
+                    Console.WriteLine($"synthetic-async-recursive-size-shell-view: shell-notification-requery={asyncViewRequeryObserved}; all-column-values-ready={allAsyncColumnValuesReady}; child-size={(childIndexForAsync >= 0 ? initialSizes[childIndexForAsync] : "<missing>")}; folders={onDemandFolderCount}; scans={asyncScans}; notifications={asyncNotificationCount}; peak-workers={asyncPeakWorkers}; enum-delta={asyncEnumDelta}; details-of-size={ReadCounter(module, "GetSyntheticSizeDetailsOfItemCount")}");
+                    if (!asyncViewRequeryObserved || !allAsyncColumnValuesReady || asyncScans != onDemandFolderCount + 1 ||
+                        asyncNotificationCount > 16 || asyncPeakWorkers > 2)
+                        throw new IOException($"The hidden Shell view did not converge bounded asynchronous size rows: all-values-ready={allAsyncColumnValuesReady}; scans={asyncScans}; notifications={asyncNotificationCount}; peak-workers={asyncPeakWorkers}; folders={onDemandFolderCount}.");
                 }
                 var processMemoryAfterFullRead = ReadCurrentProcessMemory();
                 var cacheSnapshotsAfterFullRead = onDemandRecursiveSize
