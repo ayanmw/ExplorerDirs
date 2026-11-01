@@ -47,6 +47,7 @@ internal static class DirectoryTreeScanCoordinatorSmoke
         VerifyRetirementReleasesQueuedPublication();
         VerifyLatestIncrementalPublication();
         VerifyRetirementReleasesQueuedIncrementalWorker();
+        VerifyRetirementStopsHandleBoundTreeScan();
         VerifyQueuedStaleIncrementalPublication();
         VerifyQueuedStalePublication();
         VerifyFilesystemChangeInvalidatesQueuedPublication();
@@ -161,6 +162,53 @@ internal static class DirectoryTreeScanCoordinatorSmoke
         var requestPublished = request.GetAwaiter().GetResult();
         Check(retiredWorkerReleased && !requestPublished && !publishedAfterRetirement,
             "disposing an incremental scan owner releases its worker without dispatching the queued owner callback");
+    }
+
+    private static void VerifyRetirementStopsHandleBoundTreeScan()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ExplorerDirs-RetiredIncrementalTree-" + Guid.NewGuid().ToString("N"));
+        var firstFolder = Path.Combine(root, "first");
+        var secondFolder = Path.Combine(root, "second");
+        Directory.CreateDirectory(firstFolder);
+        Directory.CreateDirectory(secondFolder);
+        File.WriteAllBytes(Path.Combine(firstFolder, "payload.bin"), [1, 2, 3]);
+        File.WriteAllBytes(Path.Combine(secondFolder, "payload.bin"), [4, 5, 6, 7]);
+
+        using var owner = new ExplorerDirs.NativeProbe.DirectoryTreeScanCoordinator();
+        using var context = new QueuedSynchronizationContext();
+        var completedDirectories = 0;
+        var rowPublished = false;
+        var finalPublished = false;
+        try
+        {
+            var request = owner.RunLatestIncrementalAsync<
+                (string Path, ExplorerDirs.NativeProbe.ShellListViewRowScanResult Result),
+                IReadOnlyDictionary<string, ExplorerDirs.NativeProbe.ShellListViewRowScanResult>>(
+                (token, publish) => ExplorerDirs.NativeProbe.HandleBoundRecursiveDirectoryScanner.ScanDirectoryTree(
+                    root, [firstFolder, secondFolder, root], token, completedDirectory: (path, result) =>
+                    {
+                        Interlocked.Increment(ref completedDirectories);
+                        publish((path, result));
+                    }),
+                context,
+                _ => rowPublished = true,
+                _ => finalPublished = true);
+            if (!context.WaitForPost(TimeSpan.FromSeconds(5)))
+                throw new TimeoutException("The handle-bound scanner did not queue its first owner update.");
+
+            owner.Dispose();
+            var workerReleased = request.Wait(TimeSpan.FromSeconds(2));
+            context.RunPostedCallback();
+            var requestPublished = request.GetAwaiter().GetResult();
+            Check(workerReleased && !requestPublished && completedDirectories == 1 &&
+                  !rowPublished && !finalPublished,
+                "disposing the owner stops a handle-bound tree scan before its queued row update is applied");
+        }
+        finally
+        {
+            owner.Dispose();
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     private static void VerifyLatestAsyncPublication()

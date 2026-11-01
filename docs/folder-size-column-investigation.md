@@ -2048,3 +2048,5 @@ NativeProbe 和 SettingsSmoke Release build 均为 0 警告/错误；增量扫�
 ### 2026-11-01：递增 owner 发布在扫描退休时解除等待
 
 新增队列化 owner context 复现：逐项扫描把一条结果投递给 owner 后，worker 会同步等待该回调；若 coordinator 在派发前取消，旧实现只使回调失效，却没有唤醒等待 worker。红测在不派发该回调的情况下确认增量请求两秒内仍未结束；同一等待也会令完成扫描的普通 owner 发布任务滞留。现将 owner 发布统一经过带退休取消注册的 helper，扫描 ticket 退休即完成等待并返回未发布；排队回调稍后运行仍会通过当前 ticket 检查被丢弃。`--recursive-directory-scanner-smoke` 通过，包含增量 worker 与普通发布两条退休回归、迟到回调不写入、coordinator/行模型及递归扫描检查。该修复仅覆盖隔离 NativeProbe coordinator 的显式取消/退休合同；产品窗格关闭是否总能退休对应扫描仍未接线/验证。
+
+随后将真实 `HandleBoundRecursiveDirectoryScanner.ScanDirectoryTree` 接入同一个 SettingsSmoke 队列场景：第一条目录完成结果排入 owner context 后立即释放 coordinator。检查 worker 在两秒内退出、扫描回调只发生一次、owner 行更新和最终摘要均未发布；迟到回调被手动派发后仍不写入，且夹具目录可立即删除，证明该场景没有遗留扫描句柄。`--recursive-directory-scanner-smoke` Release 通过。仍未覆盖实际 Shell view HWND 销毁与 UI Dispatcher 关闭的联动；产品未接线。
