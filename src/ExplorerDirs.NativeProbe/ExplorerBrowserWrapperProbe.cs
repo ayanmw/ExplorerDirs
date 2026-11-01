@@ -415,7 +415,21 @@ internal static class ExplorerBrowserWrapperProbe
                 var childColumnCaptureHr = ShellColumnManager.Capture(folderView, out var childColumns);
                 if (childColumnCaptureHr != 0 || childColumns is null)
                     throw new InvalidOperationException($"Could not capture wrapped child-folder columns: {childColumnCaptureHr}.");
-                var recursiveColumnVisibleInChild = childColumns.Any(column => column.Key == sizeKey);
+                var recursiveColumnInitiallyVisibleInChild = childColumns.Any(column => column.Key == sizeKey);
+                var requestedChildColumns = recursiveColumnInitiallyVisibleInChild
+                    ? childColumns
+                    : childColumns.Append(new DisplayColumnState(sizeKey, 160)).ToArray();
+                var childColumnApplyHr = ShellColumnManager.Apply(folderView, requestedChildColumns);
+                var childVerifyCaptureHr = ShellColumnManager.Capture(folderView, out var childColumnsAfterApply);
+                if (childColumnApplyHr != 0 || childVerifyCaptureHr != 0 || childColumnsAfterApply is null)
+                    throw new InvalidOperationException($"Could not apply/read child-folder recursive Size column: apply={childColumnApplyHr}; capture={childVerifyCaptureHr}.");
+                var recursiveColumnVisibleInChild = childColumnsAfterApply.Any(column => column.Key == sizeKey);
+                var childNestedSizeBeforeTravel = recursiveColumnVisibleInChild
+                    ? ReadViewItemDetailsByName(folderView, viewFolder, "nested", 1)
+                    : "<column-hidden>";
+                Console.WriteLine($"explorerbrowser-registered-namespace: child-recursive-column-initially-visible={recursiveColumnInitiallyVisibleInChild}; apply-hr=0x{childColumnApplyHr:X8}; visible-after-apply={recursiveColumnVisibleInChild}; nested-size={childNestedSizeBeforeTravel}");
+                if (!recursiveColumnVisibleInChild || childNestedSizeBeforeTravel != "10")
+                    throw new InvalidOperationException($"Could not display the recursive Size column in the wrapped child folder; visible={recursiveColumnVisibleInChild}; value={childNestedSizeBeforeTravel}.");
 
                 Marshal.ThrowExceptionForHR(ParseDisplayName(viewFolder, "nested", out var nestedItem));
                 var expectedNestedRoot = ILCombine(expectedChildRoot, nestedItem);
@@ -489,6 +503,16 @@ internal static class ExplorerBrowserWrapperProbe
                         }
                         else
                         {
+                            try
+                            {
+                                var selfHostedNavigation = ShellViewHostFilterProbe.ProbeRegisteredNamespaceNavigation(
+                                    rootPidl, expectedChildRoot, nestedNavigationPidl);
+                                Console.WriteLine($"explorerbrowser-registered-namespace: self-hosted-navigation={selfHostedNavigation}");
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"explorerbrowser-registered-namespace: self-hosted-navigation-failure={ex.GetType().Name}: {ex.Message}");
+                            }
                             var physicalNavigation = ProbeBrowseToPhysicalPath(browser, Path.Combine(fixture, "child", "nested"), events,
                                 ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
                             Console.WriteLine($"explorerbrowser-registered-namespace: physical-nested-navigation-hr=0x{physicalNavigation.HResult:X8}; path-matches={physicalNavigation.PathMatches}; actual-path={physicalNavigation.ActualPath}; class={physicalNavigation.ClassId}; events=pending:{physicalNavigation.Pending},complete:{physicalNavigation.Completed},failed:{physicalNavigation.Failed}; view-created={physicalNavigation.ViewCreated}");
@@ -510,13 +534,23 @@ internal static class ExplorerBrowserWrapperProbe
                     var forwardColumnCaptureHr = ShellColumnManager.Capture(folderView, out var forwardColumns);
                     if (forwardColumnCaptureHr != 0 || forwardColumns is null)
                         throw new InvalidOperationException($"Could not capture columns after Shell TravelLog forward: {forwardColumnCaptureHr}.");
-                    var recursiveColumnVisibleAfterForward = forwardColumns.Any(column => column.Key == sizeKey);
+                    var recursiveColumnInitiallyVisibleAfterForward = forwardColumns.Any(column => column.Key == sizeKey);
+                    var requestedForwardColumns = recursiveColumnInitiallyVisibleAfterForward
+                        ? forwardColumns
+                        : forwardColumns.Append(new DisplayColumnState(sizeKey, 160)).ToArray();
+                    var forwardColumnApplyHr = ShellColumnManager.Apply(folderView, requestedForwardColumns);
+                    var forwardVerifyCaptureHr = ShellColumnManager.Capture(folderView, out var forwardColumnsAfterApply);
+                    if (forwardColumnApplyHr != 0 || forwardVerifyCaptureHr != 0 || forwardColumnsAfterApply is null)
+                        throw new InvalidOperationException($"Could not reapply the recursive Size column after Shell TravelLog forward: apply={forwardColumnApplyHr}; capture={forwardVerifyCaptureHr}.");
+                    var recursiveColumnVisibleAfterForward = forwardColumnsAfterApply.Any(column => column.Key == sizeKey);
                     var nestedRecursiveSizeAfterForward = recursiveColumnVisibleAfterForward
                         ? ReadViewItemDetailsByName(folderView, viewFolder, "nested", 1)
                         : "<column-hidden>";
-                    var recursiveColumnAndValueRestored = recursiveColumnVisibleInChild &&
+                    var recursiveColumnAndValueAfterReapply = recursiveColumnVisibleInChild &&
                         recursiveColumnVisibleAfterForward && nestedRecursiveSizeAfterForward == "10";
-                    Console.WriteLine($"explorerbrowser-registered-namespace: nested-pidl-matches=True; nested-row-count={nestedRowCount}; parent-pidl-matches=True; travel-log-back=True; travel-log-forward=True; recursive-column-visible-in-child={recursiveColumnVisibleInChild}; recursive-column-visible-after-forward={recursiveColumnVisibleAfterForward}; nested-size-after-forward={nestedRecursiveSizeAfterForward}; recursive-column-and-value-restored={recursiveColumnAndValueRestored}");
+                    Console.WriteLine($"explorerbrowser-registered-namespace: nested-pidl-matches=True; nested-row-count={nestedRowCount}; parent-pidl-matches=True; travel-log-back=True; travel-log-forward=True; child-column-visible-after-apply={recursiveColumnVisibleInChild}; forward-column-initially-visible={recursiveColumnInitiallyVisibleAfterForward}; forward-column-visible-after-apply={recursiveColumnVisibleAfterForward}; nested-size-after-forward={nestedRecursiveSizeAfterForward}; recursive-column-and-value-after-reapply={recursiveColumnAndValueAfterReapply}");
+                    if (!recursiveColumnAndValueAfterReapply)
+                        throw new InvalidOperationException("The recursive Size column and value were not restored after host reapplication following Shell TravelLog navigation.");
                 }
                 finally
                 {

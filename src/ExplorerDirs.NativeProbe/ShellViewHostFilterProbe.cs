@@ -78,6 +78,149 @@ internal static class ShellViewHostFilterProbe
     internal static int RunVirtualScopeForPrivateDesktop(string scope) =>
         Run(stopAfterGroupedExport: false, leaveParentForThreadExit: true, virtualScopeOnly: scope);
 
+    internal static string ProbeRegisteredNamespaceNavigation(nint rootPidl, nint childPidl, nint nestedPidl)
+    {
+        var foreground = GetForegroundWindow();
+        nint parent = 0, folder = 0, view = 0, viewPointer = 0, viewWindow = 0, folderView = 0;
+        var created = false;
+        FilteredHost? host = null;
+
+        int Navigate(nint targetPidl, uint flags)
+        {
+            nint childFolder = 0, childView = 0, childWindow = 0;
+            var previousView = view;
+            try
+            {
+                Check(SHBindToObject(0, targetPidl, 0, in ShellFolderId, out childFolder));
+                var shellViewId = ShellViewId;
+                Check(At<CreateViewObject>(childFolder, 8)(childFolder, parent, ref shellViewId, out childView));
+                host!.View = childView;
+                var settings = new StreamProbeSettings { Mode = uint.MaxValue };
+                var bounds = new StreamProbeRect { Right = 640, Bottom = 480 };
+                Check(At<CreateViewWindow>(childView, 9)(childView, previousView, ref settings,
+                    viewPointer, ref bounds, out childWindow));
+                host.SetPendingView(childFolder, childView, childWindow);
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                host!.View = previousView;
+                if (childWindow != 0) _ = At<DestroyViewWindow>(childView, 10)(childView);
+                if (childView != 0) Marshal.Release(childView);
+                if (childFolder != 0) Marshal.Release(childFolder);
+                return Marshal.GetHRForException(ex);
+            }
+        }
+
+        int AdoptPendingView(int expectedItemCount)
+        {
+            if (host!.PendingView == 0) throw new InvalidOperationException("Self-host navigation did not create a pending Shell view.");
+            if (folderView != 0) { Marshal.Release(folderView); folderView = 0; }
+            if (created && view != 0) _ = At<DestroyViewWindow>(view, 10)(view);
+            created = false;
+            if (view != 0) { Marshal.Release(view); view = 0; }
+            if (folder != 0) { Marshal.Release(folder); folder = 0; }
+            (folder, view, viewWindow) = host.TakePendingView();
+            created = true;
+            Check(Marshal.QueryInterface(view, in FolderView2Id, out folderView));
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+            int itemCount;
+            do
+            {
+                Application.DoEvents();
+                Check(At<ItemCount>(folderView, 7)(folderView, 2, out itemCount));
+                if (itemCount == expectedItemCount) return itemCount;
+                Thread.Sleep(10);
+            } while (DateTime.UtcNow < deadline);
+            throw new TimeoutException($"Self-host Shell view did not enumerate {expectedItemCount} items; received {itemCount}.");
+        }
+
+        string ParsingName(nint pidl)
+        {
+            if (SHGetNameFromIDList(pidl, 0x80028000, out var name) < 0 || name == 0) return "<unavailable>";
+            try { return Marshal.PtrToStringUni(name) ?? "<empty>"; }
+            finally { Marshal.FreeCoTaskMem(name); }
+        }
+
+        try
+        {
+            parent = CreateWindowExW(0, "STATIC", "ExplorerDirs isolated registered namespace IShellView host",
+                0x80000000, 0, 0, 640, 480, 0, 0, 0, 0); // WS_POPUP; hidden on the isolated Desktop.
+            if (parent == 0) throw new InvalidOperationException("Could not create the hidden IShellView parent window.");
+            Check(SHBindToObject(0, rootPidl, 0, in ShellFolderId, out folder));
+            var shellViewId = ShellViewId;
+            Check(At<CreateViewObject>(folder, 8)(folder, parent, ref shellViewId, out view));
+            host = new FilteredHost(parent, new ShellFolderFilter(new QuickFilterSettings("*", false, false)),
+                rootPidl, childPidl, Navigate);
+            host.View = view;
+            viewPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+            var settings = new StreamProbeSettings { Mode = uint.MaxValue };
+            var initialBounds = new StreamProbeRect { Right = 640, Bottom = 480 };
+            Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, viewPointer, ref initialBounds, out viewWindow));
+            created = true;
+            Check(host.BrowseObject(childPidl, 0));
+            var childCount = AdoptPendingView(expectedItemCount: 2);
+            var childLocationMatches = ILIsEqual(host.CurrentPidl, childPidl);
+            var childLocationBytesMatch = GetPidlIdentity(host.CurrentPidl) == GetPidlIdentity(childPidl);
+            var childAndNestedShellEqual = ILIsEqual(childPidl, nestedPidl);
+            var childAndNestedExactEqual = PidlExactlyEquals(childPidl, nestedPidl);
+            Console.WriteLine($"ishellview-host-filter: registered-namespace-child=current-match:{childLocationMatches}; bytes-match:{childLocationBytesMatch}; child-nested-shell-equal:{childAndNestedShellEqual}; exact-equal:{childAndNestedExactEqual}; child-shape={DescribePidl(childPidl)}; nested-shape={DescribePidl(nestedPidl)}; child={ParsingName(childPidl)}; nested={ParsingName(nestedPidl)}; history-index={host.HistoryIndex}");
+            var nestedIndex = FindFolderIndex(folderView, folder, childCount);
+            if (nestedIndex < 0) throw new InvalidOperationException("The self-hosted child view did not expose its nested folder row.");
+            Check(At<GetItem>(folderView, 6)(folderView, nestedIndex, out var nestedRowPidl));
+            string nestedRecursiveSize;
+            try
+            {
+                var sizeDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+                do
+                {
+                    Application.DoEvents();
+                    Check(ReadShellDetail(folder, nestedRowPidl, 1, out nestedRecursiveSize));
+                    if (nestedRecursiveSize == "10") break;
+                    Thread.Sleep(20);
+                } while (DateTime.UtcNow < sizeDeadline);
+            }
+            finally { Marshal.FreeCoTaskMem(nestedRowPidl); }
+            Console.WriteLine($"ishellview-host-filter: registered-namespace-recursive-size={nestedRecursiveSize}; expected=10");
+            Check(host.BrowseObject(nestedPidl, 0));
+            var nestedCount = AdoptPendingView(expectedItemCount: 1);
+            var currentPidlMatches = PidlExactlyEquals(host.CurrentPidl, nestedPidl);
+            Console.WriteLine($"ishellview-host-filter: registered-namespace-route=current:{currentPidlMatches}; history-index={host.HistoryIndex}; child-items={childCount}; nested-items={nestedCount}; current={ParsingName(host.CurrentPidl)}; expected={ParsingName(nestedPidl)}");
+            if (!currentPidlMatches || host.HistoryIndex != 2 || childCount != 2 || nestedCount != 1)
+                throw new InvalidOperationException($"Self-hosted namespace navigation mismatch: current={currentPidlMatches}; history={host.HistoryIndex}; child-items={childCount}; nested-items={nestedCount}.");
+            var names = ReadVisibleItemNames(folderView, nestedCount);
+            if (!names.Contains("deep.bin", StringComparer.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Self-hosted nested Shell view did not display its backing file.");
+            if (nestedRecursiveSize != "10")
+                throw new InvalidOperationException($"Self-hosted child view did not provide the recursive size column: {nestedRecursiveSize}.");
+            Check(host.BrowseObject(0, SbspNavigateBack));
+            var backCount = AdoptPendingView(expectedItemCount: 2);
+            var backRestoredChild = host.HistoryIndex == 1 &&
+                PidlExactlyEquals(host.CurrentPidl, childPidl) && backCount == 2;
+            Check(host.BrowseObject(0, SbspNavigateForward));
+            var forwardCount = AdoptPendingView(expectedItemCount: 1);
+            var forwardRestoredNested = host.HistoryIndex == 2 &&
+                PidlExactlyEquals(host.CurrentPidl, nestedPidl) && forwardCount == 1;
+            if (!backRestoredChild || !forwardRestoredNested)
+                throw new InvalidOperationException($"Self-hosted Shell history mismatch: back={backRestoredChild}; forward={forwardRestoredNested}; index={host.HistoryIndex}.");
+            if (GetForegroundWindow() != foreground)
+                throw new InvalidOperationException("Self-hosted namespace navigation changed the foreground window.");
+            return $"root->child->nested=True; child-items={childCount}; nested-items={nestedCount}; nested-file={names[0]}; recursive-size={nestedRecursiveSize}; back-forward=True; history-index={host.HistoryIndex}";
+        }
+        finally
+        {
+            if (folderView != 0) Marshal.Release(folderView);
+            if (created && view != 0) _ = At<DestroyViewWindow>(view, 10)(view);
+            host?.DisposePendingView();
+            host?.Dispose();
+            if (view != 0) Marshal.Release(view);
+            if (folder != 0) Marshal.Release(folder);
+            if (viewPointer != 0) Marshal.Release(viewPointer);
+            // On this isolated non-input Desktop, the owning parent HWND is reclaimed at thread/process exit.
+            GC.KeepAlive(host);
+        }
+    }
+
     private static int Run(bool stopAfterGroupedExport, bool leaveParentForThreadExit, string? virtualScopeOnly = null,
         bool menuCommandsOnly = false, bool newFolderOnly = false, bool recursiveSizeProjectionOnly = false,
         bool recursiveSizeMultiViewProjectionOnly = false)
@@ -3457,6 +3600,32 @@ internal static class ShellViewHostFilterProbe
         return Convert.ToHexString(bytes);
     }
 
+    // ILIsEqual accepts a common PIDL prefix on this nested namespace; exact location identity also needs equal lengths.
+    private static bool PidlExactlyEquals(nint left, nint right)
+    {
+        if (left == 0 || right == 0 || ILGetSize(left) != ILGetSize(right)) return false;
+        return ILIsEqual(left, right);
+    }
+
+    private static string DescribePidl(nint pidl)
+    {
+        var size = ILGetSize(pidl);
+        if (size < 2 || size > 65_536) return $"invalid-size:{size}";
+        var bytes = new byte[(int)size];
+        Marshal.Copy(pidl, bytes, 0, bytes.Length);
+        var parts = new List<string>();
+        var offset = 0;
+        while (offset + sizeof(ushort) <= bytes.Length)
+        {
+            var cb = BitConverter.ToUInt16(bytes, offset);
+            if (cb == 0) return $"size:{size};items:[{string.Join('|', parts)}];terminator:{offset}";
+            if (cb < sizeof(ushort) || offset + cb > bytes.Length) return $"size:{size};invalid-item-at:{offset};cb:{cb}";
+            parts.Add($"{offset}:{cb}:{Convert.ToHexString(bytes.AsSpan(offset, Math.Min((int)cb, 24)))}");
+            offset += cb;
+        }
+        return $"size:{size};unterminated;items:[{string.Join('|', parts)}]";
+    }
+
     private static void FreePeerShellRows(IEnumerable<PeerShellRow> rows)
     {
         foreach (var row in rows)
@@ -4168,7 +4337,7 @@ internal static class ShellViewHostFilterProbe
         {
             Filter = filter;
             NavigationHistory = new ShellViewNavigationHistory(rootPidl, ClonePidl, Marshal.FreeCoTaskMem,
-                ILIsEqual, TryGetParentPidl, ILCombine, (target, flags) =>
+                PidlExactlyEquals, TryGetParentPidl, ILCombine, (target, flags) =>
                 {
                     BrowseTargetIsChild = ILIsEqual(target, expectedChildPidl);
                     BrowseTargetIsRoot = ILIsEqual(target, rootPidl);

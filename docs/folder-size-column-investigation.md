@@ -2078,3 +2078,21 @@ NativeProbe Release build 0 警告/错误；Private Desktop 功能运行因既�
 Private Desktop watchdog exit 1 是新增导航成功条件未达到；隔离守卫通过。日志：`src/.state/native-probe-watchdog/20261101-220454-536cbce2.stdout.log`。NativeProbe Release build 0 警告/错误。该结果排除了仅缺少 `SFGAO_BROWSABLE` 或 `BrowseToObject` 目标接口类型导致该现象。微软 `BrowseToObject` 文档明确说明该调用在挂起导航设置正确时可返回 `S_OK`，但这不保证导航最终成功，须结合导航成功/失败事件判断：[IExplorerBrowser::BrowseToObject](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-iexplorerbrowser-browsetoobject)。
 
 重新用撤回 `SFGAO_BROWSABLE` 修改后的原生 DLL 运行相同对照：属性回到 `0x7080017F`，`BrowseToObject(IShellFolder2)` 与 `BrowseToObject(IShellItem)` 仍都返回 `S_OK`，两个路径都停留在 child；物理路径导航成功。结果与补属性版本一致，确认浏览提示不是根因。Private Desktop watchdog 日志：`src/.state/native-probe-watchdog/20261101-220619-d86d5a92.stdout.log`；前台/输入隔离守卫通过。当前 NativeProbe 源码保留属性日志与 IShellItem 对照，属性行为恢复为 backing folder 原值。
+
+### 2026-11-01：自建 IShellView host 的 registered namespace 深层导航与递归列
+
+将同一个临时 registered namespace root / child / nested PIDL 接入已存在的隐藏 `StreamViewHost` / `IShellBrowser` 迁移原型。该宿主通过 `SHBindToObject` 绑定每个绝对目标、创建并切换 `IShellView`，完整跑通 root → child → nested；child view 中 nested 文件夹的 Shell 大小列读回 `10`，nested view 枚举到 `deep.bin`，Shell Back/Forward 能再次恢复 child / nested 并保持历史索引 2。foreground、last-input 与隔离清理守卫通过。
+
+实验同时发现，本 synthetic namespace 上 `ILIsEqual(childPidl, nestedPidl)` 返回 true，而两者 PIDL 长度分别为 622 与 1222 字节，后者是在前者两段 PIDL 后追加第三段 nested 项；parsing name 分别是 child / nested。该成功结果单独不足以证明导航位置精确相同。此前临时使用字节身份的结论已修正：Private Desktop host 改用“PIDL 长度相同且 `ILIsEqual`”后，history index 2、Back/Forward 都通过，无需字节级比较器。`CompareIDs` 对多段相对 PIDL 的递归修正也已加入 NativeProbe synthetic provider，但 `ILIsEqual` 对共同前缀仍返回 true，说明不能将两条比较路径混为一谈。
+
+同一进程中的 ExplorerBrowser 对照仍对 wrapped nested `BrowseToIDList` / `BrowseToObject` 返回 `S_OK` 但保持 child；其物理路径对照正常。NativeProbe Release build 0 警告/错误；Private Desktop 总探针仍因 ExplorerBrowser 失败断言而 exit 1，自建宿主子探针通过，隔离守卫通过。日志：`src/.state/native-probe-watchdog/20261101-221422-5f60778f.stdout.log`。该结果证明自建 host 能承载此 namespace 的 nested view 与递归大小值，但仍只覆盖隔离 Shell view，尚未覆盖完整菜单/操作/拖放/通知/选择恢复或产品窗格接线。
+
+### 2026-11-01：nested PIDL 精确历史身份复核
+
+记录 PIDL 结构后，确认 child 为 622 字节（20 + 600 + terminator），nested 为 1222 字节（20 + 600 + 600 + terminator）。虽然 `ILIsEqual(child,nested)` 返回 true，加入长度相等条件后精确比较返回 false；同一条件用于 `ShellViewNavigationHistory` 后，无须 bytes comparer 即正确追加索引 2，Back/Forward 均恢复正确位置。递归 Size 值仍为 `10`，nested view 仍显示 `deep.bin`。NativeProbe Release build 0 警告/错误；总探针 exit 1 的唯一功能失败仍是 ExplorerBrowser registered namespace 深层导航对照，Private Desktop 前台/输入隔离守卫通过。日志：`src/.state/native-probe-watchdog/20261101-221900-a8236a7a.stdout.log`。这只修正隔离原型的精确历史身份判断，产品没有迁移或修改。
+
+### 2026-11-01：修正多段 CompareIDs 后复测 ExplorerBrowser 深层导航
+
+NativeProbe synthetic provider 的 `IShellFolder2::CompareIDs` 原先只比较传入相对 PIDL 的第一段。对 first item 相等的多段 PIDL，现在绑定该子文件夹并递归比较剩余路径段；若只有一侧还有尾段，则按路径前缀关系返回排序结果。单独构建 C++ adapter 后，ExplorerBrowser 原先停在 child 的问题消失：root→child→nested 均创建并激活目标 view，回到 child、Back 到 nested、Forward 到 child 均完成，row count、PIDL 与 TravelLog 核对通过。由此确认先前失败来自探针 namespace 对多段相对 PIDL 的 `CompareIDs` 实现不完整，不是 ExplorerBrowser 本身不支持嵌套导航。
+
+Child view 初始也不含 Recursive Size 列；测试调用 `ShellColumnManager.Apply` 后，列可见且 nested 值为 `10`。TravelLog Back/Forward 返回时 Shell view 会创建默认列集；再应用 pane 的列快照后，列及值 `10` 恢复。因此原型要求宿主在每个新 Shell view 建立后恢复 pane 的列快照，不能依赖 Shell 自动跨 folder/history 携带应用自定义列。更后面的 Private Desktop 综合探针仍在第二个 provider 的按需扫描排队断言超时。日志：`src/.state/native-probe-watchdog/20261101-222241-11834f36.stdout.log`，前台/last-input/隔离清理守卫通过。NativeProbe C# Release build 0 警告/错误，独立 C++ adapter `/W4 /WX` 构建通过。该修正确认只在实验 provider 内，下一步是将 view-created 后应用列状态纳入原型并单独定位双 provider 按需扫描时序；产品 ExplorerBrowser、产品 UI 与 release 未改。

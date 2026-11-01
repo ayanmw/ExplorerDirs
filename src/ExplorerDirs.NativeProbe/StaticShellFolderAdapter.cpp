@@ -3050,7 +3050,30 @@ namespace
             }
             default: return E_INVALIDARG;
             }
-            return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, static_cast<USHORT>(comparison));
+            if (comparison != 0) return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, static_cast<USHORT>(comparison));
+
+            // Shell navigation may compare a multi-level relative PIDL at its parent folder.
+            // Comparing only its first synthetic item made a folder and its descendant indistinguishable there.
+            const auto* leftRemaining = ILNext(left);
+            const auto* rightRemaining = ILNext(right);
+            const bool leftHasRemaining = !ILIsEmpty(leftRemaining);
+            const bool rightHasRemaining = !ILIsEmpty(rightRemaining);
+            if (!leftHasRemaining || !rightHasRemaining)
+            {
+                if (leftHasRemaining == rightHasRemaining) return S_OK;
+                return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, leftHasRemaining ? 1 : static_cast<USHORT>(-1));
+            }
+
+            auto* firstChild = CloneSyntheticChild(*leftChild);
+            if (!firstChild) return E_OUTOFMEMORY;
+            IShellFolder2* nestedFolder = nullptr;
+            auto result = BindToObject(reinterpret_cast<PCUIDLIST_RELATIVE>(firstChild), nullptr,
+                IID_PPV_ARGS(&nestedFolder));
+            CoTaskMemFree(firstChild);
+            if (FAILED(result)) return result;
+            result = nestedFolder->CompareIDs(column, leftRemaining, rightRemaining);
+            nestedFolder->Release();
+            return result;
         }
         HRESULT STDMETHODCALLTYPE CreateViewObject(HWND owner, REFIID iid, void** value) override
         {
