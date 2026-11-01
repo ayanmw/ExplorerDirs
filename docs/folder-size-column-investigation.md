@@ -2119,6 +2119,12 @@ Child view 初始也不含 Recursive Size 列；测试调用 `ShellColumnManager
 随后把排序复核移到同级多个文件夹的 root view，避免用一个文件和一个文件夹比较而混入“文件夹优先”分组。递归值 `child=17`、`child-small=2`，恢复器后仍按 `child|child-small` 排列，排序键读回 `{7e1f84b7-c052-4e51-8a3c-869254a6b910}:1`、方向 `+1`。先临时将方向设为 `-1`，再执行原生 `sortascending`，状态读回方向 `+1`，但同一文件夹组仍是 `child(17)|child-small(2)`；文件组 `rename-complete(25)|root(4)|notification-created(3)` 也呈降序。当前证据表明排序状态与实际行序不一致，且不同项目组的排序效果也需分开核对；标题交互尚未成功建立，所以不能把原因单独归结为恢复时序或属性比较器。
 
 NativeProbe Release build 0 警告/错误，Private Desktop watchdog exit 0，前台/last-input/隔离清理守卫通过。日志：`src/.state/native-probe-watchdog/20261101-225856-3f34a875.stdout.log`。下一步应在同一 view 对照有效原生列（如 Name/Size）的程序化排序与用户标题交互，再核对自定义列比较结果符号/方向映射；产品 ExplorerBrowser 未修改。
+
+### 2026-11-01：原生标题槽与列快照索引逐槽对照
+
+在相同 root view 逐一点击真实 header 槽 0–3，每次点击前重置递归 PropertyKey 并读取 `IFolderView2::GetSortColumns` 与项目行序。`IColumnManager::GetColumns` 的快照数组把递归列列在索引 3，但点击原生槽 1 后 Shell 读回排序键变成 `{9e5e05ac-1936-4a75-94f7-4704b8b01923}:1`；点击槽 3 后才读回递归键 `{7e1f84b7-c052-4e51-8a3c-869254a6b910}:1`，方向为 `-1`。因此两个 API 的索引域不能直接互换，之前把快照索引传给 header 模拟点击并不能验证同一个列。当前 `IShellFolder2::GetDetailsOf(nullptr, ordinal)` 在该已包装的 folder 上返回 `E_INVALIDARG`，所以没有把槽 3 的显示标题猜成某个具体名称。
+
+关键行为缺口仍存在：递归排序键读回正确时，同级 folder `child=17`、`child-small=2` 和同级 file `notification-created=3`、`root=4`、`rename-complete=25` 的行序仍未按递归值变化。普通 Shell `sortascending` 读回递归键方向 `+1`，但值顺序仍为 25、4、3；点击 header 槽 3 后方向变为 `-1`，行序仍保持原先名称顺序。槽 0/1/2 分别读回 Name、`{9e5e…}:1` 及 Type+Name 组合键。故目前已排除“误点快照索引即可解释排序失败”，但尚未证明该隔离适配器实际向 DefView 提供了用于排序的递归比较值；下一步应检查 header 的 `IShellFolder2::MapColumnToSCID`/`CompareIDs` 路径与排序键方向，并用 native Name/Size 作有效标题交互基线。Release NativeProbe build 0 警告/错误，Private Desktop watchdog exit 0，前台/输入/清理隔离守卫通过；结果日志：`src/.state/native-probe-watchdog/20261101-230454-6ad6363e.stdout.log`。运行后段仍有独立 self-hosted restore probe 的 COM 异常诊断，不影响本段 root view 的槽位记录，但该异常未调查。产品与 release 未改。
 ### 2026-11-01：递归列身份的标签快照与 INI 往返核对
 
 生产 `OnNavigationPending` 在当前已导航标签上调用 `CaptureViewState`；捕获流程使用同一 Browser 与 view generation 读取模式、列布局、排序和分组，只有完整且仍当前的结果才替换缓存。`PaneControl`/`SessionStore` 以每标签 `ViewState` 保存这些字段。现有跨进程 `ColumnLayoutProcessSmoke` 使用与 NativeProbe provider 完全相同的递归列 PropertyKey（`7E1F84B7-C052-4E51-8A3C-869254A6B910:1`），核对列宽、排序方向、分组方向和路径从 INI 子进程读回；SettingsSmoke 全量运行 exit 0，view-state restore smoke 通过。此项是既有通用快照/INI代码对该 key 的持久化证据，不代表产品物理目录能生成此属性，或该 key 已在用户配置中提供列菜单入口。

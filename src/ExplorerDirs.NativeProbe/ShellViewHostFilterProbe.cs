@@ -290,7 +290,10 @@ internal static class ShellViewHostFilterProbe
         var listViewMode = listViewForHeader == 0 ? -1 : SendMessageW(listViewForHeader, 0x108F, 0, 0).ToInt32(); // LVM_GETVIEW.
         var modeResult = At<GetViewModeAndIconSize>(view, 36)(view, out var currentMode, out var currentIconSize);
         var listViewStyle = listViewForHeader == 0 ? 0 : GetWindowLongPtrW(listViewForHeader, GwlStyle).ToInt64();
-        var headerDiagnostics = $"view-mode-hr=0x{modeResult:X8}; mode={currentMode}; icon-size={currentIconSize}; list-view-mode={listViewMode}; list-style=0x{listViewStyle:X}; list-visible={(listViewForHeader != 0 && IsWindowVisible(listViewForHeader))}; header-visible={(headerForDiagnostics != 0 && IsWindowVisible(headerForDiagnostics))}; header-count={headerCount}; recursive-column-index={recursiveColumnIndex}; column-keys=[{(columns is null ? "" : string.Join('|', columns.Select(column => $"{column.Key.FormatId:B}:{column.Key.PropertyId}")))}]";
+        string nativeDetailTitles;
+        try { nativeDetailTitles = string.Join('|', ReadShellDetailColumnTitles(folder)); }
+        catch (Exception ex) { nativeDetailTitles = $"unavailable:{ex.GetType().Name}:{ex.Message}"; }
+        var headerDiagnostics = $"view-mode-hr=0x{modeResult:X8}; mode={currentMode}; icon-size={currentIconSize}; list-view-mode={listViewMode}; list-style=0x{listViewStyle:X}; list-visible={(listViewForHeader != 0 && IsWindowVisible(listViewForHeader))}; header-visible={(headerForDiagnostics != 0 && IsWindowVisible(headerForDiagnostics))}; header-count={headerCount}; native-detail-titles=[{nativeDetailTitles}]; recursive-column-index={recursiveColumnIndex}; column-keys=[{(columns is null ? "" : string.Join('|', columns.Select(column => $"{column.Key.FormatId:B}:{column.Key.PropertyId}")))}]";
         var countResult = At<GetSortColumnCount>(view, 26)(view, out var sortCount);
         var sortReadbackResult = countResult;
         NativeSortColumn[] sorts = [];
@@ -354,13 +357,47 @@ internal static class ShellViewHostFilterProbe
             catch (Exception ex) { shellMenuSortFailure = $"{ex.GetType().Name}: {ex.Message}"; }
         }
         string? headerSortFailure = null;
+        string[] namesAfterNativeColumnOne = names;
+        string[] namesAfterSnapshotColumn = names;
+        string[] namesAfterNativeColumnOneFirstClick = names;
+        string[] namesAfterSnapshotColumnFirstClick = names;
+        string sortAfterNativeColumnOneFirstClick = "not-run";
+        string sortAfterSnapshotColumnFirstClick = "not-run";
+        var headerSlotProbes = new List<string>();
         try
         {
             if (recursiveColumnIndex < 0)
                 throw new InvalidOperationException("The saved recursive-size column is not present in the native header.");
             // The shared setter restores metadata but may not establish the DefView's comparator for provider columns.
-            ClickHeaderItem(viewWindow, recursiveColumnIndex);
-            ClickHeaderItem(viewWindow, recursiveColumnIndex);
+            if (stage == "initial-root")
+            {
+                var target = new NativeShellViewStateTarget(view);
+                for (var slot = 0; slot < headerCount; slot++)
+                {
+                    Check(target.SetSorting(saved.SortColumns));
+                    ClickHeaderItem(viewWindow, slot);
+                    var slotNames = ReadVisibleItemNames(view, itemCount);
+                    var slotSort = ReadSortColumnsSummary(view);
+                    headerSlotProbes.Add($"slot={slot};sort=[{slotSort}];order=[{string.Join('|', slotNames)}]");
+                    if (slot == 1)
+                    {
+                        namesAfterNativeColumnOneFirstClick = slotNames;
+                        sortAfterNativeColumnOneFirstClick = slotSort;
+                    }
+                    if (slot == recursiveColumnIndex)
+                    {
+                        namesAfterSnapshotColumnFirstClick = slotNames;
+                        sortAfterSnapshotColumnFirstClick = slotSort;
+                    }
+                    if (slot == 0) namesAfterNativeColumnOne = slotNames;
+                }
+            }
+            else
+            {
+                ClickHeaderItem(viewWindow, recursiveColumnIndex);
+                ClickHeaderItem(viewWindow, recursiveColumnIndex);
+            }
+            namesAfterSnapshotColumn = ReadVisibleItemNames(view, itemCount);
         }
         catch (Exception ex) { headerSortFailure = $"{ex.GetType().Name}: {ex.Message}"; }
         var namesAfterHeaderSort = ReadVisibleItemNames(view, itemCount);
@@ -377,9 +414,20 @@ internal static class ShellViewHostFilterProbe
                 sortAfterHeader[0].Key.PropertyId == saved.SortColumns[0].Key.PropertyId &&
                 sortAfterHeader[0].Direction == saved.SortColumns[0].Direction;
         }
-        var result = $"restored={restored}; failures=[{string.Join(',', failures)}]; mode-reapply-hr=0x{modeReapplyResult:X8}; current-mode-reapply-hr=0x{currentModeReapplyResult:X8}; refresh-hr=0x{refreshResult:X8}; columns-hr=0x{columnCaptureResult:X8}; recursive-column-visible={recursiveColumnVisible}; sort-count-hr=0x{countResult:X8}; sort-readback-hr=0x{sortReadbackResult:X8}; sort-matches={sortMatches}; header-diagnostics={headerDiagnostics}; order=[{orderBeforeRestoreRetry}]; recursive-values=[{valuesBeforeRestoreRetry}]; order-matches-saved-sort={orderMatchesSavedSort}; shell-menu-sort-failure={shellMenuSortFailure ?? "none"}; sort-after-shell-menu=[{shellMenuSortReadback}]; order-after-shell-menu-sort=[{string.Join('|', namesAfterShellMenuSort)}]; values-after-shell-menu-sort=[{string.Join('|', valuesAfterShellMenuSort)}]; header-sort-failure={headerSortFailure ?? "none"}; order-after-header-sort=[{string.Join('|', namesAfterHeaderSort)}]; values-after-header-sort=[{string.Join('|', valuesAfterHeaderSort)}]; header-sort-matches-saved-sort={headerSortMatchesSavedSort}; sort-after-header-matches={sortAfterHeaderMatches}";
+        var result = $"restored={restored}; failures=[{string.Join(',', failures)}]; mode-reapply-hr=0x{modeReapplyResult:X8}; current-mode-reapply-hr=0x{currentModeReapplyResult:X8}; refresh-hr=0x{refreshResult:X8}; columns-hr=0x{columnCaptureResult:X8}; recursive-column-visible={recursiveColumnVisible}; sort-count-hr=0x{countResult:X8}; sort-readback-hr=0x{sortReadbackResult:X8}; sort-matches={sortMatches}; header-diagnostics={headerDiagnostics}; order=[{orderBeforeRestoreRetry}]; recursive-values=[{valuesBeforeRestoreRetry}]; order-matches-saved-sort={orderMatchesSavedSort}; shell-menu-sort-failure={shellMenuSortFailure ?? "none"}; sort-after-shell-menu=[{shellMenuSortReadback}]; order-after-shell-menu-sort=[{string.Join('|', namesAfterShellMenuSort)}]; values-after-shell-menu-sort=[{string.Join('|', valuesAfterShellMenuSort)}]; header-sort-failure={headerSortFailure ?? "none"}; header-slot-probes=[{string.Join(" || ", headerSlotProbes)}]; order-after-native-column-one-first-click=[{string.Join('|', namesAfterNativeColumnOneFirstClick)}]; sort-after-native-column-one-first-click=[{sortAfterNativeColumnOneFirstClick}]; order-after-native-column-one=[{string.Join('|', namesAfterNativeColumnOne)}]; order-after-snapshot-column-first-click=[{string.Join('|', namesAfterSnapshotColumnFirstClick)}]; sort-after-snapshot-column-first-click=[{sortAfterSnapshotColumnFirstClick}]; order-after-snapshot-column=[{string.Join('|', namesAfterSnapshotColumn)}]; order-after-header-sort=[{string.Join('|', namesAfterHeaderSort)}]; values-after-header-sort=[{string.Join('|', valuesAfterHeaderSort)}]; header-sort-matches-saved-sort={headerSortMatchesSavedSort}; sort-after-header-matches={sortAfterHeaderMatches}";
         Console.WriteLine($"ishellview-state-restore: stage={stage}; {result}");
         return result;
+    }
+
+    private static string ReadSortColumnsSummary(nint view)
+    {
+        var countHr = At<GetSortColumnCount>(view, 26)(view, out var count);
+        if (countHr < 0 || count == 0) return $"count-hr=0x{countHr:X8};count={count}";
+        var columns = new NativeSortColumn[count];
+        var readHr = At<GetSortColumns>(view, 28)(view, columns, count);
+        return readHr < 0
+            ? $"read-hr=0x{readHr:X8}"
+            : string.Join('|', columns.Select(column => $"{column.Key.FormatId:B}:{column.Key.PropertyId}:{column.Direction}"));
     }
 
     private static void ClickHeaderItem(nint viewWindow, int itemIndex)
