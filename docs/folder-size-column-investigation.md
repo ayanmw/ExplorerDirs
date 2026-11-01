@@ -2601,9 +2601,9 @@ App Release build 现在在构建阶段编译产品 native adapter，并将 DLL 
 
 HostProbe 的 `--shell-provider-product-async-header-click` 使用真实产品 adapter、生产 ExplorerBrowserHost 和临时两个目录；等待 5/29 B 异步值完成后，向原生递归大小列标题发送两次点击，并同时观察 `IFolderView.ItemCount` 与导出快照行数，要求最终恢复 5→29 B 升序且采样期间不出现 0 行。探针现在还会等两条逐项 `SHCNE_UPDATEITEM` 都送达后才点击，避免把通知合并窗口与排序行为混在一起；这只改变诊断时序，不改变产品排序回调。
 
-首次运行到达点击阶段，但 Shell 行数和导出行数都出现 `0→2`，最终仍为 `folder-large→folder-small`，探针失败。加上通知到达门槛后，两次复验分别在初始枚举阶段超时，以及观察到 Shell 行数为 4（预期 2）、导出持续遇到 `E_INVALIDARG` 而超时；说明产品 HostProbe 的异步 view 目前存在比表头排序更早的枚举/读回不稳定，不能将失败简单归结为“点击排序不工作”。三次执行的前台守卫均未报告变化，失败路径清理了临时 volatile 注册、夹具目录和进程。
+首次运行到达点击阶段，但 Shell 行数和导出行数都出现 `0→2`，最终仍为 `folder-large→folder-small`，探针失败。加上通知到达门槛后，复验分别在初始枚举阶段超时、捕获阶段持续收到 `E_INVALIDARG`，以及标题点击阶段出现行数异常。新增同一轮 `IFolderView.ItemCount`、原生 `SysListView32` 计数及首列文本快照后，两个计数一致出现 `0/4`（预期 2）；计数为 4 的同一快照中只有 `folder-large`、`folder-small` 两个可读名称，其余两个行文本为空。不同运行的两次点击有时最终排序正确，有时导出行数仍为 0；都观察到空行状态，因此不能把失败简单归结为“点击排序不工作”，也不能将 4 行直接认定为 provider 枚举了四项。一次尝试从托管探针直接调用 provider `IEnumIDList` 时，HostProbe 自身发生 `0xC0000374` 堆损坏；该危险诊断已撤销，不能把它归因于产品 App 或 provider 行为。失败运行前台守卫未报告变化，最后一次异常退出留下的临时注册与夹具已逐项核实并清理。
 
-HostProbe Release build 通过，0 警告/错误，`git diff --check` 通过。结论：不能把该自动表头点击候选接入产品，它会遇到空列表观察窗口，也尚不能稳定得到正确最终顺序。下一步先增强异步通知后的 PIDL/枚举身份观测，查明行数为何从 2 暂增至 4 及相应的 `E_INVALIDARG`；在此之前保留实验标签的原生手动排序，不接自动重排，也不发布该实验功能。
+HostProbe Release build 通过，0 警告/错误，`git diff --check` 通过。结论：不能把该自动表头点击候选接入产品，它会遇到 Shell 视图空行状态，也不能稳定得到最终顺序。下一步应在更安全的进程边界中比较 provider 枚举数与 DefView 行数，并追踪逐项 `SHCNE_UPDATEITEM` 前后列表状态；在此之前保留实验标签的原生手动排序，不接自动重排，也不发布该实验功能。
 ## 2026-11-02：App 中的逐行递归大小原型入口
 
 增加一个明确 opt-in 的菜单入口：在“开发者”菜单选择“在新标签打开逐行递归大小实验视图”，将当前确认的文件系统目录编码为 profile-owned Shell parsing name，再以 `Name → Recursive Size → Type` 的详细视图状态创建独立标签。原始标签与其列、排序和浏览状态不变；关闭实验标签即可回到原目录。会话保存的是 provider parsing name，启动时由既有 profile owner 重建 volatile 注册；Q-Dir 导出使用现有 codec 将该身份转回物理目录路径。

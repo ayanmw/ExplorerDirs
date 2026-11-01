@@ -106,12 +106,21 @@ internal static class ShellProviderLocationProbe
             WaitUntil(() => Equals(navigatedField.GetValue(host), true) && (nint)viewWindowField.GetValue(host)! != 0,
                 TimeSpan.FromSeconds(15), "the product Shell view did not navigate to the temporary registered root");
             stage = "wait-for-enumeration";
-            WaitUntil(() =>
+            var initialListViewCounts = new HashSet<int>();
+            try
             {
-                var counts = hostType.GetMethod("ReadItemCounts", BindingFlags.Instance | BindingFlags.NonPublic)!
-                    .Invoke(host, [false, false]);
-                return counts is not null && (int)counts.GetType().GetProperty("Total")!.GetValue(counts)! == expectedFolderCount;
-            }, TimeSpan.FromSeconds(15), $"the product Shell view did not enumerate all {expectedFolderCount} test folders");
+                WaitUntil(() =>
+                {
+                    initialListViewCounts.Add(ReadNativeListViewItemCount((nint)viewWindowField.GetValue(host)!));
+                    var counts = hostType.GetMethod("ReadItemCounts", BindingFlags.Instance | BindingFlags.NonPublic)!
+                        .Invoke(host, [false, false]);
+                    return counts is not null && (int)counts.GetType().GetProperty("Total")!.GetValue(counts)! == expectedFolderCount;
+                }, TimeSpan.FromSeconds(15), $"the product Shell view did not enumerate all {expectedFolderCount} test folders");
+            }
+            catch (TimeoutException exception)
+            {
+                throw new TimeoutException($"{exception.Message}; native-listview-item-counts=[{string.Join('|', initialListViewCounts.Order())}]", exception);
+            }
 
             stage = "async-values";
             var readValues = typeof(ShellProviderLocationProbe).GetMethod("ReadRecursiveValues",
@@ -187,11 +196,13 @@ internal static class ShellProviderLocationProbe
             string[] names = [];
             var captureShellItemCounts = new HashSet<int>();
             var captureExportRowCounts = new HashSet<int>();
+            var captureListViewCounts = new HashSet<int>();
             var captureTransientReadErrors = 0;
             try
             {
                 WaitUntil(() =>
                 {
+                    captureListViewCounts.Add(ReadNativeListViewItemCount((nint)viewWindowField.GetValue(host)!));
                     var liveCounts = readItemCounts.Invoke(host, [false, false]);
                     if (liveCounts is not null)
                         captureShellItemCounts.Add((int)liveCounts.GetType().GetProperty("Total")!.GetValue(liveCounts)!);
@@ -213,7 +224,7 @@ internal static class ShellProviderLocationProbe
             }
             catch (TimeoutException exception)
             {
-                throw new TimeoutException($"{exception.Message}; item-counts=[{string.Join('|', captureShellItemCounts.Order())}]; export-counts=[{string.Join('|', captureExportRowCounts.Order())}]; transient-read-errors={captureTransientReadErrors}", exception);
+                throw new TimeoutException($"{exception.Message}; item-counts=[{string.Join('|', captureShellItemCounts.Order())}]; native-listview-item-counts=[{string.Join('|', captureListViewCounts.Order())}]; export-counts=[{string.Join('|', captureExportRowCounts.Order())}]; transient-read-errors={captureTransientReadErrors}", exception);
             }
             var nameColumn = Array.FindIndex(columns, name => name.Equals("Name", StringComparison.OrdinalIgnoreCase) || name == "名称");
             if (nameColumn < 0) throw new InvalidOperationException("The product Shell view export did not expose the Name column.");
@@ -272,6 +283,8 @@ internal static class ShellProviderLocationProbe
                 var observation = (
                     Names: secondClick.Names,
                     ShellItemCounts: firstClick.ShellItemCounts.Concat(secondClick.ShellItemCounts).Distinct().Order().ToArray(),
+                    NativeListViewCounts: firstClick.NativeListViewCounts.Concat(secondClick.NativeListViewCounts).Distinct().Order().ToArray(),
+                    NativeListViewRowSnapshots: firstClick.NativeListViewRowSnapshots.Concat(secondClick.NativeListViewRowSnapshots).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(),
                     ExportRowCounts: firstClick.ExportRowCounts.Concat(secondClick.ExportRowCounts).Distinct().Order().ToArray(),
                     TransientReadErrors: firstClick.TransientReadErrors + secondClick.TransientReadErrors);
                 ReportSortExperiment(sortStrategy, orderAfterAsyncFill, autoResorted, 0, observation, classId);
@@ -1095,19 +1108,26 @@ internal static class ShellProviderLocationProbe
         Dispatcher.PushFrame(frame);
     }
 
-    private static (string[] Names, int[] ShellItemCounts, int[] ExportRowCounts, int TransientReadErrors) ObserveProductSort(
+    private static (string[] Names, int[] ShellItemCounts, int[] NativeListViewCounts, string[] NativeListViewRowSnapshots, int[] ExportRowCounts, int TransientReadErrors) ObserveProductSort(
         Type hostType, HwndHost host, MethodInfo capture, MethodInfo readRows, MethodInfo readItemCounts,
         int nameColumn, TimeSpan duration, string[]? expectedNames = null)
     {
         var shellItemCounts = new HashSet<int>();
+        var nativeListViewCounts = new HashSet<int>();
+        var nativeListViewRowSnapshots = new HashSet<string>(StringComparer.Ordinal);
         var exportRowCounts = new HashSet<int>();
         var transientReadErrors = 0;
         string[] names = [];
+        var viewWindowField = hostType.GetField("_viewWindow", BindingFlags.Instance | BindingFlags.NonPublic)!;
         var clock = Stopwatch.StartNew();
         do
         {
             try
             {
+                var viewWindow = (nint)viewWindowField.GetValue(host)!;
+                var listSnapshot = ReadNativeListViewSnapshot(viewWindow);
+                nativeListViewCounts.Add(listSnapshot.Count);
+                nativeListViewRowSnapshots.Add($"{listSnapshot.Count}:{string.Join('|', listSnapshot.Names)}");
                 var liveCounts = readItemCounts.Invoke(host, [false, false]);
                 if (liveCounts is not null)
                     shellItemCounts.Add((int)liveCounts.GetType().GetProperty("Total")!.GetValue(liveCounts)!);
@@ -1124,7 +1144,8 @@ internal static class ShellProviderLocationProbe
             PumpDispatcher(TimeSpan.FromMilliseconds(20));
         } while (clock.Elapsed < duration && (expectedNames is null ||
             !names.SequenceEqual(expectedNames, StringComparer.OrdinalIgnoreCase)));
-        return (names, shellItemCounts.Order().ToArray(), exportRowCounts.Order().ToArray(), transientReadErrors);
+        return (names, shellItemCounts.Order().ToArray(), nativeListViewCounts.Order().ToArray(),
+            nativeListViewRowSnapshots.Order(StringComparer.Ordinal).ToArray(), exportRowCounts.Order().ToArray(), transientReadErrors);
     }
 
     private static (int[] ShellItemCounts, int[] ExportRowCounts, int FinalShellItems, int FinalExportRows) ObserveProductRowCounts(
@@ -1163,11 +1184,11 @@ internal static class ShellProviderLocationProbe
         exception.InnerException?.HResult == unchecked((int)0x80070057);
 
     private static void ReportSortExperiment(string strategy, string[] initialOrder, bool shellAutoResorted,
-        int actionResult, (string[] Names, int[] ShellItemCounts, int[] ExportRowCounts, int TransientReadErrors) observation,
+        int actionResult, (string[] Names, int[] ShellItemCounts, int[] NativeListViewCounts, string[] NativeListViewRowSnapshots, int[] ExportRowCounts, int TransientReadErrors) observation,
         Guid classId)
     {
         var expectedAscending = new[] { "folder-small", "folder-large" };
-        Console.WriteLine($"shell-provider-product-async-sort: strategy={strategy}; product-dll=True; volatile-registration=True; hidden-shell-view=True; recursive-values=[29|5]; initial-order=[{string.Join('|', initialOrder)}]; shell-auto-resorted={shellAutoResorted}; action-hr=0x{actionResult:X8}; final-order=[{string.Join('|', observation.Names)}]; candidate-ordered={observation.Names.SequenceEqual(expectedAscending, StringComparer.OrdinalIgnoreCase)}; shell-item-counts=[{string.Join('|', observation.ShellItemCounts)}]; export-row-counts=[{string.Join('|', observation.ExportRowCounts)}]; transient-empty-shell-view={observation.ShellItemCounts.Contains(0)}; transient-empty-export={observation.ExportRowCounts.Contains(0)}; transient-read-errors={observation.TransientReadErrors}; class={classId:D}; foreground-unchanged=True");
+        Console.WriteLine($"shell-provider-product-async-sort: strategy={strategy}; product-dll=True; volatile-registration=True; hidden-shell-view=True; recursive-values=[29|5]; initial-order=[{string.Join('|', initialOrder)}]; shell-auto-resorted={shellAutoResorted}; action-hr=0x{actionResult:X8}; final-order=[{string.Join('|', observation.Names)}]; candidate-ordered={observation.Names.SequenceEqual(expectedAscending, StringComparer.OrdinalIgnoreCase)}; shell-item-counts=[{string.Join('|', observation.ShellItemCounts)}]; native-listview-item-counts=[{string.Join('|', observation.NativeListViewCounts)}]; native-listview-row-snapshots=[{string.Join(" || ", observation.NativeListViewRowSnapshots)}]; export-row-counts=[{string.Join('|', observation.ExportRowCounts)}]; transient-empty-shell-view={observation.ShellItemCounts.Contains(0)}; transient-empty-listview={observation.NativeListViewCounts.Contains(0)}; transient-empty-export={observation.ExportRowCounts.Contains(0)}; transient-read-errors={observation.TransientReadErrors}; class={classId:D}; foreground-unchanged=True");
     }
 
     private static int InvokeProductSetSorting(Type hostType, HwndHost host, Array sortColumns)
@@ -1605,22 +1626,59 @@ internal static class ShellProviderLocationProbe
 
     private static nint FindSortHeader(nint viewWindow)
     {
-        nint header = 0;
+        var header = SendMessageW(FindNativeListView(viewWindow), 0x101F, 0, 0); // LVM_GETHEADER.
+        if (header == 0) throw new InvalidOperationException("The product ExplorerBrowser list view did not expose its native header.");
+        var count = SendMessageW(header, 0x1200, 0, 0); // HDM_GETITEMCOUNT.
+        if (count < 2) throw new InvalidOperationException($"The product Shell header exposed only {count} column(s); the recursive-size header is missing.");
+        return header;
+    }
+
+    private static int ReadNativeListViewItemCount(nint viewWindow) =>
+        checked((int)SendMessageW(FindNativeListView(viewWindow), 0x1004, 0, 0)); // LVM_GETITEMCOUNT.
+
+    private static nint FindNativeListView(nint viewWindow)
+    {
+        nint listView = 0;
         EnumChildWindows(viewWindow, (window, _) =>
         {
             var className = new StringBuilder(128);
             _ = GetClassName(window, className, className.Capacity);
             if (string.Equals(className.ToString(), "SysListView32", StringComparison.Ordinal))
             {
-                header = SendMessageW(window, 0x101F, 0, 0); // LVM_GETHEADER.
-                return header == 0;
+                listView = window;
+                return false;
             }
             return true;
         }, 0);
-        if (header == 0) throw new InvalidOperationException("The product ExplorerBrowser view did not expose a SysListView32 header.");
-        var count = SendMessageW(header, 0x1200, 0, 0); // HDM_GETITEMCOUNT.
-        if (count < 2) throw new InvalidOperationException($"The product Shell header exposed only {count} column(s); the recursive-size header is missing.");
-        return header;
+        if (listView == 0) throw new InvalidOperationException("The product ExplorerBrowser view did not expose a SysListView32.");
+        return listView;
+    }
+
+    private static (int Count, string[] Names) ReadNativeListViewSnapshot(nint viewWindow)
+    {
+        var listView = FindNativeListView(viewWindow);
+        // Pair the native count and text reads so a transient reorder cannot make separate samples appear contradictory.
+        var count = checked((int)SendMessageW(listView, 0x1004, 0, 0)); // LVM_GETITEMCOUNT.
+        var itemPointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeListViewItem>());
+        var textPointer = Marshal.AllocHGlobal(1024);
+        try
+        {
+            var names = new string[count];
+            for (var index = 0; index < count; index++)
+            {
+                Marshal.WriteInt32(textPointer, 0);
+                var item = new NativeListViewItem { Item = index, Text = textPointer, TextCapacity = 512 };
+                Marshal.StructureToPtr(item, itemPointer, false);
+                _ = SendMessageW(listView, 0x1073, index, itemPointer); // LVM_GETITEMTEXTW.
+                names[index] = Marshal.PtrToStringUni(textPointer) ?? string.Empty;
+            }
+            return (count, names);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(textPointer);
+            Marshal.FreeHGlobal(itemPointer);
+        }
     }
 
     private static void ClickHeaderColumn(nint header, int columnIndex)
@@ -1733,6 +1791,23 @@ internal static class ShellProviderLocationProbe
     [StructLayout(LayoutKind.Sequential)] private struct NativeRect
     {
         public int Left, Top, Right, Bottom;
+    }
+    [StructLayout(LayoutKind.Sequential)] private struct NativeListViewItem
+    {
+        public uint Mask;
+        public int Item;
+        public int SubItem;
+        public uint State;
+        public uint StateMask;
+        public nint Text;
+        public int TextCapacity;
+        public int Image;
+        public nint Parameter;
+        public int Indent;
+        public int GroupId;
+        public uint Columns;
+        public nint ColumnFormats;
+        public nint Group;
     }
     [StructLayout(LayoutKind.Sequential)] private struct NativeHeaderItem
     {
