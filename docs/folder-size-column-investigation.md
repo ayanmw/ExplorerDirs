@@ -1936,3 +1936,9 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 此次还补了按当前 ListView 稳定行 ID 回填列值并逐行核对显示文本的断言。原因是大小排序会改变控件行序，旧快照的枚举索引不能再直接作为 ListView 行索引。
 
 限制：这些是隔离夹具上的显式 Shell 通知，不涵盖文件系统自然通知的完整时序、重叠通知、丢失/溢出、目录重命名后子树缓存重键、网络路径及产品 watcher/batch。产品仍使用 ExplorerBrowser；本轮未改产品或 release。
+
+### 2026-11-01：双视图中的递归目录改名与缓存键退役
+
+在已经覆盖文件 create/delete/rename 的双 `IShellView` 原型中，再把可见行 `size-10` 实际改名为 `size-10-renamed`，并显式发送双路径 `SHCNE_RENAMEFOLDER`。两份真实 Shell view 均收敛到新名称；基于真实 filesystem identity 对账后，目录行的稳定 ID=3、选中和焦点保持。失效逻辑只退役旧路径缓存；两视图随后对新路径共用一次生产递归扫描，读回 20 B。Peer 列表在已按大小排序的情况下依稳定 row ID 更新名称，数值顺序及逐行列文本检查通过。包含此前文件 update/create/delete/rename 的完整探针连续三轮 exit 0；NativeProbe Release 构建 0 警告/错误，Private Desktop 前台、输入和夹具清理守卫通过。
+
+该测试通过 `Directory.Move` 改变真实夹具，再由探针显式发出 `SHCNE_RENAMEFOLDER`；它不证明所有文件系统 watcher 与 Shell 通知自然时序，也未覆盖重叠子树缓存、重命名竞争、通知丢失/溢出或产品生命周期。仍然只是 NativeProbe；产品继续使用 ExplorerBrowser，未生成 release。

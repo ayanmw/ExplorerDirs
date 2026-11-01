@@ -1569,9 +1569,13 @@ internal static class ShellViewHostFilterProbe
                     .Select(update => (update.EventId, Path: Path.GetFullPath(update.Path!))).ToArray();
                 var updatedDirectories = updates.Where(update => update.EventId == ShellChangeUpdatedDirectory)
                     .Select(update => update.Path).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-                var changedPaths = updates.Where(update => update.EventId is ShellChangeCreated or ShellChangeDeleted or
-                        ShellChangeRenamedItem or ShellChangeRenamedFolder || update.EventId == ShellChangeUpdatedDirectory ||
-                        updatedDirectories.Length == 0 || updatedDirectories.Any(directory => IsSameOrDescendantPath(update.Path, directory)))
+                var structuralPaths = updates.Where(update => update.EventId is ShellChangeCreated or ShellChangeDeleted or
+                        ShellChangeRenamedItem or ShellChangeRenamedFolder)
+                    .Select(update => update.Path).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+                var changedPaths = structuralPaths.Length > 0
+                    ? structuralPaths
+                    : updates.Where(update => update.EventId == ShellChangeUpdatedDirectory || updatedDirectories.Length == 0 ||
+                            updatedDirectories.Any(directory => IsSameOrDescendantPath(update.Path, directory)))
                     .Select(update => update.Path).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
                 var invalidated = cache.Keys.Where(cachedRoot => changedPaths.Any(changedPath =>
                         IsSameOrDescendantPath(changedPath, cachedRoot)))
@@ -1698,9 +1702,62 @@ internal static class ShellViewHostFilterProbe
             SHChangeNotify(ShellChangeUpdatedDirectory, ShellChangePathUnicode, changedDirectory, null);
             RescanAfterNotification(renameEventIndex, [ShellChangeRenamedItem, ShellChangeUpdatedDirectory], 20, 8, "rename");
 
+            var renamedDirectory = Path.GetFullPath(Path.Combine(fixture, "size-10-renamed"));
+            var folderRenameEventIndex = watcher.Events.Count;
+            Directory.Move(changedDirectory, renamedDirectory);
+            SHChangeNotify(ShellChangeRenamedFolder, ShellChangePathUnicode, changedDirectory, renamedDirectory);
+            WaitForPeerShellRename(firstFolderView, changedDirectory, renamedDirectory, expectedCount);
+            WaitForPeerShellRename(secondFolderView, changedDirectory, renamedDirectory, expectedCount);
+            var folderRenamedFirst = CapturePeerShellRows(firstFolderView, folderPidl, shellFolder, firstProjection.Rows, ref nextFirstId);
+            var folderRenamedSecond = CapturePeerShellRows(secondFolderView, folderPidl, secondFolder, secondProjection.Rows, ref nextSecondId);
+            var firstRenamedRow = folderRenamedFirst.Rows.Single(row => row.Name == "size-10-renamed");
+            var secondRenamedRow = folderRenamedSecond.Rows.Single(row => row.Name == "size-10-renamed");
+            if (firstRenamedRow.Id != firstSelected.Id || secondRenamedRow.Id != secondSelected.Id ||
+                !folderRenamedFirst.Rows.Select(row => row.Id).ToHashSet().SetEquals(firstIds) ||
+                !folderRenamedSecond.Rows.Select(row => row.Id).ToHashSet().SetEquals(secondIds))
+                throw new InvalidOperationException("Renaming a recursive Shell directory changed its stable row identity in one of the peer views.");
+
+            // The directory name changed while the peer Lists remain size-sorted, so update the Name cells by stable row ID.
+            var firstListIndexById = ReadPeerListRowIds(firstList).Select((id, index) => (id, index)).ToDictionary(item => item.id, item => item.index);
+            var secondListIndexById = ReadPeerListRowIds(secondList).Select((id, index) => (id, index)).ToDictionary(item => item.id, item => item.index);
+            foreach (var row in folderRenamedFirst.Rows)
+                SetPeerListCell(firstList, firstListIndexById[row.Id], 0, row.Name);
+            foreach (var row in folderRenamedSecond.Rows)
+                SetPeerListCell(secondList, secondListIndexById[row.Id], 0, row.Name);
+            firstProjection = folderRenamedFirst;
+            secondProjection = folderRenamedSecond;
+
+            if (!watcher.WaitForAnySince(folderRenameEventIndex, [ShellChangeRenamedFolder], TimeSpan.FromSeconds(5)))
+                throw new TimeoutException("The recursive-folder rename notification was not observed.");
+            var folderInvalidatedRoots = InvalidateFromShellChanges(folderRenameEventIndex);
+            if (folderInvalidatedRoots.Length != 1 || !string.Equals(folderInvalidatedRoots[0], changedDirectory, StringComparison.OrdinalIgnoreCase) ||
+                cache.ContainsKey(changedDirectory) || cache.ContainsKey(renamedDirectory))
+                throw new InvalidOperationException($"Folder rename did not retire exactly the old recursive cache key: invalidated=[{string.Join('|', folderInvalidatedRoots)}].");
+            var renamedDirectoryFirst = Request(renamedDirectory);
+            var renamedDirectorySecond = Request(renamedDirectory);
+            if (!Task.WaitAll([renamedDirectoryFirst, renamedDirectorySecond], TimeSpan.FromSeconds(10)))
+                throw new TimeoutException("The renamed recursive directory did not complete its fresh scan within ten seconds.");
+            if (scanStarts != 9 || renamedDirectoryFirst.Result.Bytes != 20 ||
+                !ReferenceEquals(renamedDirectoryFirst.Result, renamedDirectorySecond.Result))
+                throw new InvalidOperationException($"The renamed recursive folder did not share one fresh snapshot: scans={scanStarts}; bytes={renamedDirectoryFirst.Result.Bytes}.");
+            firstResults.Remove(changedDirectory);
+            secondResults.Remove(changedDirectory);
+            firstResults[renamedDirectory] = renamedDirectoryFirst.Result;
+            secondResults[renamedDirectory] = renamedDirectorySecond.Result;
+            firstBytesById = ApplyRecursiveValues(firstList, firstProjection.Rows, firstResults);
+            secondBytesById = ApplyRecursiveValues(secondList, secondProjection.Rows, secondResults);
+            SortPeerListByRecursiveSize(firstList, firstBytesById);
+            SortPeerListByRecursiveSize(secondList, secondBytesById);
+            VerifySortedSelection(firstList, firstProjection.Rows, firstBytesById, firstIds, firstSelected.Id);
+            VerifySortedSelection(secondList, secondProjection.Rows, secondBytesById, secondIds, secondSelected.Id);
+            if (!ReadPeerListNames(firstList).Contains("size-10-renamed", StringComparer.OrdinalIgnoreCase) ||
+                !ReadPeerListNames(secondList).Contains("size-10-renamed", StringComparer.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The peer projections did not publish the renamed directory caption.");
+            Console.WriteLine($"ishellview-peer-recursive-size-change: kind=folder-rename; invalidated-roots={folderInvalidatedRoots.Length}; old-cache-retired=True; new-path-shared-scan=True; bytes={renamedDirectoryFirst.Result.Bytes}; row-id={firstSelected.Id}; selection-focus-preserved=True");
+
             if (GetForegroundWindow() != foreground || IsWindowVisible(parent))
                 throw new InvalidOperationException("The multi-view Shell probe changed foreground ownership or exposed its hidden parent.");
-            Console.WriteLine($"ishellview-peer-recursive-size-multiview: real-shell-views=2; shared-root=True; unique-directories={firstPaths.Length}; shared-scan-starts-initial=4; shell-notification-invalidated-roots={invalidatedRoots.Length}; shared-scan-starts-after-all-changes={scanStarts}; update/create/delete/rename=True; peer-row-ids-stable=True; numeric-sort=True; selection-focus-preserved=True; production-scanner=True; product-integration=False; foreground-unchanged=True; parent-visible=False");
+            Console.WriteLine($"ishellview-peer-recursive-size-multiview: real-shell-views=2; shared-root=True; unique-directories={firstPaths.Length}; shared-scan-starts-initial=4; shell-notification-invalidated-roots={invalidatedRoots.Length}; shared-scan-starts-after-all-changes={scanStarts}; update/create/delete/rename/folder-rename=True; peer-row-ids-stable=True; numeric-sort=True; selection-focus-preserved=True; production-scanner=True; product-integration=False; foreground-unchanged=True; parent-visible=False");
         }
         finally
         {
