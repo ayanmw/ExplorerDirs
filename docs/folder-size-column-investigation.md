@@ -1928,3 +1928,11 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 在双真实 `IShellView` 共享缓存切片上继续接入 `SHChangeNotifyRegister` 事件到缓存失效的探针逻辑。对 `size-10\payload.bin` 写入 20 B 并发送 `UPDATEITEM`/`UPDATEDIR` 后，本机这次事件突发还包含同级其它目录的 `UPDATEITEM`。若把事件路径逐个直接映射为失效，四个已缓存目录都会被重扫；将 `UPDATEDIR` 当作范围边界、仅合并其目录内的项目更新后，三次 Private Desktop 运行均只失效 `size-10`，两视图共享一次新扫描，扫描总数从 4 增至 5，读回 20 B，PIDL 行 ID、排序、选区和焦点保持。
 
 这只是探针针对该事件形态验证的失效策略；其它通知类型（新增/删除/改名）、重叠目录更新、通知丢失/溢出、网络路径和产品 watcher/batch 接线尚未覆盖。产品仍使用 ExplorerBrowser，未改产品或 release。
+
+### 2026-11-01：递归列缓存对新增、删除与改名通知的失效
+
+扩展双真实 `IShellView` 共用缓存探针，对已缓存的 `size-10` 目录依次在隔离夹具内创建 3 B 文件、删除该文件、再将原 20 B 载荷文件改名。每步都发送相应 Shell `CREATE`、`DELETE` 或双路径 `RENAMEITEM`，并发送父目录 `UPDATEDIR`；探针从事件 PIDL 解析路径，只移除包含这些变更路径的递归根缓存。三轮重复运行均通过：每一步只失效 `size-10`、两视图共享一次重扫，字节结果依次为 23、20、20；行 ID、数值顺序、选中与焦点保持。
+
+此次还补了按当前 ListView 稳定行 ID 回填列值并逐行核对显示文本的断言。原因是大小排序会改变控件行序，旧快照的枚举索引不能再直接作为 ListView 行索引。
+
+限制：这些是隔离夹具上的显式 Shell 通知，不涵盖文件系统自然通知的完整时序、重叠通知、丢失/溢出、目录重命名后子树缓存重键、网络路径及产品 watcher/batch。产品仍使用 ExplorerBrowser；本轮未改产品或 release。

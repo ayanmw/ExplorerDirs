@@ -49,6 +49,7 @@ internal static class ShellViewHostFilterProbe
     private const uint ShellChangeCreated = 0x00000002;
     private const uint ShellChangeDeleted = 0x00000004;
     private const uint ShellChangeRenamedItem = 0x00000001;
+    private const uint ShellChangeRenamedFolder = 0x00020000;
     private const uint ShellChangeUpdatedItem = 0x00002000;
     private const uint ShellChangeUpdatedDirectory = 0x00001000;
     private const uint ShellChangePathUnicode = 0x00000005;
@@ -1561,13 +1562,15 @@ internal static class ShellViewHostFilterProbe
             string[] InvalidateFromShellChanges(int eventIndex)
             {
                 var updates = watcher.ChangeEvents.Skip(eventIndex)
-                    .Where(change => change.EventId is ShellChangeUpdatedItem or ShellChangeUpdatedDirectory)
+                    .Where(change => change.EventId is ShellChangeCreated or ShellChangeDeleted or ShellChangeRenamedItem or
+                        ShellChangeRenamedFolder or ShellChangeUpdatedItem or ShellChangeUpdatedDirectory)
                     .SelectMany(change => new[] { (change.EventId, Path: change.FirstPath), (change.EventId, Path: change.SecondPath) })
                     .Where(update => !string.IsNullOrWhiteSpace(update.Path) && Path.IsPathRooted(update.Path))
                     .Select(update => (update.EventId, Path: Path.GetFullPath(update.Path!))).ToArray();
                 var updatedDirectories = updates.Where(update => update.EventId == ShellChangeUpdatedDirectory)
                     .Select(update => update.Path).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-                var changedPaths = updates.Where(update => update.EventId == ShellChangeUpdatedDirectory ||
+                var changedPaths = updates.Where(update => update.EventId is ShellChangeCreated or ShellChangeDeleted or
+                        ShellChangeRenamedItem or ShellChangeRenamedFolder || update.EventId == ShellChangeUpdatedDirectory ||
                         updatedDirectories.Length == 0 || updatedDirectories.Any(directory => IsSameOrDescendantPath(update.Path, directory)))
                     .Select(update => update.Path).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
                 var invalidated = cache.Keys.Where(cachedRoot => changedPaths.Any(changedPath =>
@@ -1649,9 +1652,55 @@ internal static class ShellViewHostFilterProbe
             SortPeerListByRecursiveSize(secondList, secondBytesById);
             VerifySortedSelection(firstList, firstProjection.Rows, firstBytesById, firstIds, firstSelected.Id);
             VerifySortedSelection(secondList, secondProjection.Rows, secondBytesById, secondIds, secondSelected.Id);
+
+            void RescanAfterNotification(int eventIndex, uint[] expectedEvents, ulong expectedBytes, int expectedScanCount, string description)
+            {
+                if (!watcher.WaitForAnySince(eventIndex, expectedEvents, TimeSpan.FromSeconds(5)))
+                    throw new TimeoutException($"The Shell change observer did not receive the {description} notification.");
+                var invalidated = InvalidateFromShellChanges(eventIndex);
+                if (invalidated.Length != 1 || !string.Equals(invalidated[0], changedDirectory, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"The {description} notification did not invalidate only its recursive parent: [{string.Join('|', invalidated)}].");
+                var first = Request(changedDirectory);
+                var second = Request(changedDirectory);
+                if (!Task.WaitAll([first, second], TimeSpan.FromSeconds(10)))
+                    throw new TimeoutException($"The {description} recursive scan did not complete within ten seconds.");
+                if (scanStarts != expectedScanCount || first.Result.Bytes != expectedBytes || !ReferenceEquals(first.Result, second.Result))
+                    throw new InvalidOperationException($"The {description} update did not share the expected fresh scan: scans={scanStarts}; bytes={first.Result.Bytes}; shared={ReferenceEquals(first.Result, second.Result)}.");
+
+                firstResults[changedDirectory] = first.Result;
+                secondResults[changedDirectory] = second.Result;
+                firstBytesById = ApplyRecursiveValues(firstList, firstProjection.Rows, firstResults);
+                secondBytesById = ApplyRecursiveValues(secondList, secondProjection.Rows, secondResults);
+                SortPeerListByRecursiveSize(firstList, firstBytesById);
+                SortPeerListByRecursiveSize(secondList, secondBytesById);
+                VerifySortedSelection(firstList, firstProjection.Rows, firstBytesById, firstIds, firstSelected.Id);
+                VerifySortedSelection(secondList, secondProjection.Rows, secondBytesById, secondIds, secondSelected.Id);
+                Console.WriteLine($"ishellview-peer-recursive-size-change: kind={description}; invalidated-roots={invalidated.Length}; shared-scans={scanStarts}; bytes={expectedBytes}; row-ids-stable=True; selection-focus-preserved=True");
+            }
+
+            var addedPayload = Path.Combine(changedDirectory, "added.bin");
+            var createEventIndex = watcher.Events.Count;
+            File.WriteAllBytes(addedPayload, new byte[3]);
+            SHChangeNotify(ShellChangeCreated, ShellChangePathUnicode, addedPayload, null);
+            SHChangeNotify(ShellChangeUpdatedDirectory, ShellChangePathUnicode, changedDirectory, null);
+            RescanAfterNotification(createEventIndex, [ShellChangeCreated, ShellChangeUpdatedDirectory], 23, 6, "create");
+
+            var deleteEventIndex = watcher.Events.Count;
+            File.Delete(addedPayload);
+            SHChangeNotify(ShellChangeDeleted, ShellChangePathUnicode, addedPayload, null);
+            SHChangeNotify(ShellChangeUpdatedDirectory, ShellChangePathUnicode, changedDirectory, null);
+            RescanAfterNotification(deleteEventIndex, [ShellChangeDeleted, ShellChangeUpdatedDirectory], 20, 7, "delete");
+
+            var renamedPayload = Path.Combine(changedDirectory, "renamed.bin");
+            var renameEventIndex = watcher.Events.Count;
+            File.Move(changedPayload, renamedPayload);
+            SHChangeNotify(ShellChangeRenamedItem, ShellChangePathUnicode, changedPayload, renamedPayload);
+            SHChangeNotify(ShellChangeUpdatedDirectory, ShellChangePathUnicode, changedDirectory, null);
+            RescanAfterNotification(renameEventIndex, [ShellChangeRenamedItem, ShellChangeUpdatedDirectory], 20, 8, "rename");
+
             if (GetForegroundWindow() != foreground || IsWindowVisible(parent))
                 throw new InvalidOperationException("The multi-view Shell probe changed foreground ownership or exposed its hidden parent.");
-            Console.WriteLine($"ishellview-peer-recursive-size-multiview: real-shell-views=2; shared-root=True; unique-directories={firstPaths.Length}; shared-scan-starts-initial=4; shell-notification-invalidated-roots={invalidatedRoots.Length}; shared-scan-starts-after-invalidation={scanStarts}; updated-bytes=20; peer-row-ids-stable=True; numeric-sort=True; selection-focus-preserved=True; production-scanner=True; product-integration=False; foreground-unchanged=True; parent-visible=False");
+            Console.WriteLine($"ishellview-peer-recursive-size-multiview: real-shell-views=2; shared-root=True; unique-directories={firstPaths.Length}; shared-scan-starts-initial=4; shell-notification-invalidated-roots={invalidatedRoots.Length}; shared-scan-starts-after-all-changes={scanStarts}; update/create/delete/rename=True; peer-row-ids-stable=True; numeric-sort=True; selection-focus-preserved=True; production-scanner=True; product-integration=False; foreground-unchanged=True; parent-visible=False");
         }
         finally
         {
@@ -1670,12 +1719,16 @@ internal static class ShellViewHostFilterProbe
         IReadOnlyDictionary<string, RecursiveDirectoryScanResult> results)
     {
         var bytesById = new Dictionary<int, ulong>();
-        for (var index = 0; index < rows.Count; index++)
+        var indexById = ReadPeerListRowIds(listView).Select((id, index) => (id, index))
+            .ToDictionary(item => item.id, item => item.index);
+        for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)
         {
-            var row = rows[index];
-            if (row.FileSystemPath is null || !results.TryGetValue(Path.GetFullPath(row.FileSystemPath), out var result)) continue;
+            var row = rows[rowIndex];
+            if (row.FileSystemPath is null || !results.TryGetValue(Path.GetFullPath(row.FileSystemPath), out var result) ||
+                !indexById.TryGetValue(row.Id, out var listIndex)) continue;
             bytesById[row.Id] = result.Bytes;
-            SetPeerListCell(listView, index, row.DetailTitles.Length, result.Bytes.ToString(System.Globalization.CultureInfo.InvariantCulture) + " B");
+            // Sorting reorders ListView rows; publish by stable Shell row ID, never by the old projection index.
+            SetPeerListCell(listView, listIndex, row.DetailTitles.Length, result.Bytes.ToString(System.Globalization.CultureInfo.InvariantCulture) + " B");
         }
         return bytesById;
     }
@@ -1687,10 +1740,19 @@ internal static class ShellViewHostFilterProbe
             .ThenBy(row => bytesById.TryGetValue(row.Id, out var bytes) ? bytes : ulong.MaxValue)
             .ThenBy(row => row.Id).Select(row => row.Id).ToArray();
         var actual = ReadPeerListRowIds(listView);
+        var rowById = rows.ToDictionary(row => row.Id);
         var selectedIndex = Array.IndexOf(actual, selectedId);
         if (!actual.SequenceEqual(expected) || selectedIndex < 0 || GetPeerListItemState(listView, selectedIndex, 0x0003) != 0x0003 ||
             !oldIds.ToHashSet().SetEquals(actual))
             throw new InvalidOperationException("Peer recursive-size sort did not retain the original row IDs and selected/focused Shell row.");
+        for (var index = 0; index < actual.Length; index++)
+        {
+            if (!bytesById.TryGetValue(actual[index], out var bytes)) continue;
+            var row = rowById[actual[index]];
+            var expectedText = bytes.ToString(System.Globalization.CultureInfo.InvariantCulture) + " B";
+            if (!string.Equals(GetPeerListCell(listView, index, row.DetailTitles.Length), expectedText, StringComparison.Ordinal))
+                throw new InvalidOperationException($"Recursive-size text no longer matches sorted Shell row {row.Name}: expected='{expectedText}'.");
+        }
     }
 
     private static bool IsSameOrDescendantPath(string path, string root)
