@@ -1624,7 +1624,67 @@ internal static class ShellViewHostFilterProbe
             if (refreshedScan.WorkerThread == ownerThread || !refreshedScan.Rows.TryGetValue(changedDirectory, out var changedSummary) ||
                 changedSummary.Summary.Bytes != 20)
                 throw new InvalidOperationException("The invalidated recursive-size row did not rescan to the updated value.");
-            recursiveSizeCache[changedDirectory] = changedSummary.Summary.Bytes;
+
+            long scanGeneration = 0;
+            var scanStartedGeneration = Interlocked.Read(ref scanGeneration);
+            using var scanOpened = new ManualResetEventSlim();
+            using var continueScan = new ManualResetEventSlim();
+            var supersededScan = Task.Run(() =>
+            {
+                var workerThread = Environment.CurrentManagedThreadId;
+                var rows = HandleBoundRecursiveDirectoryScanner.Scan([changedDirectory], refreshCancellation.Token,
+                    (_, _) =>
+                    {
+                        scanOpened.Set();
+                        if (!continueScan.Wait(TimeSpan.FromSeconds(5)))
+                            throw new TimeoutException("The in-flight recursive scan was not released by the notification race probe.");
+                    });
+                return (Rows: rows, WorkerThread: workerThread);
+            }, refreshCancellation.Token);
+            var scanOpenDeadline = Environment.TickCount64 + 5000;
+            while (!scanOpened.IsSet && Environment.TickCount64 < scanOpenDeadline)
+            {
+                Application.DoEvents();
+                Thread.Sleep(10);
+            }
+            if (!scanOpened.IsSet)
+            {
+                continueScan.Set();
+                throw new TimeoutException("The worker did not open the recursive-size directory before the notification race.");
+            }
+            if (!ReadPeerListRowIds(listView).SequenceEqual(sortedIds) ||
+                GetPeerListItemState(listView, selectedAfterSort, 0x0003) != 0x0003)
+                throw new InvalidOperationException("The peer selection changed before the in-flight notification race.");
+
+            var raceEventIndex = changeWatch.ChangeEvents.Count;
+            File.WriteAllBytes(changedPayload, new byte[30]);
+            SHChangeNotify(ShellChangeUpdatedItem, ShellChangePathUnicode, changedPayload, null);
+            SHChangeNotify(ShellChangeUpdatedDirectory, ShellChangePathUnicode, changedDirectory, null);
+            if (!changeWatch.WaitForAnySince(raceEventIndex, [ShellChangeUpdatedItem, ShellChangeUpdatedDirectory], TimeSpan.FromSeconds(5)))
+            {
+                continueScan.Set();
+                throw new TimeoutException("The Shell change window did not receive the update that supersedes the in-flight recursive scan.");
+            }
+            var currentScanGeneration = Interlocked.Increment(ref scanGeneration);
+            continueScan.Set();
+            var supersededResult = supersededScan.GetAwaiter().GetResult();
+            var supersededValueDiscarded = currentScanGeneration != scanStartedGeneration &&
+                supersededResult.WorkerThread != ownerThread;
+            if (!supersededValueDiscarded || !supersededResult.Rows.TryGetValue(changedDirectory, out var supersededSummary) ||
+                supersededSummary.Summary.Bytes != 30)
+                throw new InvalidOperationException("The in-flight result was not retired after a newer Shell update arrived.");
+
+            using var finalScanCancellation = new CancellationTokenSource();
+            var finalScan = Task.Run(() => HandleBoundRecursiveDirectoryScanner.Scan([changedDirectory], finalScanCancellation.Token));
+            while (!finalScan.IsCompleted)
+            {
+                Application.DoEvents();
+                Thread.Sleep(10);
+            }
+            var finalScanResult = finalScan.GetAwaiter().GetResult();
+            if (!finalScanResult.TryGetValue(changedDirectory, out var finalSummary) || finalSummary.Summary.Bytes != 30)
+                throw new InvalidOperationException("The follow-up recursive-size scan did not read the latest value after an in-flight update.");
+            recursiveSizeCache[changedDirectory] = finalSummary.Summary.Bytes;
 
             PopulatePeerList(listView, projection.Rows);
             InsertPeerColumn(listView, projection.Rows[0].DetailTitles.Length, "Recursive size (on demand)");
@@ -1648,11 +1708,11 @@ internal static class ShellViewHostFilterProbe
                 .ThenBy(row => updatedBytesById.TryGetValue(row.Id, out var bytes) ? bytes : ulong.MaxValue)
                 .ThenBy(row => row.Id).ToArray();
             var refreshedSelectedIndex = Array.IndexOf(refreshedIds, selectedRow.Id);
-            if (updatedBytesById[selectedRow.Id] != 20 || !refreshedIds.SequenceEqual(expectedRefreshedOrder.Select(row => row.Id)) ||
+            if (updatedBytesById[selectedRow.Id] != 30 || !refreshedIds.SequenceEqual(expectedRefreshedOrder.Select(row => row.Id)) ||
                 refreshedSelectedIndex < 0 || GetPeerListItemState(listView, refreshedSelectedIndex, 0x0003) != 0x0003 ||
                 !refreshedNames.SequenceEqual(expectedRefreshedOrder.Select(row => row.Name), StringComparer.OrdinalIgnoreCase))
                 throw new InvalidOperationException($"The updated recursive-size value did not flow through peer sort/reselection: names=[{string.Join(',', refreshedNames)}], value={updatedBytesById.GetValueOrDefault(selectedRow.Id)}.");
-            Console.WriteLine($"ishellview-peer-recursive-size-notification: shell-update-events={updateEvents.Length}; changed-directories-coalesced={dirtyDirectories.Count}; peer-rows-retained-during-worker-rescan=True; peer-rows-reenumerated=True; row-ids-preserved=True; stale-cache-invalidated={cacheEntryInvalidated}; rescanned-bytes={updatedBytesById[selectedRow.Id]}; rescan-worker={refreshedScan.WorkerThread}; numeric-order=[{string.Join(',', refreshedNames)}]; selected-focused-id={selectedRow.Id}; selection-focus-preserved=True; foreground-unchanged={GetForegroundWindow() == foreground}");
+            Console.WriteLine($"ishellview-peer-recursive-size-notification: shell-update-events={updateEvents.Length}; changed-directories-coalesced={dirtyDirectories.Count}; peer-rows-retained-during-worker-rescan=True; superseded-inflight-result-discarded={supersededValueDiscarded}; follow-up-bytes={updatedBytesById[selectedRow.Id]}; peer-rows-reenumerated=True; row-ids-preserved=True; stale-cache-invalidated={cacheEntryInvalidated}; rescan-worker={refreshedScan.WorkerThread}; numeric-order=[{string.Join(',', refreshedNames)}]; selected-focused-id={selectedRow.Id}; selection-focus-preserved=True; foreground-unchanged={GetForegroundWindow() == foreground}");
         }
         finally
         {

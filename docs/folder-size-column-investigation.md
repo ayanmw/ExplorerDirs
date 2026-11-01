@@ -1802,3 +1802,9 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 在上一节真实文件系统 Shell 更新通知场景上，快速改写 `size-10\payload.bin` 三次并发布多条 `SHCNE_UPDATEITEM`/`SHCNE_UPDATEDIR`。两次独立 Private Desktop 运行均收到 6 个更新事件；探针在 150 ms 安静窗口后按受影响目录去重为 1 项，仅启动一次 worker 扫描，最终读回 20 B。扫描被刻意延迟期间，peer ListView 行 ID 与选中/焦点保持；重枚举后原目录行身份、数值排序和焦点仍保持。NativeProbe Release build 0 警告/错误，两个 watchdog 运行均 exit 0，前台、last-input 和 fixture 清理守卫通过。
 
 这只验证隔离探针内的 burst 收集、路径去重、worker 扫描及 peer 行保留；去重集合和安静计时尚未接入产品通知管线，通知由探针显式 `SHChangeNotify` 触发。未覆盖 watcher 溢出、取消/关闭竞争、慢盘/网络、多个窗格共享容量或可见刷新体验。下一步核对扫描期间新通知到达时的重扫/过期结果保护，再决定是否推进产品架构迁移评审。
+
+### 2026-11-01：递归大小扫描中的新通知使旧结果失效
+
+延续上一节 burst 场景，探针在 worker 已打开目标目录后暂停扫描；此时将 payload 从 20 B 改为 30 B 并发送新 Shell 更新通知。更新到达时递增本地扫描代次，释放 worker 后即使该轮读取到 30 B，也按已过期代次丢弃，不写入 peer/cache；随后启动的 worker 才发布最终 30 B。两次 Private Desktop 运行均通过，peer 行 ID、选择焦点、前台窗口保持，NativeProbe Release build 0 警告/错误，watchdog exit 0，隔离清理通过。
+
+本轮只验证探针内的代次失效语义；被丢弃的 worker 因在通知之后才读取目录，数据本身也可能已是最新，因此它不是“扫描结果必然陈旧”的证明。产品没有逐行递归列，也没有接入此代次机制。剩余门槛包括与实际行模型/取消关闭生命周期接线、真实多窗格并发和可见刷新验收。
