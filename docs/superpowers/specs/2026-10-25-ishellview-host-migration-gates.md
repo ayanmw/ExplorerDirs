@@ -34,7 +34,7 @@ Explorer Dirs 的首要目标是稳定地承载 Windows Shell 文件管理，并
 
 - 产品 `ExplorerBrowserHost` 持有 `IExplorerBrowser`，在创建的 STA 管理视图、导航就绪、Shell TravelLog、快捷键转发、文件操作焦点恢复、视图配置、目录 watcher 与刷新恢复。
 - 产品 `ShellBrowserSite` 实现 `ICommDlgBrowser`、`ICommDlgBrowser2`、`ICommDlgBrowser3` 及 Explorer Pane 可见性回调；WPF `PaneControl` 负责多个标签、布局、导航树和视图状态连接。
-- 隔离 `StreamViewHost` 的浏览器框架回调存在 no-op，`BrowseObject` 基类返回 `E_NOTIMPL`，没有完整产品的状态栏、控制窗、WPF 窗格、标签、历史、筛选和 watcher 生命周期。
+- 隔离 `StreamViewHost` 已实现浏览器框架菜单/状态栏/快捷键/导航等部分回调；`BrowseObject` 可委托给 `ShellViewNavigationHistory`，纯逻辑与 COM vtable 测试覆盖合成及真实 filesystem PIDL 的绝对/相对导航、父级和失败保留。它仍没有完整产品的状态栏、控制窗、WPF 窗格、标签、ExplorerBrowser travel-log、筛选和 watcher 生命周期；真实 filesystem PIDL 合同不等于创建并导航真实 `IShellView`。
 - 隔离 `FilteredHost` 只实现两个临时目录的父级/历史/筛选路径，不能证明任意路径、虚拟 Shell 位置或完整搜索行为。
 - 默认 ExplorerBrowser 实际 view 的窗口树为 `CtrlNotifySink`、`DirectUIHWND`、`ScrollBar`，没有原型所需 `SysListView32`；原型的 `LVM_SETVIEW` 和 `NM_CUSTOMDRAW` 不能直接接入现有宿主。
 - Private Desktop 已证明默认 `IShellView` 在 Icon、Details、SmallIcon、List、Tile 五种同步模式下可绘制规则色并保留实际选中项默认颜色，包含排序/分组样本；不涵盖 Content、Q-Dir 特殊模式、其它 Shell provider、用户桌面或 ExplorerBrowser DirectUI。

@@ -5667,4 +5667,4 @@ NativeProbe 已将每个 view 的合并批次拆为至多两个并行半批，�
 
 隐藏 NativeProbe 原型已证明异步派生列可参与 Shell 原生 Details 排序与多视图回填，但产品 `ExplorerBrowserHost` 仍由 ExplorerBrowser 创建 Windows 文件夹的 DefView；没有受支持的接口把任意逐行值追加到当前 DefView。接入该列必须先将物理目录导航改为包装 Shell namespace PIDL，并迁移/复核地址栏与历史、文件树、对象身份、菜单/文件操作、剪贴板/拖放及通知路径，不是局部列设置改动。
 
-下一步不再扩大同类隐藏压力场景；仅在隔离原型中验证 ExplorerBrowser 导航至包装真实本地目录的最小端到端切片：地址与父级导航、标准文件/背景菜单命令、单项重命名、Shell 通知后的列回填，以及关闭后清理。现有探针的焦点/选区曾有一次不稳定，且可见刷新、完整 OLE 拖放、菜单命令路由和真实多进程通知仍未验证。通过可见验收前，递归大小列不接入产品、不进入 release；若该切片需要重做现有 Shell 行为，将基于实测重估迁移成本与收益。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01-explorerbrowser-产品接线架构评审)。
+已补真实 filesystem PIDL 与 `StreamViewHost` COM `BrowseObject` 的无窗口导航历史合同，覆盖绝对/相对目标、父级、Back/Forward 和文件目标拒绝；它不创建真实 `IShellView`，不关闭 ExplorerBrowser 宿主门槛。下一步仍需在隔离原型中验证 ExplorerBrowser 导航至包装真实本地目录的最小端到端切片：地址与父级导航、标准文件/背景菜单命令、单项重命名、Shell 通知后的列回填，以及关闭后清理。现有探针的焦点/选区曾有一次不稳定，且可见刷新、完整 OLE 拖放、菜单命令路由和真实多进程通知仍未验证。通过可见验收前，递归大小列不接入产品、不进入 release；若该切片需要重做现有 Shell 行为，将基于实测重估迁移成本与收益。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01-explorerbrowser-产品接线架构评审)与[真实 PIDL 合同](folder-size-column-investigation.md#2026-11-01真实文件系统-pidl-的无窗口导航历史合同)。

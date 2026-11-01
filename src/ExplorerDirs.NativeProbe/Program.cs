@@ -42,6 +42,8 @@ internal static class Program
             return ShellListViewSelectionRestoreProbe.Run();
         if (args.Length == 1 && args[0] == "--shell-view-state-stream-smoke")
             return ShellViewStateStreamSmoke.Run();
+        if (args.Length == 1 && args[0] == "--shell-view-real-pidl-navigation-smoke")
+            return ShellViewNavigationRealPidlSmoke.Run();
         if (args.Length == 4 && args[0] is "--shell-view-state-store-child-write" or "--shell-view-state-store-child-read" or
                 "--shell-view-state-store-child-race-write")
             return ShellViewStateStreamSmoke.RunChildCommand(args);

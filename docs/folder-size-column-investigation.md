@@ -1524,3 +1524,9 @@ Native adapter `/W4 /WX` 与 NativeProbe Release 均构建成功，0 警告/错�
 结论：递归大小列的异步 provider 原型已足以证明“Shell 自定义文件夹可以提供可排序的派生列”，不再需要重复扩展同类隐藏 DefView 压力。它尚不足以证明可安全接入产品；应保持 NativeProbe 隔离，下一阶段把验证集中到最关键的迁移切片：让 ExplorerBrowser 宿主导航到一个包装的真实本地文件夹，验证返回路径/面包屑/父级导航、标准文件与背景菜单执行、单项重命名及 Shell 通知后列刷新，再确认退出与重开无残留注册。只有该切片在可见 UI 中通过，才评估四窗格和会话接线；若这些基础 Shell 行为需要由应用重做，则将迁移成本与收益重新评估，不把列原型并入当前产品。
 
 本评审是基于当前源码与已有隔离探针的路线判断，不是 ExplorerBrowser 原型运行或用户可见验收。本轮没有改产品宿主、发布包或用户级 Shell 注册；该列仍未实现于 Explorer Dirs。
+
+### 2026-11-01：真实文件系统 PIDL 的无窗口导航历史合同
+
+NativeProbe 新增 `--shell-view-real-pidl-navigation-smoke`，使用临时真实目录经 `SHParseDisplayName` 生成 Shell PIDL，在不创建 `IShellView` 窗口的条件下验证绝对目录导航、相对子项合并、父级解析、Back/Forward 历史身份，以及文件 PIDL 被导航回调拒绝时历史保持不变。另经 `StreamViewHost` 的 COM `IShellBrowser::BrowseObject` vtable 回调验证绝对和相对真实目录 PIDL 的路由。
+
+命令退出码 0，7 项断言通过，输出 `shell-view-created=False`。这将导航历史验证从纯合成 PIDL 推进到真实 Windows filesystem PIDL 和 COM 回调边界，但没有创建或导航真实 `IShellView`/ExplorerBrowser，也未验证 Shell 菜单、父级 UI、通知、拖放或列回填。ExplorerBrowser 包装目录的最小宿主切片仍是下一道迁移门槛；产品 ExplorerBrowser 与发布包均未更改。
