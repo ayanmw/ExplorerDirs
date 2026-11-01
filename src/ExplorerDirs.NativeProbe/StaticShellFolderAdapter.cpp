@@ -48,6 +48,18 @@ namespace
         TraceSyntheticSortStage(message);
     }
 
+    void TraceSyntheticFolderAttributes(const std::wstring& backingPath, SFGAOF requested, SFGAOF returned, HRESULT result)
+    {
+        char pathUtf8[1024]{};
+        if (!backingPath.empty())
+            WideCharToMultiByte(CP_UTF8, 0, backingPath.c_str(), -1, pathUtf8,
+                static_cast<int>(ARRAYSIZE(pathUtf8)), nullptr, nullptr);
+        char message[1400]{};
+        sprintf_s(message, "synthetic-sort: GetAttributesOf-nested; hr=0x%08X; requested=0x%08X; returned=0x%08X; backing-path=%s",
+            static_cast<unsigned>(result), static_cast<unsigned>(requested), static_cast<unsigned>(returned), pathUtf8);
+        TraceSyntheticSortStage(message);
+    }
+
     void TraceSyntheticNotificationPidl(LONG event, unsigned index, PCIDLIST_ABSOLUTE pidl)
     {
         if (!pidl)
@@ -3103,10 +3115,13 @@ namespace
             try { original.resize(count, nullptr); }
             catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
             HRESULT result = S_OK;
+            bool traceNestedChild = false;
+            const auto requestedAttributes = *attributes;
             for (UINT index = 0; index < count; ++index)
             {
                 const auto* child = SyntheticData(items[index]);
                 if (!child) { result = E_INVALIDARG; break; }
+                traceNestedChild = traceNestedChild || _wcsicmp(child->name, L"nested") == 0;
                 ULONG eaten = 0;
                 result = _inner->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(child->name), &eaten, &original[index], nullptr);
                 if (FAILED(result)) break;
@@ -3123,6 +3138,7 @@ namespace
                         *attributes &= ~(SFGAO_FILESYSTEM | SFGAO_FILESYSANCESTOR);
                 }
             }
+            if (traceNestedChild) TraceSyntheticFolderAttributes(_backingPath, requestedAttributes, *attributes, result);
             for (auto item : original) if (item) CoTaskMemFree(item);
             return result;
         }

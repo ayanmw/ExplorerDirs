@@ -471,11 +471,29 @@ internal static class ExplorerBrowserWrapperProbe
                             nestedNavigationPidl, ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
                         Console.WriteLine($"explorerbrowser-registered-namespace: nested-object-events=pending:{events.Started - pendingBeforeNested},complete:{events.Completed - completedBeforeNested},failed:{events.Failed - failedBeforeNested}");
                         Console.WriteLine($"explorerbrowser-registered-namespace: browse-to-object-hr=0x{objectNavigation.HResult:X8}; object-class-matches={objectNavigation.ClassMatches}; object-pidl-matches={objectNavigation.PidlMatches}; object-location={objectNavigation.Location}; filesystem-path={objectNavigation.FileSystemPath}");
-                        var physicalNavigation = ProbeBrowseToPhysicalPath(browser, Path.Combine(fixture, "child", "nested"), events,
-                            ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
-                        Console.WriteLine($"explorerbrowser-registered-namespace: physical-nested-navigation-hr=0x{physicalNavigation.HResult:X8}; path-matches={physicalNavigation.PathMatches}; actual-path={physicalNavigation.ActualPath}; class={physicalNavigation.ClassId}; events=pending:{physicalNavigation.Pending},complete:{physicalNavigation.Completed},failed:{physicalNavigation.Failed}; view-created={physicalNavigation.ViewCreated}");
-                        if (!objectNavigation.ClassMatches || !objectNavigation.PidlMatches)
-                            throw new InvalidOperationException("BrowseToIDList did not reach nested and BrowseToObject did not preserve the wrapped nested folder.");
+                        var shellItemId = ShellItemId;
+                        var shellItemHr = SHCreateItemFromIDList(nestedNavigationPidl, ref shellItemId, out var nestedShellItem);
+                        var itemNavigation = (shellItemHr, false, false, "<shell-item-creation-failed>", "<shell-item-creation-failed>");
+                        try
+                        {
+                            if (shellItemHr >= 0 && nestedShellItem != 0)
+                                itemNavigation = ProbeBrowseToObject(browser, nestedShellItem, classId, nestedNavigationPidl,
+                                    ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+                        }
+                        finally { if (nestedShellItem != 0) Marshal.Release(nestedShellItem); }
+                        Console.WriteLine($"explorerbrowser-registered-namespace: shell-item-create-hr=0x{shellItemHr:X8}; browse-shell-item-hr=0x{itemNavigation.Item1:X8}; shell-item-class-matches={itemNavigation.Item2}; shell-item-pidl-matches={itemNavigation.Item3}; shell-item-location={itemNavigation.Item4}");
+                        if ((objectNavigation.ClassMatches && objectNavigation.PidlMatches) || (itemNavigation.Item2 && itemNavigation.Item3))
+                        {
+                            NavigateAndWaitForFolder(browser, nestedNavigationPidl, 0, classId,
+                                nestedNavigationPidl, ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+                        }
+                        else
+                        {
+                            var physicalNavigation = ProbeBrowseToPhysicalPath(browser, Path.Combine(fixture, "child", "nested"), events,
+                                ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+                            Console.WriteLine($"explorerbrowser-registered-namespace: physical-nested-navigation-hr=0x{physicalNavigation.HResult:X8}; path-matches={physicalNavigation.PathMatches}; actual-path={physicalNavigation.ActualPath}; class={physicalNavigation.ClassId}; events=pending:{physicalNavigation.Pending},complete:{physicalNavigation.Completed},failed:{physicalNavigation.Failed}; view-created={physicalNavigation.ViewCreated}");
+                            throw new InvalidOperationException("ExplorerBrowser did not activate the nested target through BrowseToIDList, BrowseToObject(IShellFolder), or BrowseToObject(IShellItem).");
+                        }
                     }
                     var nestedRowCount = WaitForViewItemCount(folderView, 1);
                     NavigateAndWaitForFolder(browser, 0, SbspParent, classId,
@@ -1510,6 +1528,7 @@ internal static class ExplorerBrowserWrapperProbe
     [DllImport("ole32.dll")] private static extern int CoCreateInstance(ref Guid clsid, nint outer, uint context, ref Guid iid, out nint instance);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SHParseDisplayName(string name, nint bindContext, out nint pidl, uint attributesIn, out uint attributesOut);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SHCreateItemFromParsingName(string name, nint bindContext, in Guid iid, out nint item);
+    [DllImport("shell32.dll")] private static extern int SHCreateItemFromIDList(nint pidl, ref Guid iid, out nint item);
     [DllImport("shell32.dll")] private static extern int SHBindToObject(nint parent, nint pidl, nint bindContext, ref Guid iid, out nint value);
     [DllImport("shell32.dll")] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);
     [DllImport("shell32.dll")] private static extern void SHChangeNotify(uint eventId, uint flags, nint item1, nint item2);

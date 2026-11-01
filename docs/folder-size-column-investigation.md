@@ -2070,3 +2070,11 @@ Native adapter 与 NativeProbe Release 构建通过；Private Desktop watchdog �
 在已由 `BindToObject("nested")` 返回的 nested `IShellFolder2` 上，直接调用 `CreateViewObject(IID_IShellView)`，结果为 `S_OK` 且返回非空 view；随后释放该接口。这个调用单独触发了 nested provider 的 `CreateViewObject` 日志，证明 provider view factory 本身可工作。接着由 ExplorerBrowser 执行 `BrowseToObject`，它仍报告 `pending/complete`，但活动位置留在 `child` 且 PIDL 不匹配；直接物理路径导航依旧创建 filesystem view 并成功。
 
 NativeProbe Release build 0 警告/错误；Private Desktop 功能运行因既有 wrapped nested 导航断言失败而 exit 1，隔离守卫仍报告前台与 last-input 未变。日志：`src/.state/native-probe-watchdog/20261101-220048-ba141f85.stdout.log`。这排除了 nested `CreateViewObject` 不能创建 view 的假设；当前证据指向 ExplorerBrowser 对已注册包装 namespace 的深层 `BrowseToObject` 导航未切换 view。该调用只证明 view 对象能创建，未证明其 `CreateViewWindow`、菜单/命令、文件操作、通知及历史链路可用，也未接入产品。
+
+### 2026-11-01：浏览属性与 IShellItem 导航假设对照
+
+记录 ExplorerBrowser 对 `nested` 行请求 `SFGAO_BROWSABLE`（requested `0x7EFBBFFF`）但 backing folder 只返回 `0x7080017F`。隔离地在可浏览文件夹返回值中补 `SFGAO_BROWSABLE` 后，仍没有 nested view 创建，Browser 活动位置仍停留在 child；该行为改动已撤回。随后用 `SHCreateItemFromIDList` 从同一绝对 PIDL 构造 `IShellItem`，分别对 `IShellFolder2` 和 `IShellItem` 调用 `BrowseToObject`：两次 HRESULT 均为 `S_OK`，class ID 匹配包装 provider，但活动 PIDL 仍不匹配且位置为 child。物理 nested path 导航仍成功。
+
+Private Desktop watchdog exit 1 是新增导航成功条件未达到；隔离守卫通过。日志：`src/.state/native-probe-watchdog/20261101-220454-536cbce2.stdout.log`。NativeProbe Release build 0 警告/错误。该结果排除了仅缺少 `SFGAO_BROWSABLE` 或 `BrowseToObject` 目标接口类型导致该现象。微软 `BrowseToObject` 文档明确说明该调用在挂起导航设置正确时可返回 `S_OK`，但这不保证导航最终成功，须结合导航成功/失败事件判断：[IExplorerBrowser::BrowseToObject](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-iexplorerbrowser-browsetoobject)。
+
+重新用撤回 `SFGAO_BROWSABLE` 修改后的原生 DLL 运行相同对照：属性回到 `0x7080017F`，`BrowseToObject(IShellFolder2)` 与 `BrowseToObject(IShellItem)` 仍都返回 `S_OK`，两个路径都停留在 child；物理路径导航成功。结果与补属性版本一致，确认浏览提示不是根因。Private Desktop watchdog 日志：`src/.state/native-probe-watchdog/20261101-220619-d86d5a92.stdout.log`；前台/输入隔离守卫通过。当前 NativeProbe 源码保留属性日志与 IShellItem 对照，属性行为恢复为 backing folder 原值。
