@@ -2709,6 +2709,22 @@ namespace
             try { result = EnumerateBackingChildren(_backingPath, flags, &children); }
             catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
             if (FAILED(result)) return result;
+            if (_recursiveSizeStore &&
+                InterlockedCompareExchange(&g_syntheticTranslateChildNotificationsForProbe, 0, 0) &&
+                InterlockedCompareExchange(&g_syntheticRecursiveSizeScanEnabledForProbe, 0, 0) &&
+                !InterlockedCompareExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, 0, 0))
+            {
+                // DefView may keep an existing row PIDL after re-enumeration; publish fresh metrics so that row reads the updated snapshot.
+                for (const auto& child : children)
+                {
+                    if (!(child.attributes & FILE_ATTRIBUTE_DIRECTORY) ||
+                        (child.attributes & FILE_ATTRIBUTE_REPARSE_POINT) || !child.identity.available) continue;
+                    std::wstring parsingName;
+                    if (SUCCEEDED(GetAbsoluteParsingName(&child, &parsingName)))
+                        (void)_recursiveSizeStore->Set(parsingName.c_str(), child.identity,
+                            child.size, child.fileCount, child.folderCount);
+                }
+            }
             *value = new (std::nothrow) SyntheticChildEnumerator(std::move(children));
             return *value ? S_OK : E_OUTOFMEMORY;
         }

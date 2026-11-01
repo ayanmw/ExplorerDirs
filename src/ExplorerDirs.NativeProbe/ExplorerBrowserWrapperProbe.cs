@@ -290,7 +290,7 @@ internal static class ExplorerBrowserWrapperProbe
             if (childSizeBeforeNotification != "10")
                 throw new InvalidOperationException($"The recursive Size row value was unexpected before its child update; value={childSizeBeforeNotification}.");
             File.WriteAllBytes(Path.Combine(fixture, "child", "notification-size.bin"), [1, 2, 3, 4, 5, 6, 7]);
-            Marshal.ThrowExceptionForHR(SHParseDisplayName(Path.Combine(fixture, "child"), 0, out var physicalChildPidl, 0, out _));
+            Marshal.ThrowExceptionForHR(SHParseDisplayName(Path.Combine(fixture, "child", "notification-size.bin"), 0, out var physicalChildPidl, 0, out _));
             string childSizeAfterNotification = "";
             var getQueuedNotifications = Marshal.GetDelegateForFunctionPointer<GetProbeCount>(
                 NativeLibrary.GetExport(nativeLibrary, "GetSyntheticChildNotificationTranslationQueuedCount"));
@@ -304,7 +304,7 @@ internal static class ExplorerBrowserWrapperProbe
             string providerSizeAfterNotification = "";
             try
             {
-                SHChangeNotify(0x00002000, 0, physicalChildPidl, 0); // SHCNE_UPDATEITEM / SHCNF_IDLIST
+                SHChangeNotify(0x00000002, 0, physicalChildPidl, 0); // SHCNE_CREATE for a file below the displayed child folder.
                 for (var attempt = 0; attempt < 50; attempt++)
                 {
                     Application.DoEvents();
@@ -313,33 +313,13 @@ internal static class ExplorerBrowserWrapperProbe
                     if (childSizeAfterNotification == "17") break;
                     Thread.Sleep(100);
                 }
-                if (childSizeAfterNotification != "17")
-                {
-                    Marshal.ThrowExceptionForHR(ParseDisplayName(viewFolder, "child", out var refreshedChildPidl));
-                    var refreshedAbsoluteChildPidl = ILCombine(rootPidl, refreshedChildPidl);
-                    try
-                    {
-                        SHChangeNotify(0x00002000, 0, refreshedAbsoluteChildPidl, 0); // SHCNE_UPDATEITEM for the namespace item.
-                        for (var attempt = 0; attempt < 20; attempt++)
-                        {
-                            Application.DoEvents();
-                            childSizeAfterNotification = ReadViewItemDetailsByName(folderView, viewFolder, "child", 1);
-                            if (childSizeAfterNotification == "17") break;
-                            Thread.Sleep(100);
-                        }
-                    }
-                    finally
-                    {
-                        Marshal.FreeCoTaskMem(refreshedAbsoluteChildPidl);
-                        Marshal.FreeCoTaskMem(refreshedChildPidl);
-                    }
-                }
                 var enumerationsAfterChildChange = getEnumerationCount();
-                Console.WriteLine($"explorerbrowser-registered-namespace: child-updateitem-queued={getQueuedNotifications() - queuedBeforeChildChange}; sent={getSentNotifications() - sentBeforeChildChange}; enumerations={enumerationsBeforeChildChange}->{enumerationsAfterChildChange}; view-size={childSizeBeforeNotification}->{childSizeAfterNotification}; provider-size={providerSizeAfterNotification}; row-refreshed={childSizeAfterNotification == "17"}");
+                var viewItemSize = ReadViewItemPidlSizeByName(folderView, viewFolder, "child");
+                Console.WriteLine($"explorerbrowser-registered-namespace: child-updateitem-queued={getQueuedNotifications() - queuedBeforeChildChange}; sent={getSentNotifications() - sentBeforeChildChange}; enumerations={enumerationsBeforeChildChange}->{enumerationsAfterChildChange}; view-size={childSizeBeforeNotification}->{childSizeAfterNotification}; provider-size={providerSizeAfterNotification}; view-pidl-size={viewItemSize}; row-refreshed={childSizeAfterNotification == "17"}");
                 if (providerSizeAfterNotification != "17" || enumerationsAfterChildChange <= enumerationsBeforeChildChange)
                     throw new InvalidOperationException("The backing namespace provider did not rescan the changed child directory after its Shell notification.");
                 if (childSizeAfterNotification != "17")
-                    Console.WriteLine("explorerbrowser-registered-namespace: limitation=provider-and-enumeration-updated; existing-view-row-retains-old-PIDL-metadata");
+                    throw new InvalidOperationException($"The existing Shell row did not read the updated recursive Size snapshot; value={childSizeAfterNotification}.");
             }
             finally { Marshal.FreeCoTaskMem(physicalChildPidl); }
 
@@ -501,6 +481,22 @@ internal static class ExplorerBrowserWrapperProbe
         Marshal.ThrowExceptionForHR(ParseDisplayName(folder, name, out var item));
         try { return ReadShellDetailsText(folder, item, column); }
         finally { Marshal.FreeCoTaskMem(item); }
+    }
+
+    private static ulong ReadViewItemPidlSizeByName(nint folderView, nint folder, string name)
+    {
+        Marshal.ThrowExceptionForHR(At<GetItemCount>(folderView, 7)(folderView, 2, out var count));
+        for (var index = 0; index < count; index++)
+        {
+            Marshal.ThrowExceptionForHR(At<GetItemPidl>(folderView, 6)(folderView, index, out var item));
+            try
+            {
+                if (string.Equals(ReadShellDetailsText(folder, item, 0), name, StringComparison.OrdinalIgnoreCase))
+                    return unchecked((ulong)Marshal.ReadInt64(item, sizeof(ulong)));
+            }
+            finally { Marshal.FreeCoTaskMem(item); }
+        }
+        return ulong.MaxValue;
     }
 
     private static string ReadShellDetailsText(nint folder, nint item, uint column)

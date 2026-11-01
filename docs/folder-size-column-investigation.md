@@ -1587,6 +1587,8 @@ NativeProbe Release 构建 0 警告/错误；Private Desktop 探针通过，前�
 
 ### 2026-11-01：ExplorerBrowser 子目录通知刷新递归大小原型
 
-Private Desktop 探针在已注册 namespace 的 `child` 目录下新增 7 B 文件并发出物理文件系统 `SHCNE_UPDATEITEM`。Shell 将通知送到 `SFVM_FSNOTIFY`；adapter 转发父目录 `SHCNE_UPDATEDIR`，Shell 的枚举计数从 2 增至 3，provider 新解析的 `child` 行大小从 10 B 变为 17 B。可是 Browser 当前视图仍保留原行的合成 PIDL 元数据，显示值维持 10 B。再对新解析的合成绝对子项发送 `SHCNE_UPDATEITEM` 也没有让该行更新。
+Private Desktop 探针在已注册 namespace 的 `child` 目录下新增 7 B 文件，并针对该新文件发出物理文件系统 `SHCNE_CREATE`。Shell 将通知送到 `SFVM_FSNOTIFY`；adapter 转发父目录 `SHCNE_UPDATEDIR`，Shell 的枚举计数从 2 增至 3，provider 新解析的 `child` 行大小从 10 B 变为 17 B。起初原有视图行仍读到旧值。修正后，原有视图行的 PIDL 大小字段仍为 10，但行值通过 `GetDetailsOf` 已读到 17 B。
 
-这证明 backing 目录通知、递归快照失效、provider 重枚举已连通，但通知没有映射成 DefView 能更新现存 namespace 行的身份/数据变化。需继续研究 namespace PIDL 更新/比较合同与视图行刷新路由；不能把重新枚举或缓存更新当作可见行刷新成功。隔离探针以“provider 重算成功、当前行仍旧值”作为已知限制通过，Private Desktop 前台/输入守卫和临时注册清理通过。产品及 release 未修改。
+根因是重新枚举只把新递归大小放进新 PIDL；DefView 会保留同一文件夹原行 PIDL，因此行查询回退到旧值。现在，仅在启用隔离通知转发时，对同步递归枚举得到的目录快照也写入该 provider 共享的 identity-validated snapshot store。旧 PIDL 查询时按绝对 parsing name 与 file identity 命中同一快照，能拿到新值；异步按需模式仍由现有扫描任务写入此 store。Private Desktop 探针同时确认根目录外部新增行、子目录内新建文件后的递归大小读值，以及进入子目录/返回根；前台和输入守卫未变化，临时注册已清理。现有静态 folder contract 与 async on-demand smoke 也通过。
+
+边界：这是 NativeProbe 注册 namespace 的逻辑视图读取证据，不是屏幕绘制或产品接线验收；snapshot 写入失败仍不应阻断目录枚举。ExplorerBrowser 产品及 release 未修改。

@@ -5707,6 +5707,6 @@ Q-Dir 对照确认 Type 列的递归 counts 也需要复用后台扫描值。Nat
 
 只证明菜单对象和命令项可构造，未显示或执行菜单命令。下一步验证外部 Shell 变更通知与递归大小回填；产品/release 未变。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01注册-namespace-背景菜单转发)。
 
-### 2026-11-01：子目录变更后的递归大小可见刷新门槛
+### 2026-11-01：子目录通知后的递归大小行值更新
 
-隔离 ExplorerBrowser 探针确认子目录通知已触发 provider 重新枚举（计数 2→3）且递归 Size 从 10 B 重算到 17 B；当前 Browser 行仍持有旧 PIDL 元数据，显示 10 B。向新合成绝对子项补发 `SHCNE_UPDATEITEM` 也未更新现存行。因此“底层通知与重算”已验证，“Shell 视图行刷新”未通过，是继续迁移评审前的未完成门槛。产品和 release 未改。详见[调查记录](folder-size-column-investigation.md#2026-11-01-explorerbrowser-子目录通知刷新递归大小原型)。
+隔离 ExplorerBrowser 探针模拟真实子目录文件 `SHCNE_CREATE`：父目录重新枚举后，行 PIDL 仍带旧值 10 B，但通过共享 identity-validated snapshot store，现存 Shell 行的 `GetDetailsOf` 读值已更新为 17 B。根目录外部新增行、子目录进入/返回、静态 folder contract、async on-demand smoke、前台/输入守卫和临时注册清理也通过。NativeProbe 逻辑视图证据通过；尚非屏幕绘制或产品接线验收。产品和 release 未改。详见[调查记录](folder-size-column-investigation.md#2026-11-01-explorerbrowser-子目录通知刷新递归大小原型)。
