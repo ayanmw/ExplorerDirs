@@ -316,9 +316,11 @@ public static class SyntheticShellSortProbe
         var asyncSharedViewDistinctRoots = asyncSharedViewProbe && asyncSharedViewRootMode == "distinct";
         var asyncQueueSaturationRequested = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_FORCE_QUEUE_SATURATION") == "1";
         var asyncParentBatchProbe = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_BATCH_BY_VIEW") == "1";
+        var asyncCancelAfterQueueProbe = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_CANCEL_AFTER_QUEUE") == "1";
+        var asyncPartialRequestProbe = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_PARTIAL_REQUEST") == "1";
         // Diagnostic only: hold both workers to expose queue rejection under distinct per-pane roots.
         var asyncQueueSaturationProbe = asyncSharedViewDistinctRoots && asyncQueueSaturationRequested;
-        var asyncQueueGateProbe = asyncQueueSaturationProbe || (asyncSharedViewDistinctRoots && asyncParentBatchProbe);
+        var asyncQueueGateProbe = asyncQueueSaturationProbe || (asyncSharedViewDistinctRoots && asyncParentBatchProbe) || asyncCancelAfterQueueProbe || asyncPartialRequestProbe;
         if (asyncSharedViewProbe && asyncSharedViewCount is not (2 or 4))
             throw new ArgumentOutOfRangeException(nameof(asyncSharedViewCountText), "The shared recursive-size view probe accepts two or four active views.");
         if (asyncSharedViewRootMode is not ("same" or "distinct") ||
@@ -328,6 +330,12 @@ public static class SyntheticShellSortProbe
             throw new ArgumentException("Forced queue saturation requires four active views on distinct roots.", nameof(asyncQueueSaturationRequested));
         if (asyncParentBatchProbe && (!asyncSharedViewProbe || asyncSharedViewCount != 4))
             throw new ArgumentException("View-batched recursive-size scanning requires four active views.", nameof(asyncParentBatchProbe));
+        if (asyncCancelAfterQueueProbe && (!asyncParentBatchProbe || !asyncSharedViewProbe || asyncSharedViewCount != 4))
+            throw new ArgumentException("Batch cancellation requires four active view batches.", nameof(asyncCancelAfterQueueProbe));
+        if (asyncPartialRequestProbe && (!asyncParentBatchProbe || !asyncSharedViewProbe || asyncSharedViewCount != 4))
+            throw new ArgumentException("Partial-row demand requires the four-view batch probe.", nameof(asyncPartialRequestProbe));
+        if (asyncCancelAfterQueueProbe && asyncPartialRequestProbe)
+            throw new ArgumentException("Queue cancellation and partial-row demand are separate probe scenarios.");
         if (asyncSharedViewProbe && (!recursiveDirectorySizeSortOnly || largeViewSortProbe || twoViewDistinctLocations || onDemandFolderCount < 2))
             throw new ArgumentException("The async shared-view probe requires the recursive-size view fixture, a single shared root, and no separate large-view sort strategy.");
         if (largeViewSortProbe && (!onDemandRecursiveSize || onDemandFolderCount == 0))
@@ -704,12 +712,15 @@ public static class SyntheticShellSortProbe
                     Console.WriteLine($"synthetic-async-recursive-size-shared-view: phase=before-fill; roots={asyncSharedViewRootMode}; views={asyncSharedViewCount}; selected-focused=independent");
                 }
                 var initialEnumerationCount = ReadCounter(module, "GetSyntheticEnumObjectsCount");
-                var initialSizes = ReadColumnTexts(sizeListView, module, 1, expectedCount: expectedInitialCount);
+                var initialSizes = asyncPartialRequestProbe ? Array.Empty<string>() :
+                    ReadColumnTexts(sizeListView, module, 1, expectedCount: expectedInitialCount);
                 var sharedInitialSizes = asyncSharedViewProbe
-                    ? ReadColumnTexts(sharedSizeListView, module, 1, expectedCount: expectedInitialCount)
+                    ? asyncPartialRequestProbe ? Array.Empty<string>() :
+                        ReadColumnTexts(sharedSizeListView, module, 1, expectedCount: expectedInitialCount)
                     : Array.Empty<string>();
                 var additionalInitialSizes = additionalListViews
-                    .Select(listView => ReadColumnTexts(listView, module, 1, expectedCount: expectedInitialCount)).ToArray();
+                    .Select(listView => asyncPartialRequestProbe ? Array.Empty<string>() :
+                        ReadColumnTexts(listView, module, 1, expectedCount: expectedInitialCount)).ToArray();
                 if (asyncOnDemandRecursiveSize)
                 {
                     // Fill every requested row to expose bounded-queue overflow and retry behavior under Shell notifications.
@@ -763,7 +774,8 @@ public static class SyntheticShellSortProbe
                     }
                     var expectedAsyncScanCount = (onDemandFolderCount + 1) * (asyncSharedViewDistinctRoots ? asyncSharedViewCount : 1);
                     initialNames = ReadNames(sizeListView, module, expectedCount: expectedInitialCount);
-                    initialSizes = ReadColumnTexts(sizeListView, module, 1, expectedCount: expectedInitialCount);
+                    initialSizes = asyncPartialRequestProbe ? Array.Empty<string>() :
+                        ReadColumnTexts(sizeListView, module, 1, expectedCount: expectedInitialCount);
                     if (asyncSharedViewProbe) ReadSharedViewColumns();
                     if (asyncQueueGateProbe)
                     {
@@ -773,6 +785,50 @@ public static class SyntheticShellSortProbe
                         if (asyncParentBatchProbe && rejectedBeforeRelease != 0)
                             throw new IOException($"The four view batches rejected {rejectedBeforeRelease} recursive-size tasks; expected no queue rejections.");
                         Console.WriteLine($"synthetic-async-recursive-size-queue-gate: rejected-before-release={rejectedBeforeRelease}; queue-capacity=256; distinct-roots=4");
+                        if (asyncPartialRequestProbe)
+                        {
+                            var requestedRows = Math.Min(3, checked((int)SendMessageW(sizeListView, LvmGetItemCount, 0, 0)));
+                            var requestedValues = ReadColumnTextsForRows(sizeListView, 1, requestedRows);
+                            Pump(250);
+                            var queuedEntries = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeBatchRequestedEntriesForProbe");
+                            Marshal.GetDelegateForFunctionPointer<NativeVoidCall>(
+                                NativeLibrary.GetExport(module, "ReleaseSyntheticAsyncRecursiveSizeQueueGateForProbe"))();
+                            Pump(1500);
+                            var partialScans = ReadCounter(module, "GetSyntheticOnDemandSizeScanCount");
+                            var partialFinishedBatches = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeScanFinishedCountForProbe");
+                            var partialNotifications = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeNotificationCountForProbe");
+                            var sharedRootScanOverlap = partialScans > onDemandFolderCount + 1;
+                            Console.WriteLine($"synthetic-async-recursive-size-demand-observation: explicit-row-requests={requestedRows}; requested-values=[{string.Join('|', requestedValues)}]; queued-entries-per-view={queuedEntries}; scan-operations={partialScans}; same-root-scan-overlap={sharedRootScanOverlap}; completed-view-batches={partialFinishedBatches}; notifications={partialNotifications}; sibling-folders={onDemandFolderCount}");
+                            if (queuedEntries == 0 || partialScans == 0 || partialScans > queuedEntries ||
+                                partialFinishedBatches == 0 || partialNotifications == 0 || rejectedBeforeRelease != 0)
+                                throw new IOException("The demand-observation probe failed to queue, complete, or notify for the Shell-requested recursive-size rows.");
+                            Marshal.GetDelegateForFunctionPointer<NativeVoidCall>(
+                                NativeLibrary.GetExport(module, "ClearSyntheticAsyncRecursiveSizeQueueGateForProbe"))();
+                            asyncQueueGateCreated = false;
+                            return 0;
+                        }
+                        if (asyncCancelAfterQueueProbe)
+                        {
+                            Marshal.GetDelegateForFunctionPointer<ReleaseViewHold>(NativeLibrary.GetExport(module,
+                                "ReleaseSyntheticSortViewHold"))();
+                            Marshal.GetDelegateForFunctionPointer<NativeVoidCall>(
+                                NativeLibrary.GetExport(module, "ReleaseSyntheticAsyncRecursiveSizeQueueGateForProbe"))();
+                            var cancellationDrainDeadline = Environment.TickCount64 + 10_000;
+                            var getFinishedAfterCancellation = Marshal.GetDelegateForFunctionPointer<NativeLibraryUnloadContractSmoke>(
+                                NativeLibrary.GetExport(module, "GetSyntheticAsyncRecursiveSizeScanFinishedCountForProbe"));
+                            while (getFinishedAfterCancellation() < asyncSharedViewCount &&
+                                Environment.TickCount64 < cancellationDrainDeadline)
+                                Pump(25);
+                            var scansAfterCancellation = ReadCounter(module, "GetSyntheticOnDemandSizeScanCount");
+                            var notificationsAfterCancellation = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeNotificationCountForProbe");
+                            Console.WriteLine($"synthetic-async-recursive-size-cancel: queued-view-batches={getFinishedAfterCancellation()}; scans-after-close={scansAfterCancellation}; notifications-after-close={notificationsAfterCancellation}");
+                            if (getFinishedAfterCancellation() < asyncSharedViewCount || scansAfterCancellation != 0 || notificationsAfterCancellation != 0)
+                                throw new IOException("Closing all held Shell views did not cancel queued recursive-size batches before scan or notification.");
+                            Marshal.GetDelegateForFunctionPointer<NativeVoidCall>(
+                                NativeLibrary.GetExport(module, "ClearSyntheticAsyncRecursiveSizeQueueGateForProbe"))();
+                            asyncQueueGateCreated = false;
+                            return 0;
+                        }
                         Marshal.GetDelegateForFunctionPointer<NativeVoidCall>(
                             NativeLibrary.GetExport(module, "ReleaseSyntheticAsyncRecursiveSizeQueueGateForProbe"))();
                         var acceptedScanTarget = expectedAsyncScanCount - rejectedBeforeRelease;
@@ -3792,6 +3848,33 @@ public static class SyntheticShellSortProbe
         try
         {
             for (var index = 0; index < count; index++)
+            {
+                Marshal.WriteInt16(text, 0);
+                var item = new NativeListViewItem { Mask = LvifText, Item = index, SubItem = subItem, Text = text, TextCapacity = 1024 };
+                var itemPointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeListViewItem>());
+                try
+                {
+                    Marshal.StructureToPtr(item, itemPointer, false);
+                    var length = checked((int)SendMessageW(listView, LvmGetItemTextW, index, itemPointer));
+                    if (length < 0 || length >= 1024) throw new InvalidOperationException($"Invalid synthetic list text length {length}.");
+                    values[index] = Marshal.PtrToStringUni(text, length) ?? string.Empty;
+                }
+                finally { Marshal.FreeHGlobal(itemPointer); }
+            }
+        }
+        finally { Marshal.FreeHGlobal(text); }
+        return values;
+    }
+
+    private static string[] ReadColumnTextsForRows(nint listView, int subItem, int rowCount)
+    {
+        var count = checked((int)SendMessageW(listView, LvmGetItemCount, 0, 0));
+        if (rowCount < 0 || rowCount > count) throw new ArgumentOutOfRangeException(nameof(rowCount));
+        var values = new string[rowCount];
+        var text = Marshal.AllocHGlobal(1024 * sizeof(char));
+        try
+        {
+            for (var index = 0; index < rowCount; index++)
             {
                 Marshal.WriteInt16(text, 0);
                 var item = new NativeListViewItem { Mask = LvifText, Item = index, SubItem = subItem, Text = text, TextCapacity = 1024 };

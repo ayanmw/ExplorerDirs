@@ -1443,4 +1443,12 @@ NativeProbe Release build 成功，0 警告/错误；原生 adapter `/W4 /WX` �
 
 ### 2026-11-01：按视图批次的同根四视图共享缓存
 
-放开 batch probe 的同根四视图组合后，使用相同 80 目录夹具和 512 缓存跑两轮。四个共享同一 backing root 的 view 都读回 82/82 行，累计只扫描 81 个唯一目录（child、80 个同级目录），重复扫描 0、队列拒绝 0、峰值 worker 1、通知 2、聚合 `EnumObjects` 增量 4；四份选区和焦点保留。日志：`src/.state/native-probe-watchdog/20261101-133655-890a7c79.stdout.log`、`src/.state/native-probe-watchdog/20261101-133713-ac00c843.stdout.log`。这是同进程 synthetic provider 的隐藏 `IShellView` 证据；尚未测试只请求部分行时的扫描范围，也尚未验证关闭/取消竞争。下一步先补这两项生命周期和按需范围，再评估产品接线。
+放开 batch probe 的同根四视图组合后，使用相同 80 目录夹具和 512 缓存跑两轮。四个共享同一 backing root 的 view 都读回 82/82 行，累计只扫描 81 个唯一目录（child、80 个同级目录），重复扫描 0、队列拒绝 0、峰值 worker 1、通知 2、聚合 `EnumObjects` 增量 4；四份选区和焦点保留。日志：`src/.state/native-probe-watchdog/20261101-133655-890a7c79.stdout.log`、`src/.state/native-probe-watchdog/20261101-133713-ac00c843.stdout.log`。这是同进程 synthetic provider 的隐藏 `IShellView` 证据；更大同根负载与取消竞争尚未验证。
+
+### 2026-11-01：同根多视图扫描合并与关闭取消
+
+先用 500 个同级目录和四个共享根目录的 view 观察 Shell 自动请求范围。探针只额外读取主 view 的前三行，但 Shell 已对多个 view 请求了 1,525 个按单 view 去重的列项；旧实现执行 977 次扫描，已超过同根 501 个唯一目录，确认了跨 `SyntheticSortFolder` 实例的并发重复扫描。扫描缓存只在任务结束后写入，而待处理集合原先属于每个 folder 实例，因此不同 view 会同时扫描相同路径。首次观测日志：`src/.state/native-probe-watchdog/20261101-async-partial-before-dedupe.stdout.log`。这也说明“逐行按需”受 Shell 的实际请求粒度限制：在此 500 行详情视图中，Shell 自己请求了大部分行，三次手动行读取不能被当成仅扫描三行的证据。
+
+在 NativeProbe 的共享快照存储内增加按解析路径的扫描占位：缓存未命中时只有一个 view 扫描该路径，其它 view 等待该快照写入或宿主取消后再尝试。修正后，同一个 500 目录、四同根 view 场景扫描恰为 501 次，重复扫描 0、队列拒绝 0、四 view 全部 502/502、通知 2、峰值 worker 1，四份选区与焦点保留；日志：`src/.state/native-probe-watchdog/20261101-async-same-root-500-after-dedupe.stdout.log`。在相同 Shell 自动请求负载下复跑部分行观察，仍请求 1,525 个按 view 去重条目，但扫描保持 501 次；日志：`src/.state/native-probe-watchdog/20261101-async-partial-after-dedupe.stdout.log`。四个不同根目录、每根 80 项的回归场景仍为 324/324 唯一扫描、拒绝 0、峰值 worker 2、四 view 均 82/82 且选区/焦点保留；日志：`src/.state/native-probe-watchdog/20261101-async-distinct-root-after-dedupe.stdout.log`。
+
+关闭竞争场景在闸门关闭期间排入四个 view 批次，先退休全部 view 再放行 worker；四批均结束，扫描数 0、Shell 通知数 0。日志：`src/.state/native-probe-watchdog/20261101-async-same-root-cancel-after-dedupe.stdout.log`。Native adapter `/W4 /WX` 与 NativeProbe Release 均构建成功，0 警告/错误。以上仍是隐藏 synthetic `IShellView` 原型，不是 ExplorerBrowser 产品接线或可见 UI 验收；慢磁盘/网络延迟、同一视图关闭与其它视图继续等待、队列背压及排序体验仍待验证。产品决策前还需用更贴近单窗格的 Shell 请求负载测延迟与交互影响。
