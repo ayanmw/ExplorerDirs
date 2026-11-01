@@ -393,7 +393,7 @@ internal static class ExplorerBrowserWrapperProbe
             {
                 NavigateAndWaitForFolder(browser, expectedChildRoot, 0, classId,
                     expectedChildRoot, ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
-                Marshal.ThrowExceptionForHR(At<GetItemCount>(folderView, 7)(folderView, 2, out var childRowCount));
+                var childRowCount = WaitForViewItemCount(folderView, 2);
                 if (childRowCount != 2)
                     throw new InvalidOperationException("Child navigation did not preserve the namespace PIDL or enumerate its backing folder.");
                 var childColumnCaptureHr = ShellColumnManager.Capture(folderView, out var childColumns);
@@ -409,13 +409,16 @@ internal static class ExplorerBrowserWrapperProbe
                 {
                     NavigateAndWaitForFolder(browser, expectedNestedRoot, 0, classId,
                         expectedNestedRoot, ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
-                    Marshal.ThrowExceptionForHR(At<GetItemCount>(folderView, 7)(folderView, 2, out var nestedRowCount));
+                    var nestedRowCount = WaitForViewItemCount(folderView, 1);
                     NavigateAndWaitForFolder(browser, 0, SbspParent, classId,
                         expectedChildRoot, ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+                    _ = WaitForViewItemCount(folderView, 2);
                     NavigateAndWaitForFolder(browser, 0, SbspNavigateBack, classId,
                         expectedNestedRoot, ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+                    _ = WaitForViewItemCount(folderView, 1);
                     NavigateAndWaitForFolder(browser, 0, SbspNavigateForward, classId,
                         expectedChildRoot, ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+                    _ = WaitForViewItemCount(folderView, 2);
                     if (nestedRowCount != 1)
                         throw new InvalidOperationException("Nested navigation did not enumerate its backing folder.");
                     var forwardColumnCaptureHr = ShellColumnManager.Capture(folderView, out var forwardColumns);
@@ -1121,6 +1124,22 @@ internal static class ExplorerBrowserWrapperProbe
                 throw new TimeoutException($"ExplorerBrowser did not navigate to the expected wrapped folder for flags 0x{flags:X8}.");
             Thread.Sleep(20);
         }
+    }
+
+    private static int WaitForViewItemCount(nint folderView, int expectedCount)
+    {
+        // ExplorerBrowser publishes the active PIDL before the new view finishes enumerating its rows.
+        var stopwatch = Stopwatch.StartNew();
+        int actualCount;
+        do
+        {
+            Application.DoEvents();
+            Marshal.ThrowExceptionForHR(At<GetItemCount>(folderView, 7)(folderView, 2, out actualCount));
+            if (actualCount == expectedCount) return actualCount;
+            Thread.Sleep(20);
+        } while (stopwatch.Elapsed < TimeSpan.FromSeconds(5));
+
+        throw new TimeoutException($"ExplorerBrowser view item count did not reach {expectedCount}; actual={actualCount}.");
     }
 
     private static void ReleaseActiveFolder(ref nint shellView, ref nint folderView, ref nint viewFolder,
