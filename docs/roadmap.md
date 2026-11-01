@@ -5752,3 +5752,7 @@ NativeProbe 已完成受控精确失效合同：四个不同根的异步 Shell �
 ### 2026-11-01：可控原生列表接入真实 Shell 行导航合同
 
 `--common-listview-navigation-contract` 现在把真实 `IShellFolder` 枚举行填入隐藏 `SysListView32`，通过被选目录行的 Shell identity 浏览子目录、返回、前进和改走分支，并检查行模型对应当前目录且前进历史正确清空。NativeProbe Release 以及导航、递归大小数据/文件操作、相对大小排序合同均通过；无可见窗口、未建实际 `IShellView`，产品与 release 未变。下一个原型门槛是让自控列表的 View/Sort/Group/Refresh/New 命令使用正确 Shell view 服务并与行模型一致；背景 `IShellFolder` 菜单检查当前未发现默认 View/Sort/Group/Refresh 项，不能把它算作已兼容。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01将真实-shell-枚举行接入可控列表导航原型)。
+
+### 2026-11-01：确认 view-owned Shell 菜单及命令的状态边界
+
+窄化 Private Desktop `--ishellview-menu-command-private-desktop` 退出码 0：默认 `IShellView` 的 view-owned 背景菜单可执行 Details、刷新、升降序、分组升降序，模式/排序/分组状态及行顺序读回正确；前台、last-input 与隔离清理守卫通过。刷新会先将 Shell 行模型变为 0 行再恢复，降序样本需要生产选择/焦点快照恢复。view-owned 菜单命令只更新所属原生 view，不会自动更新独立 `SysListView32`；自控列表若要接这类菜单，仍需显式投影视图模式、排序/分组及行身份。此前完整 host-filter 虚拟位置序列在 ZIP 阶段超时并退出 1，不作为全量通过；当时前台/输入守卫未变化且未发现残留进程。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01核对默认-shell-view-菜单命令作为自控列表的同步来源)。

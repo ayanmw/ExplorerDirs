@@ -1740,3 +1740,9 @@ NativeProbe Release 构建 0 警告/错误；`--explorerbrowser-registered-names
 `--common-listview-navigation-contract` 之前只分别枚举每个测试目录并验证纯位置历史。本轮将这些 Shell 行实际填入隐藏原生 `SysListView32`，用行 `LPARAM` 指向保留的 Shell row identity：从根列表选中 `child` 后打开其目录、读回子列表、后退/前进，再从根列表选中 `branch` 并确认前进历史被清除。每个导航位置的项目名均与真实 `IShellFolder` 枚举一致，Shell parent PIDL 与预期根目录匹配，探针结束时前台未变化。运行初版曾暴露探针自身重复释放重映射行的 PIDL；修正所有权登记后，进程正常退出。
 
 NativeProbe Release 构建（0 警告/错误）、`--common-listview-navigation-contract`、`--common-listview-data-contract` 和 `--common-listview-relative-size-contract` 均退出码 0。现有数据合同同时复验了递归列排序、系统图标、多选 Shell data object、Shell item/background menu 对象查询及 Copy/Move/Rename/Delete。所有 ListView 都未显示，未建立实际 `IShellView`，也未验证鼠标/键盘输入、菜单显示与命令路由或可见重绘。下一步对照该自控列表与默认 `IShellView` 的 view/background 命令来源，验证 View/Sort/Group/Refresh/New 能否在列表身份和行顺序上形成一致结果；这仍是 NativeProbe 架构原型，不接入产品 ExplorerBrowser 或 release。
+
+### 2026-11-01：核对默认 Shell view 菜单命令作为自控列表的同步来源
+
+窄化复跑 `--ishellview-menu-command-private-desktop`，避免跨虚拟位置的长序列影响普通文件夹命令判断。通过 `IShellView::GetItemObject(SVGIO_BACKGROUND)` 取得 view-owned `IContextMenu` 后，使用菜单 canonical verb 依次执行 `viewlogicaldetails`、`refresh`、`sortdescending`、`sortascending`、`groupdescending`、`groupascending`；Shell 的当前模式、排序方向、分组方向及文件顺序均按预期读回。Private Desktop watchdog exit 0，前台 HWND 与 last-input tick 未变，隔离 fixture 清理通过。
+
+该命令仍只控制它所属的默认 `IShellView`。刷新时 Shell 行模型从 3 行短暂归零再恢复；降序排序在本轮样本中使选择/焦点短暂丢失，需使用生产 `ShellViewSelectionSnapshot` 最终恢复。因此不能把 view-owned 菜单对象直接挂给另一个 `SysListView32` 并假设它会同步；后续桥接原型必须在每项命令后显式把 view mode、排序/分组状态和稳定 Shell item 身份投影到自控列表，并检查刷新空窗与焦点恢复成本。此前全量 host-filter 虚拟位置序列已在 ZIP 阶段超过 watchdog 时限，退出码 1；该次不是全量通过证据，也没有残留探针进程。
