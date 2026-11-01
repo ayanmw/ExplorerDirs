@@ -25,6 +25,9 @@ internal static class ShellViewDropTargetProbe
     private const uint AddSelectionAndFocus = 0x1u | 0x10u;
     private const int DragDropSDrop = 0x00040100;
     private const int DragDropSCancel = 0x00040101;
+    private const uint ShellChangeDeleted = 0x00000004;
+    private const uint ShellChangeUpdatedDirectory = 0x00001000;
+    private const uint ShellChangePathAndFlushNoWait = 0x00000005;
 
     internal static int Run() => RunCore(interactiveOleEffect: 0);
 
@@ -74,7 +77,7 @@ internal static class ShellViewDropTargetProbe
         nint crossVolumeFolderPidl = 0, crossVolumeFolder = 0, crossVolumeDropTarget = 0, crossVolumeDataObject = 0,
             crossVolumeSourcePidl = 0, crossVolumeChildPidls = 0, crossVolumeMoveDataObject = 0,
             crossVolumeMoveSourcePidl = 0, crossVolumeMoveChildPidls = 0;
-        nint sourceViewWindow = 0, targetViewWindow = 0, sourceHostPointer = 0, targetHostPointer = 0, sourceFolderView = 0;
+        nint sourceViewWindow = 0, targetViewWindow = 0, sourceHostPointer = 0, targetHostPointer = 0, sourceFolderView = 0, targetFolderView = 0;
         nint folderDropTarget = 0, viewDropTarget = 0, dataObject = 0, selectedDataObject = 0, multiSelectedDataObject = 0,
             childPidls = 0;
         StreamViewHost? sourceHost = null, targetHost = null;
@@ -198,6 +201,9 @@ internal static class ShellViewDropTargetProbe
             Marshal.ThrowExceptionForHR(At<ItemCount>(sourceFolderView, 7)(sourceFolderView, 1, out var multiSelectedCount));
             if (multiSelectedCount != 2)
                 throw new InvalidOperationException($"Expected two selected source files, observed {multiSelectedCount}.");
+            var sourceFocusedPathBefore = ReadFocusedShellViewPath(sourceFolderView, sourceFolderPidl);
+            if (sourceFocusedPathBefore is null)
+                throw new InvalidOperationException("The multi-selection source Shell view has no focused item before drop.");
             var multiSelectedDataObjectId = DataObjectId;
             var multiSelectedDataObjectHr = At<GetItemObject>(sourceView, 15)(sourceView, 1,
                 ref multiSelectedDataObjectId, out multiSelectedDataObject);
@@ -241,6 +247,16 @@ internal static class ShellViewDropTargetProbe
             Marshal.ThrowExceptionForHR(At<CreateViewWindow>(targetView, 9)(targetView, 0, ref settings, targetHostPointer, ref bounds, out targetViewWindow));
             if (targetViewWindow == 0) throw new InvalidOperationException("Target CreateViewWindow returned no HWND.");
             PrivateDesktopShellProbe.ReportStage("drop-target: target-view-created");
+            // A real row is the only reliable signal that this Shell view has completed initial enumeration.
+            var targetReadyPath = Path.Combine(targetFolderPath, "view-ready.txt");
+            File.WriteAllText(targetReadyPath, "native-shell-view-ready");
+            var targetFolderViewId = FolderViewId;
+            Marshal.ThrowExceptionForHR(Marshal.QueryInterface(targetView, in targetFolderViewId, out targetFolderView));
+            _ = WaitForShellViewPaths(targetFolderView, targetFolderPidl, [Path.GetFullPath(targetReadyPath)]);
+            File.Delete(targetReadyPath);
+            SHChangeNotify(ShellChangeDeleted, ShellChangePathAndFlushNoWait, targetReadyPath, null);
+            _ = WaitForShellViewPaths(targetFolderView, targetFolderPidl, []);
+            Console.WriteLine("shell-view-drop-target-stage: target-view-initial-enumeration-complete");
             if (recreateTargetViewWindow)
             {
                 Marshal.ThrowExceptionForHR(At<DestroyViewWindow>(targetView, 10)(targetView));
@@ -249,6 +265,14 @@ internal static class ShellViewDropTargetProbe
                 Marshal.ThrowExceptionForHR(At<CreateViewWindow>(targetView, 9)(targetView, 0, ref settings, targetHostPointer, ref bounds, out targetViewWindow));
                 if (targetViewWindow == 0) throw new InvalidOperationException("Recreated target CreateViewWindow returned no HWND.");
                 PrivateDesktopShellProbe.ReportStage("drop-target: target-view-recreated-before-drop");
+            }
+            if (recreateTargetViewWindow)
+            {
+                Marshal.ThrowExceptionForHR(Marshal.QueryInterface(targetView, in targetFolderViewId, out var recreatedFolderView));
+                if (targetFolderView != 0) Marshal.Release(targetFolderView);
+                targetFolderView = recreatedFolderView;
+                var recreatedRows = ReadShellViewRows(targetFolderView, targetFolderPidl);
+                Console.WriteLine($"shell-view-drop-target-stage: target-view-rows-after-window-recreate={recreatedRows.Length}");
             }
             var dropTargetId = DropTargetId;
             Marshal.ThrowExceptionForHR(At<CreateViewObject>(targetFolder, 8)(targetFolder, targetViewWindow, ref dropTargetId, out folderDropTarget));
@@ -332,9 +356,11 @@ internal static class ShellViewDropTargetProbe
                     File.ReadAllText(selectedTargetPath) == "native-shell-selected-view-fixture" &&
                     File.Exists(multiSelectedTargetPath) && File.ReadAllText(multiSelectedTargetPath) == "native-shell-multi-selected-a-fixture" &&
                     File.Exists(secondMultiSelectedTargetPath) && File.ReadAllText(secondMultiSelectedTargetPath) == "native-shell-multi-selected-b-fixture";
+                var viewAndSourceStateValid = VerifyDropViewState(targetView, targetFolderView, targetFolderPidl, targetFolderPath,
+                    sourceFolderView, sourceFolderPidl, sourceFocusedPathBefore, expectedSelectedCount: 2);
                 var foregroundUnchanged = GetForegroundWindow() == foreground;
-                Console.WriteLine($"shell-view-drop-target-probe: target-view-window-recreated=True; selected-view-data-copy={selectedDataObjectResult}; multi-selected-view-data-copy={multiSelectedDataObjectResult}; source-preserved={sourcePreserved}; destination-valid={destinationValid}; foreground-unchanged={foregroundUnchanged}; actual-DoDragDrop=False; cross-volume-and-move-cases=not-run");
-                if (!selectedDataObjectResult || !multiSelectedDataObjectResult || !sourcePreserved || !destinationValid || !foregroundUnchanged)
+                Console.WriteLine($"shell-view-drop-target-probe: target-view-window-recreated=True; selected-view-data-copy={selectedDataObjectResult}; multi-selected-view-data-copy={multiSelectedDataObjectResult}; source-preserved={sourcePreserved}; destination-valid={destinationValid}; target-view-and-source-state-valid={viewAndSourceStateValid}; foreground-unchanged={foregroundUnchanged}; actual-DoDragDrop=False; cross-volume-and-move-cases=not-run");
+                if (!selectedDataObjectResult || !multiSelectedDataObjectResult || !sourcePreserved || !destinationValid || !viewAndSourceStateValid || !foregroundUnchanged)
                     throw new InvalidOperationException("The recreated Shell view drop target did not copy the selected items or preserve the foreground window.");
                 PrivateDesktopShellProbe.ReportStage("drop-target: recreated-view-transfer-complete");
                 return 0;
@@ -416,8 +442,10 @@ internal static class ShellViewDropTargetProbe
                 File.ReadAllText(multiSelectedTargetPath) == "native-shell-multi-selected-a-fixture" &&
                 File.Exists(secondMultiSelectedTargetPath) &&
                 File.ReadAllText(secondMultiSelectedTargetPath) == "native-shell-multi-selected-b-fixture";
-            Console.WriteLine($"shell-view-drop-target-probe: target-view-window-recreated={recreateTargetViewWindow}; view-target-copy={viewTargetResult}; selected-view-data-copy={selectedDataObjectResult}; multi-selected-view-data-copy={multiSelectedDataObjectResult}; multi-selected-destination-valid={multiSelectedDestinationValid}; cross-volume-default-copy={crossVolumeAvailable}:{crossVolumeCopyResult}; cross-volume-shift-move={crossVolumeAvailable}:{crossVolumeMoveResult}; same-volume-default-move={defaultMoveResult}; shift-move={folderTargetResult}; source-states-valid={sourceStatesValid}; foreground-unchanged=True; actual-DoDragDrop=False");
-            if (!folderTargetResult || !selectedDataObjectResult || !multiSelectedDataObjectResult || !multiSelectedDestinationValid || !defaultMoveResult ||
+            var viewAndSourceStateValidFinal = VerifyDropViewState(targetView, targetFolderView, targetFolderPidl, targetFolderPath,
+                sourceFolderView, sourceFolderPidl, sourceFocusedPathBefore, expectedSelectedCount: 2);
+            Console.WriteLine($"shell-view-drop-target-probe: target-view-window-recreated={recreateTargetViewWindow}; view-target-copy={viewTargetResult}; selected-view-data-copy={selectedDataObjectResult}; multi-selected-view-data-copy={multiSelectedDataObjectResult}; multi-selected-destination-valid={multiSelectedDestinationValid}; target-view-and-source-state-valid={viewAndSourceStateValidFinal}; cross-volume-default-copy={crossVolumeAvailable}:{crossVolumeCopyResult}; cross-volume-shift-move={crossVolumeAvailable}:{crossVolumeMoveResult}; same-volume-default-move={defaultMoveResult}; shift-move={folderTargetResult}; source-states-valid={sourceStatesValid}; foreground-unchanged=True; actual-DoDragDrop=False");
+            if (!folderTargetResult || !selectedDataObjectResult || !multiSelectedDataObjectResult || !multiSelectedDestinationValid || !defaultMoveResult || !viewAndSourceStateValidFinal ||
                 crossVolumeAvailable && (!crossVolumeCopyResult || !crossVolumeMoveResult) || !sourceStatesValid)
                 throw new InvalidOperationException("An isolated Shell target effect or source/target filesystem state did not match the requested Copy/Move operation.");
             PrivateDesktopShellProbe.ReportStage("drop-target: transfer-complete");
@@ -445,6 +473,7 @@ internal static class ShellViewDropTargetProbe
             if (multiSelectedDataObject != 0) Marshal.Release(multiSelectedDataObject);
             if (dataObject != 0) Marshal.Release(dataObject);
             if (sourceFolderView != 0) Marshal.Release(sourceFolderView);
+            if (targetFolderView != 0) Marshal.Release(targetFolderView);
             if (sourceView != 0) Marshal.Release(sourceView);
             if (targetView != 0) Marshal.Release(targetView);
             if (sourceFolder != 0) Marshal.Release(sourceFolder);
@@ -828,8 +857,114 @@ internal static class ShellViewDropTargetProbe
         finally { Marshal.FreeCoTaskMem(name); }
     }
 
+    private static bool VerifyDropViewState(nint targetView, nint targetFolderView, nint targetFolderPidl,
+        string targetFolderPath, nint sourceFolderView, nint sourceFolderPidl, string sourceFocusedPathBefore,
+        int expectedSelectedCount)
+    {
+        var expectedPaths = Directory.EnumerateFileSystemEntries(targetFolderPath)
+            .Select(Path.GetFullPath).Order(StringComparer.OrdinalIgnoreCase).ToArray();
+        var naturallyUpdated = TryWaitForShellViewPaths(targetFolderView, targetFolderPidl, expectedPaths,
+            TimeSpan.FromMilliseconds(800), out var targetRowsBeforeRefresh);
+        var refreshHr = At<RefreshShellView>(targetView, 8)(targetView);
+        if (refreshHr < 0) Marshal.ThrowExceptionForHR(refreshHr);
+        var updatedAfterRefresh = TryWaitForShellViewPaths(targetFolderView, targetFolderPidl, expectedPaths,
+            TimeSpan.FromMilliseconds(800), out var targetRowsAfterRefresh);
+        var directoryNotificationFallback = false;
+        if (!updatedAfterRefresh)
+        {
+            SHChangeNotify(ShellChangeUpdatedDirectory, ShellChangePathAndFlushNoWait, targetFolderPath, null);
+            directoryNotificationFallback = true;
+            targetRowsAfterRefresh = WaitForShellViewPaths(targetFolderView, targetFolderPidl, expectedPaths);
+        }
+        var targetRowsMatch = naturallyUpdated && targetRowsBeforeRefresh.Select(row => (row.Path, row.PidlIdentity))
+            .SequenceEqual(targetRowsAfterRefresh.Select(row => (row.Path, row.PidlIdentity)));
+        var targetRowPidlIdentitiesUnique = targetRowsAfterRefresh.Select(row => row.PidlIdentity).Distinct(StringComparer.Ordinal).Count() == targetRowsAfterRefresh.Length;
+        if (naturallyUpdated && !targetRowsMatch)
+            throw new InvalidOperationException("The target Shell view did not preserve dropped row PIDL identities across Refresh.");
+        if (!targetRowPidlIdentitiesUnique)
+            throw new InvalidOperationException("The target Shell view returned duplicate absolute PIDL identities for different rows.");
+
+        Marshal.ThrowExceptionForHR(At<ItemCount>(sourceFolderView, 7)(sourceFolderView, 1, out var selectedCount));
+        var sourceFocusedPathAfter = ReadFocusedShellViewPath(sourceFolderView, sourceFolderPidl);
+        var sourceSelectionAndFocusPreserved = selectedCount == expectedSelectedCount &&
+            string.Equals(sourceFocusedPathAfter, sourceFocusedPathBefore, StringComparison.OrdinalIgnoreCase);
+        if (!sourceSelectionAndFocusPreserved)
+            throw new InvalidOperationException($"The source Shell selection/focus changed during drop: selected={selectedCount}/{expectedSelectedCount}; focus='{sourceFocusedPathAfter}'; expected='{sourceFocusedPathBefore}'.");
+
+        Console.WriteLine($"shell-view-drop-target-view-state: rows={targetRowsAfterRefresh.Length}; rows-match-disk=True; naturally-updated-within-800ms={naturallyUpdated}; explicit-refresh=True; directory-notification-fallback={directoryNotificationFallback}; row-pidl-identities-preserved-after-refresh={targetRowsMatch}; row-pidl-identities-unique={targetRowPidlIdentitiesUnique}; source-selected={selectedCount}; source-focus-preserved=True");
+        return true;
+    }
+
+    private static ShellViewRowIdentity[] WaitForShellViewPaths(nint folderView, nint folderPidl,
+        IReadOnlyList<string> expectedPaths)
+    {
+        if (TryWaitForShellViewPaths(folderView, folderPidl, expectedPaths, TimeSpan.FromSeconds(5), out var rows))
+            return rows;
+        throw new TimeoutException($"Target Shell view did not settle to filesystem entries [{string.Join(',', expectedPaths.Select(Path.GetFileName))}]; actual=[{string.Join(',', rows.Select(row => Path.GetFileName(row.Path)))}].");
+    }
+
+    private static bool TryWaitForShellViewPaths(nint folderView, nint folderPidl,
+        IReadOnlyList<string> expectedPaths, TimeSpan timeout, out ShellViewRowIdentity[] rows)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        var stableSamples = 0;
+        rows = [];
+        while (DateTime.UtcNow < deadline && stableSamples < 3)
+        {
+            System.Windows.Forms.Application.DoEvents();
+            rows = ReadShellViewRows(folderView, folderPidl);
+            var paths = rows.Select(row => row.Path).Order(StringComparer.OrdinalIgnoreCase).ToArray();
+            stableSamples = paths.SequenceEqual(expectedPaths, StringComparer.OrdinalIgnoreCase) ? stableSamples + 1 : 0;
+            if (stableSamples < 3) Thread.Sleep(50);
+        }
+        return stableSamples >= 3;
+    }
+
+    private static ShellViewRowIdentity[] ReadShellViewRows(nint folderView, nint folderPidl)
+    {
+        Marshal.ThrowExceptionForHR(At<ItemCount>(folderView, 7)(folderView, 2, out var count));
+        var rows = new List<ShellViewRowIdentity>(count);
+        for (var index = 0; index < count; index++)
+        {
+            Marshal.ThrowExceptionForHR(At<GetItem>(folderView, 6)(folderView, index, out var relativePidl));
+            if (relativePidl == 0) throw new InvalidOperationException($"Target Shell view row {index} returned a null PIDL.");
+            var absolutePidl = ILCombine(folderPidl, relativePidl);
+            try
+            {
+                var byteCount = ILGetSize(absolutePidl);
+                if (byteCount == 0 || byteCount > 65_536) throw new InvalidOperationException($"Target Shell view row {index} has invalid PIDL size {byteCount}.");
+                var pidlBytes = new byte[byteCount];
+                Marshal.Copy(absolutePidl, pidlBytes, 0, pidlBytes.Length);
+                rows.Add(new ShellViewRowIdentity(GetFileSystemPath(absolutePidl), Convert.ToHexString(pidlBytes)));
+            }
+            finally
+            {
+                Marshal.FreeCoTaskMem(absolutePidl);
+                Marshal.FreeCoTaskMem(relativePidl);
+            }
+        }
+        return rows.OrderBy(row => row.Path, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    private static string? ReadFocusedShellViewPath(nint folderView, nint folderPidl)
+    {
+        var hr = At<GetFocusedItem>(folderView, 10)(folderView, out var index);
+        if (hr < 0 || index < 0) return null;
+        Marshal.ThrowExceptionForHR(At<GetItem>(folderView, 6)(folderView, index, out var relativePidl));
+        if (relativePidl == 0) return null;
+        var absolutePidl = ILCombine(folderPidl, relativePidl);
+        try { return GetFileSystemPath(absolutePidl); }
+        finally
+        {
+            Marshal.FreeCoTaskMem(absolutePidl);
+            Marshal.FreeCoTaskMem(relativePidl);
+        }
+    }
+
     private static T At<T>(nint instance, int slot) where T : Delegate =>
         Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(instance), slot * IntPtr.Size));
+
+    private sealed record ShellViewRowIdentity(string Path, string PidlIdentity);
 
     [StructLayout(LayoutKind.Sequential)] private struct PointL { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] private struct FormatEtc
@@ -853,6 +988,8 @@ internal static class ShellViewDropTargetProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetViewWindow(nint self, out nint window);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ItemCount(nint self, uint scope, out int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItem(nint self, int index, out nint itemPidl);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFocusedItem(nint self, out int index);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int RefreshShellView(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SelectItem(nint self, int index, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemObject(nint self, uint item, ref Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumFormatEtc(nint self, uint direction, out nint enumerator);
@@ -881,7 +1018,9 @@ internal static class ShellViewDropTargetProbe
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClipboardFormatNameW(ushort format, System.Text.StringBuilder name, int maxCount);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern uint DragQueryFileW(nint drop, uint file, System.Text.StringBuilder? path, uint pathLength);
     [DllImport("shell32.dll")] private static extern nint ILCombine(nint absoluteParent, nint relativeChild);
+    [DllImport("shell32.dll")] private static extern uint ILGetSize(nint pidl);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SHGetNameFromIDList(nint pidl, uint nameKind, out nint name);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern void SHChangeNotify(uint eventId, uint flags, string path1, string? path2);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern uint RegisterClipboardFormatW(string formatName);
     [DllImport("kernel32.dll", SetLastError = true)] private static extern nuint GlobalSize(nint memory);
     [DllImport("kernel32.dll", SetLastError = true)] private static extern nint GlobalLock(nint memory);

@@ -1862,3 +1862,11 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 在上述直接 `IDropTarget.Drop` 完成多选目录复制后，探针对目标文件夹调用 `IShellFolder.EnumObjects`，读取返回的子 PIDL 并以完整文件系统 parsing name 解析。Shell 枚举结果精确为 `size-10` 与 `size-2`，与目标目录磁盘内容及源选中集合一致。重复 Private Desktop 探针 exit 0，NativeProbe Release build 0 警告/错误，前台、last-input 与清理守卫通过。
 
 这增加了“目标 `IDropTarget` 接受 → 目标 Shell folder 重新枚举”的后台一致性证据；没有创建目标 `IShellView` 或 peer ListView，也没有行 ID/焦点恢复、延迟通知、真实拖动时序、Move effect、可见刷新或产品接线证据。不能视为目标窗格的完整刷新验收。
+
+### 2026-11-01：Shell Drop 后目标 IShellView 行同步
+
+扩展独立 `ShellViewDropTargetProbe`，在临时目标目录创建哨兵文件，并等待真实目标 `IShellView` 将它枚举为行，再删除并等待空行集合；只有完成这次首次枚举后才执行选中项 Copy。此屏障也用于“先销毁再重建目标 view HWND”的对照，避免把首次枚举尚未完成误判成 Drop 刷新失败。
+
+普通目标 view 和先销毁/重建 HWND 两种路径均通过 Private Desktop 探针。重建后初始行集合为 0；两次后续复跑中，Drop 产生的文件均在 800 ms 内自然进入目标 view 行集合，逐路径与磁盘一致；无需显式 `IShellView.Refresh` 或 `SHChangeNotify` 回退。重建路径投影后的 3 个目标行 PIDL 身份唯一，显式 Refresh 后 PIDL 身份保持；源端两项选择和焦点锚点保留。普通路径仍通过单选/多选复制、同卷移动和跨卷 Copy/Shift-Move 矩阵。NativeProbe build 0 警告/错误，Private Desktop 前台、last-input、清理守卫通过。
+
+该探针直接调用 `IDropTarget.DragEnter/Drop`，没有运行 OLE `DoDragDrop` 或模拟鼠标，也没有验证屏幕命中、拖放提示、Move 后目标/源 view 同步、可见 Shell/产品 ExplorerBrowser 或释放版行为。哨兵只证明探针开始拖放前目标 view 曾完成过一次枚举；不能据此认定真实窗口重建时产品会自动复用相同初始化时序。
