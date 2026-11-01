@@ -2423,3 +2423,9 @@ HostProbe Release 构建通过，四种隐藏合成视图场景（正常/忽略�
 先在现有注册 namespace Private Desktop 探针中加入“两个 Shell view 必须有不同位置”的断言，首轮按预期失败：第二个 ExplorerBrowser 仍被导航到 namespace 根 A。随后让它通过同一 provider CLSID 的 path-bearing PIDL 打开独立根 B，并在 A、B 下创建同名 `lifecycle-scan` 子目录，分别包含 3 B 和 7 B 文件。两次列值读取都先返回未就绪，并分别登记根 A/B 的异步请求；销毁 A 的浏览器后只取消 A 的扫描，释放队列闸门后 B 的扫描完成。最终计数为 `finished=2, completed=1, scans=0→1, cache=6→7`，幸存根 B 的列值为 7 B，没有读到 A 的 3 B。
 
 NativeProbe Release 构建 0 警告/错误；注册 namespace Private Desktop watchdog exit 0，前台/last-input 未变、临时 CLSID 与 Desktop NameSpace 清理完成。日志：`src/.state/native-probe-watchdog/20261102-031719-4ef7541f.stdout.log` 与 `.stderr.log`。本证据覆盖同一 app/provider CLSID 下两个 ExplorerBrowser 的不同根路径身份与递归扫描退役；不代表产品 MainWindow 多窗格接线、产品缓存/通知代码、滚动可见回填或用户可见 UI 已验证。
+
+### 2026-11-02：异步递归值完成后的 ExplorerBrowser 视图通知
+
+扩展异根生命周期 Private Desktop 探针：根 A、根 B 分别为同一相对名 `lifecycle-scan` 请求递归值；销毁 A 的 ExplorerBrowser 后仅根 B 扫描成功。新增合同要求 B 的值完成后，不止 provider cache 出现 7 B，还必须发送异步视图更新通知并观察到 Shell provider 再次枚举。NativeProbe Release 构建 0 警告/错误；watchdog exit 0，结果 `notifications=0→1`、`enumerations=27→28`、根 B 值 7 B，前台/last-input 未变且隔离清理通过。日志：`src/.state/native-probe-watchdog/20261102-032008-811afbd6.stdout.log` 与 `.stderr.log`。
+
+这是 ExplorerBrowser 实际 provider/视图的隐藏重枚举证据，说明缓存完成通知到达 Shell 消费链；它没有测量屏幕像素、列表行最终绘制、重枚举引发的闪烁或选区焦点变化，也不等于用户可见刷新体验已改善。当前通知使用合并的 `SHCNE_UPDATEDIR`；下一步评估目标项 `SHCNE_UPDATEITEM` 能否刷新递归列，同时减少整目录重枚举，并比较状态保持。产品未接线。

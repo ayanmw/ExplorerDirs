@@ -862,6 +862,10 @@ internal static class ExplorerBrowserWrapperProbe
             NativeLibrary.GetExport(nativeLibrary, "GetSyntheticOnDemandSizeScanCount"));
         var getSnapshotCount = Marshal.GetDelegateForFunctionPointer<GetProbeCount>(
             NativeLibrary.GetExport(nativeLibrary, "GetSyntheticRecursiveSizeCacheSnapshotCountForProbe"));
+        var getNotificationCount = Marshal.GetDelegateForFunctionPointer<GetProbeCount>(
+            NativeLibrary.GetExport(nativeLibrary, "GetSyntheticAsyncRecursiveSizeNotificationCountForProbe"));
+        var getEnumerationCount = Marshal.GetDelegateForFunctionPointer<GetProbeCount>(
+            NativeLibrary.GetExport(nativeLibrary, "GetSyntheticEnumObjectsCount"));
         var hasSnapshot = Marshal.GetDelegateForFunctionPointer<HasChildScanReservation>(
             NativeLibrary.GetExport(nativeLibrary, "HasSyntheticRecursiveSizeSnapshotForViewProbe"));
         var getViewHoldCount = Marshal.GetDelegateForFunctionPointer<GetProbeCount>(
@@ -870,6 +874,8 @@ internal static class ExplorerBrowserWrapperProbe
         var completedBefore = getCompleted();
         var scansBefore = getScanCount();
         var snapshotsBefore = getSnapshotCount();
+        var notificationsBefore = getNotificationCount();
+        var enumerationsBefore = getEnumerationCount();
         nint peerBrowser = 0, peerParent = 0, peerPidl = 0, peerShellView = 0, peerFolderView = 0, peerViewFolder = 0, peerPersist = 0;
         uint peerInitialized = 0;
         var destroyedBrowser = false;
@@ -956,10 +962,20 @@ internal static class ExplorerBrowserWrapperProbe
             var snapshotsAfterRetire = getSnapshotCount();
             var peerValueAfterRetirement = ReadParsedItemDetailsByName(peerViewFolder, scanChildName, 1);
             var survivingViewHasSnapshot = hasSnapshot(peerShellView, scanChildName) != 0;
+            var notificationDeadline = Environment.TickCount64 + 5000;
+            while ((getNotificationCount() <= notificationsBefore || getEnumerationCount() <= enumerationsBefore) &&
+                   Environment.TickCount64 < notificationDeadline)
+            {
+                Application.DoEvents();
+                Thread.Sleep(10);
+            }
+            var notificationsAfterRetire = getNotificationCount();
+            var enumerationsAfterRetire = getEnumerationCount();
             if (finishedCount != 2 || completedCount != 1 || scansAfterRetire != scansBefore + 1 ||
-                snapshotsAfterRetire < snapshotsBefore + 1 || !survivingViewHasSnapshot || peerValueAfterRetirement != "7")
-                throw new InvalidOperationException($"Retiring the view for root A did not isolate its pending scan from root B: finished={finishedCount}/2; completed={completedCount}/1; scans={scansBefore}->{scansAfterRetire}; snapshots={snapshotsBefore}->{snapshotsAfterRetire}; surviving-root-B-value='{peerValueAfterRetirement}'.");
-            Console.WriteLine($"explorerbrowser-registered-namespace-scan-lifecycle: distinct-root-requests=2; same-relative-child={scanChildName}; expected-root-values=3/7; first-browser-destroyed=True; root-A-request-canceled=True; root-B-request-completed=True; finished={finishedCount}; completed={completedCount}; scan-count={scansBefore}->{scansAfterRetire}; cache-count={snapshotsBefore}->{snapshotsAfterRetire}; root-B-has-target-snapshot={survivingViewHasSnapshot}; root-B-value={peerValueAfterRetirement}");
+                snapshotsAfterRetire < snapshotsBefore + 1 || !survivingViewHasSnapshot || peerValueAfterRetirement != "7" ||
+                notificationsAfterRetire <= notificationsBefore || enumerationsAfterRetire <= enumerationsBefore)
+                throw new InvalidOperationException($"Retiring the view for root A did not isolate root B's scan and refresh its surviving ExplorerBrowser view: finished={finishedCount}/2; completed={completedCount}/1; scans={scansBefore}->{scansAfterRetire}; snapshots={snapshotsBefore}->{snapshotsAfterRetire}; notifications={notificationsBefore}->{notificationsAfterRetire}; enumerations={enumerationsBefore}->{enumerationsAfterRetire}; surviving-root-B-value='{peerValueAfterRetirement}'.");
+            Console.WriteLine($"explorerbrowser-registered-namespace-scan-lifecycle: distinct-root-requests=2; same-relative-child={scanChildName}; expected-root-values=3/7; first-browser-destroyed=True; root-A-request-canceled=True; root-B-request-completed=True; view-notification-sent=True; surviving-view-reenumerated=True; finished={finishedCount}; completed={completedCount}; scan-count={scansBefore}->{scansAfterRetire}; cache-count={snapshotsBefore}->{snapshotsAfterRetire}; notifications={notificationsBefore}->{notificationsAfterRetire}; enumerations={enumerationsBefore}->{enumerationsAfterRetire}; root-B-has-target-snapshot={survivingViewHasSnapshot}; root-B-value={peerValueAfterRetirement}");
         }
         finally
         {
