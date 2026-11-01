@@ -2589,6 +2589,14 @@ App 生命周期接线位置仍是：在 `FolderOpenRouter.TryStart` 成功后�
 
 这仍是隐藏 HostProbe/NativeProbe 证据：未接 App、未进行可见窗口像素/焦点/选区验收，也未改 release。异步值完成后的可靠自动排序仍未解决；本结果只证明正确的行身份通知没有导致重复扩行，并且 burst 后视图稳定。
 
+### 2026-11-02：Shell 视图通知回调投递边界
+
+为解释产品 HostProbe 中“16 次 `SHCNE_UPDATEITEM` 发送、Desktop 观察器只收到 11 项”的差异，诊断 DLL 现在额外记录自定义 `IShellFolderViewCB::MessageSFVCB(SFVM_FSNOTIFY)` 调用数和通知 PIDL 身份。16 项 burst 中 adapter 确实发出 16 次；Shell view 的 `SFVM_FSNOTIFY` 回调为 0 次、无回调 PIDL；独立 Desktop scope observer 在 30 秒内固定收到 `folder-extra-00..10` 共 11 项。HostProbe Release 与诊断 DLL 构建均为 0 警告/错误。
+
+随后只在诊断 DLL/HostProbe 中把 `SFVM_GETNOTIFY` 返回根从物理 backing directory 临时切换到 synthetic namespace root，再运行同一 16 项 burst，结果仍为回调 0、Desktop observer 11/16。由此排除“通知监听根仅选错为 backing directory”这一简单原因；当前证据指向合成子项 `SHCNE_UPDATEITEM` 未进入这个 ExplorerBrowser 自定义 view callback 的通知链，但尚不能确定是 Shell 注册范围、ExplorerBrowser 内部订阅方式还是 PIDL 身份/格式约定导致。此次 burst 按现有完整投递门槛预期失败，不能算通过。
+
+实验切换与计数只存在于 `EXPLORERDIRS_PRODUCT_DIAGNOSTICS` 构建及 HostProbe，不进入正式产品 DLL；没有改 App、发布版本或可见 UI。后续若继续，先验证该 view 实际提供给 `SFVM_GETNOTIFY` 的 PIDL/事件掩码及 Shell 的订阅登记，再设计单项通知对照；在确认 Shell view 能接收并正确刷新目标行前，不把逐行递归大小列接入普通浏览器视图。
+
 ### 2026-11-02：App profile namespace owner 与 native 载荷
 
 App 现复用 `FolderOpenRouter` profile 锁作为注册互斥边界：确认拿到锁后、创建/恢复任何 MainWindow 前，读取 profile `ShellNamespace.ini` 中稳定 CLSID，加载产品 `ExplorerDirs.ShellNamespace.dll`，配置该 profile 的 provider 根，并创建 volatile HKCU CLSID、`InprocServer32`、`ShellFolder` 和 Desktop NameSpace 项。正常退出/启动建窗失败时先按 ownership marker 与 adapter 路径校验并回收，再释放 profile 单实例锁；同 CLSID 的已归属残留会在锁内删除重建，外部/不匹配注册拒绝覆盖。偏好和身份仍由 INI 保存；HKCU 项仅用于当前用户会话的 Shell 激活。进程强杀后的恢复前提已有独立 Private Desktop 原型支持，产品实际窗口关闭和进程强杀尚未运行验收。

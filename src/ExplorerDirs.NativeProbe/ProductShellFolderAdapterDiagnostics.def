@@ -7,3 +7,7 @@ EXPORTS
     GetProductAsyncDirectoryNotificationAttempts
     GetProductAsyncItemNotificationIdentityCount
     GetProductAsyncItemNotificationIdentity
+    GetProductViewItemNotificationCallbackCount
+    SetProductViewNotificationsUseSyntheticRoot
+    GetProductViewItemNotificationIdentityCount
+    GetProductViewItemNotificationIdentity

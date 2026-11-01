@@ -64,6 +64,8 @@ internal static class ShellProviderLocationProbe
             adapter = NativeLibrary.Load(adapterPath);
             var configure = GetExport<ConfigureShellNamespaceRoot>(adapter, "ConfigureShellNamespaceRoot");
             Check(configure(ref classId, fallbackRoot));
+            if (notificationBurst && NativeLibrary.TryGetExport(adapter, "SetProductViewNotificationsUseSyntheticRoot", out var notificationRootAddress))
+                Marshal.GetDelegateForFunctionPointer<SetProductViewNotificationsUseSyntheticRoot>(notificationRootAddress)(1);
             RegisterVolatileClass(classKeyPath, adapterPath);
             classRegistered = true;
             RegisterVolatileNamespace(namespaceKeyPath);
@@ -182,9 +184,12 @@ internal static class ShellProviderLocationProbe
                     catch (TimeoutException) { }
                 }
                 var sentNotificationIdentities = ReadProductDiagnosticItemIdentities(adapter);
+                var viewCallbackIdentities = ReadProductDiagnosticIdentities(adapter,
+                    "GetProductViewItemNotificationIdentityCount", "GetProductViewItemNotificationIdentity");
                 var sentNotificationNames = sentNotificationIdentities.Select(GetProviderItemName).ToArray();
+                var viewCallbackNames = viewCallbackIdentities.Select(GetProviderItemName).ToArray();
                 var receivedNotificationNames = desktopUpdateObserver.UpdatedItemParsingNames.Select(GetProviderItemName).ToArray();
-                Console.WriteLine($"shell-provider-product-async-notifications: adapter-item-send-attempts={ReadProductDiagnosticCounter(adapter, "GetProductAsyncItemNotificationAttempts")}; adapter-pidl-identities=[{string.Join('|', sentNotificationNames)}]; expected-item-names=[{string.Join('|', expectedUpdatedNames)}]; provider-root-item-pidls={itemUpdateObserver.UpdatedItemPidls}; provider-root-events=[{itemUpdateObserver.EventSummary}]; physical-root-item-names=[{string.Join('|', filesystemUpdateObserver.UpdatedItemNames)}]; physical-root-events=[{filesystemUpdateObserver.EventSummary}]; desktop-item-names=[{string.Join('|', desktopUpdateObserver.UpdatedItemNames)}]; desktop-pidl-identities=[{string.Join('|', receivedNotificationNames)}]; identities-match={sentNotificationIdentities.Order(StringComparer.OrdinalIgnoreCase).SequenceEqual(desktopUpdateObserver.UpdatedItemParsingNames.Order(StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase)}; desktop-events=[{desktopUpdateObserver.EventSummary}]; burst-delivery-samples=[{string.Join('|', notificationDeliverySamples)}]");
+                Console.WriteLine($"shell-provider-product-async-notifications: adapter-item-send-attempts={ReadProductDiagnosticCounter(adapter, "GetProductAsyncItemNotificationAttempts")}; adapter-pidl-identities=[{string.Join('|', sentNotificationNames)}]; view-callback-count={ReadProductDiagnosticCounter(adapter, "GetProductViewItemNotificationCallbackCount")}; view-callback-pidl-identities=[{string.Join('|', viewCallbackNames)}]; expected-item-names=[{string.Join('|', expectedUpdatedNames)}]; provider-root-item-pidls={itemUpdateObserver.UpdatedItemPidls}; provider-root-events=[{itemUpdateObserver.EventSummary}]; physical-root-item-names=[{string.Join('|', filesystemUpdateObserver.UpdatedItemNames)}]; physical-root-events=[{filesystemUpdateObserver.EventSummary}]; desktop-item-names=[{string.Join('|', desktopUpdateObserver.UpdatedItemNames)}]; desktop-pidl-identities=[{string.Join('|', receivedNotificationNames)}]; identities-match={sentNotificationIdentities.Order(StringComparer.OrdinalIgnoreCase).SequenceEqual(desktopUpdateObserver.UpdatedItemParsingNames.Order(StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase)}; desktop-events=[{desktopUpdateObserver.EventSummary}]; burst-delivery-samples=[{string.Join('|', notificationDeliverySamples)}]");
                 if (!expectedUpdatedNames.SetEquals(desktopUpdateObserver.UpdatedItemNames))
                     throw new InvalidOperationException($"The Desktop-scope observer did not receive every changed row: expected=[{string.Join('|', expectedUpdatedNames)}]; received=[{string.Join('|', desktopUpdateObserver.UpdatedItemNames)}]; provider-root-events=[{itemUpdateObserver.EventSummary}]; physical-root-events=[{filesystemUpdateObserver.EventSummary}]; desktop-events=[{desktopUpdateObserver.EventSummary}].");
                 if (notificationBurst)
@@ -1170,9 +1175,13 @@ internal static class ShellProviderLocationProbe
             : "unavailable";
 
     private static string[] ReadProductDiagnosticItemIdentities(nint adapter)
+        => ReadProductDiagnosticIdentities(adapter,
+            "GetProductAsyncItemNotificationIdentityCount", "GetProductAsyncItemNotificationIdentity");
+
+    private static string[] ReadProductDiagnosticIdentities(nint adapter, string countExport, string identityExport)
     {
-        if (!NativeLibrary.TryGetExport(adapter, "GetProductAsyncItemNotificationIdentityCount", out var countAddress) ||
-            !NativeLibrary.TryGetExport(adapter, "GetProductAsyncItemNotificationIdentity", out var identityAddress))
+        if (!NativeLibrary.TryGetExport(adapter, countExport, out var countAddress) ||
+            !NativeLibrary.TryGetExport(adapter, identityExport, out var identityAddress))
             return [];
         var count = Marshal.GetDelegateForFunctionPointer<GetCounter>(countAddress)();
         var getIdentity = Marshal.GetDelegateForFunctionPointer<GetProductAsyncItemNotificationIdentity>(identityAddress);
@@ -1879,6 +1888,7 @@ internal static class ShellProviderLocationProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetClassId(ref Guid classId);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetFlag(int enabled);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCounter();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void SetProductViewNotificationsUseSyntheticRoot(int enabled);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)]
     private delegate int GetProductAsyncItemNotificationIdentity(int index,
         [MarshalAs(UnmanagedType.LPWStr)] StringBuilder buffer, uint capacity);

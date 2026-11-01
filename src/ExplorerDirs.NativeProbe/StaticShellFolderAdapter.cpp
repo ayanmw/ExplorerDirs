@@ -1858,6 +1858,10 @@ namespace
     volatile LONG g_productAsyncDirectoryNotificationAttempts = 0;
     std::mutex g_productAsyncItemNotificationIdentityMutex;
     std::vector<std::wstring> g_productAsyncItemNotificationIdentities;
+    volatile LONG g_productViewItemNotificationCallbacks = 0;
+    volatile LONG g_productViewNotificationsUseSyntheticRoot = 0;
+    std::mutex g_productViewItemNotificationIdentityMutex;
+    std::vector<std::wstring> g_productViewItemNotificationIdentities;
 
     void RecordProductAsyncItemNotificationIdentity(PCIDLIST_ABSOLUTE itemPidl)
     {
@@ -1867,6 +1871,20 @@ namespace
         {
             std::lock_guard<std::mutex> lock(g_productAsyncItemNotificationIdentityMutex);
             g_productAsyncItemNotificationIdentities.emplace_back(parsingName);
+        }
+        catch (...) {}
+        CoTaskMemFree(parsingName);
+    }
+
+    void RecordProductViewItemNotificationIdentity(PCIDLIST_ABSOLUTE itemPidl)
+    {
+        if (!itemPidl) return;
+        LPWSTR parsingName = nullptr;
+        if (FAILED(SHGetNameFromIDList(itemPidl, SIGDN_DESKTOPABSOLUTEPARSING, &parsingName)) || !parsingName) return;
+        try
+        {
+            std::lock_guard<std::mutex> lock(g_productViewItemNotificationIdentityMutex);
+            g_productViewItemNotificationIdentities.emplace_back(parsingName);
         }
         catch (...) {}
         CoTaskMemFree(parsingName);
@@ -2995,6 +3013,17 @@ namespace
             if (message == SFVM_GETNOTIFY) TraceSyntheticSortStage("synthetic-sort: SFVM_GETNOTIFY");
             if (message == SFVM_FSNOTIFY)
             {
+#if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
+                InterlockedIncrement(&g_productViewItemNotificationCallbacks);
+                if (wParam)
+                {
+                    auto* callbackPidls = reinterpret_cast<PCIDLIST_ABSOLUTE*>(wParam);
+                    RecordProductViewItemNotificationIdentity(callbackPidls[0]);
+                    const auto callbackEvent = static_cast<LONG>(lParam) & ~SHCNE_INTERRUPT;
+                    if (callbackEvent == SHCNE_RENAMEITEM || callbackEvent == SHCNE_RENAMEFOLDER)
+                        RecordProductViewItemNotificationIdentity(callbackPidls[1]);
+                }
+#endif
                 char notification[160]{};
                 sprintf_s(notification, "synthetic-sort: SFVM_FSNOTIFY; wParam=0x%p; lParam=0x%llX",
                     reinterpret_cast<void*>(wParam), static_cast<unsigned long long>(static_cast<UINT_PTR>(lParam)));
@@ -3059,7 +3088,13 @@ namespace
             }
             if (message != SFVM_GETNOTIFY) return E_NOTIMPL;
             if (!wParam || !lParam || !_backingRoot) return E_POINTER;
+#if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
+            *reinterpret_cast<PIDLIST_ABSOLUTE*>(wParam) =
+                InterlockedCompareExchange(&g_productViewNotificationsUseSyntheticRoot, 0, 0) && _root
+                    ? _root : _backingRoot;
+#else
             *reinterpret_cast<PIDLIST_ABSOLUTE*>(wParam) = _backingRoot;
+#endif
             *reinterpret_cast<LONG*>(lParam) = SHCNE_ALLEVENTS;
             return S_OK;
         }
@@ -5077,6 +5112,26 @@ extern "C" HRESULT WINAPI GetProductAsyncItemNotificationIdentity(LONG index, LP
     std::lock_guard<std::mutex> lock(g_productAsyncItemNotificationIdentityMutex);
     if (index < 0 || static_cast<size_t>(index) >= g_productAsyncItemNotificationIdentities.size()) return E_BOUNDS;
     return StringCchCopyW(buffer, capacity, g_productAsyncItemNotificationIdentities[static_cast<size_t>(index)].c_str());
+}
+
+extern "C" LONG WINAPI GetProductViewItemNotificationCallbackCount()
+{ return InterlockedCompareExchange(&g_productViewItemNotificationCallbacks, 0, 0); }
+
+extern "C" void WINAPI SetProductViewNotificationsUseSyntheticRoot(BOOL enabled)
+{ InterlockedExchange(&g_productViewNotificationsUseSyntheticRoot, enabled ? 1 : 0); }
+
+extern "C" LONG WINAPI GetProductViewItemNotificationIdentityCount()
+{
+    std::lock_guard<std::mutex> lock(g_productViewItemNotificationIdentityMutex);
+    return static_cast<LONG>(g_productViewItemNotificationIdentities.size());
+}
+
+extern "C" HRESULT WINAPI GetProductViewItemNotificationIdentity(LONG index, LPWSTR buffer, UINT capacity)
+{
+    if (!buffer || capacity == 0) return E_INVALIDARG;
+    std::lock_guard<std::mutex> lock(g_productViewItemNotificationIdentityMutex);
+    if (index < 0 || static_cast<size_t>(index) >= g_productViewItemNotificationIdentities.size()) return E_BOUNDS;
+    return StringCchCopyW(buffer, capacity, g_productViewItemNotificationIdentities[static_cast<size_t>(index)].c_str());
 }
 #endif
 
