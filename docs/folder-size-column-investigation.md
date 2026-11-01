@@ -1592,3 +1592,9 @@ Private Desktop 探针在已注册 namespace 的 `child` 目录下新增 7 B 文
 根因是重新枚举只把新递归大小放进新 PIDL；DefView 会保留同一文件夹原行 PIDL，因此行查询回退到旧值。现在，仅在启用隔离通知转发时，对同步递归枚举得到的目录快照也写入该 provider 共享的 identity-validated snapshot store。旧 PIDL 查询时按绝对 parsing name 与 file identity 命中同一快照，能拿到新值；异步按需模式仍由现有扫描任务写入此 store。Private Desktop 探针同时确认根目录外部新增行、子目录内新建文件后的递归大小读值，以及进入子目录/返回根；前台和输入守卫未变化，临时注册已清理。现有静态 folder contract 与 async on-demand smoke 也通过。
 
 边界：这是 NativeProbe 注册 namespace 的逻辑视图读取证据，不是屏幕绘制或产品接线验收；snapshot 写入失败仍不应阻断目录枚举。ExplorerBrowser 产品及 release 未修改。
+
+### 2026-11-01：注册 namespace 原生文件删除命令执行
+
+在同一临时注册 namespace 探针中，先经包装文件项取得原生 `IContextMenu` 并确认其 canonical `delete` 动词，再调用 `IContextMenu::InvokeCommand`，传入该命令 offset 和 `CMIC_MASK_FLAG_NO_UI | CMIC_MASK_SHIFT_DOWN`。随机临时夹具中的 `context-delete.txt` 被 backing 文件系统实际删除；无确认窗口出现。随后已有根列表新增项通知、子目录创建通知与递归大小回填、目录进入/返回仍通过，前台/输入守卫和临时注册清理通过。
+
+这证明文件项 context menu 的一个破坏性命令能穿过包装 namespace 到达真实 backing 文件系统；它不等同于菜单展示或鼠标命中验证，也未证明其他命令（打开、复制、粘贴、属性、新建、撤销/重做）及背景菜单命令路由。只操作每轮新建的临时文件，ExplorerBrowser 产品与 release 未改。

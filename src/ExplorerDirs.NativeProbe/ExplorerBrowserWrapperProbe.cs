@@ -230,6 +230,13 @@ internal static class ExplorerBrowserWrapperProbe
             if (backgroundMenuHr < 0 || backgroundMenu == 0 || backgroundMenuQueryHr < 0 || backgroundMenuItemCount <= 0)
                 throw new InvalidOperationException("The registered namespace did not expose native background-folder commands.");
 
+            File.WriteAllText(Path.Combine(fixture, "context-delete.txt"), "temporary native-menu delete target");
+            PrivateDesktopShellProbe.ReportStage("namespace-probe: invoke-native-delete-command");
+            var deleteCommandOffset = InvokeNativeDeleteWithoutUi(viewFolder, "context-delete.txt");
+            if (File.Exists(Path.Combine(fixture, "context-delete.txt")))
+                throw new InvalidOperationException("The registered namespace's native Delete verb did not reach the backing file.");
+            Console.WriteLine($"explorerbrowser-registered-namespace: native-delete-verb=delete; command-offset={deleteCommandOffset}; backing-file-removed=True; no-confirmation-ui=True");
+
             PrivateDesktopShellProbe.ReportStage("namespace-probe: native-item-menu-and-rename");
             Marshal.ThrowExceptionForHR(ParseDisplayName(viewFolder, "rename-source.txt", out var renameSource));
             nint contextMenu = 0, popup = 0;
@@ -527,6 +534,52 @@ internal static class ExplorerBrowserWrapperProbe
         finally { Marshal.FreeHGlobal(items); }
     }
 
+    private static uint InvokeNativeDeleteWithoutUi(nint folder, string name)
+    {
+        Marshal.ThrowExceptionForHR(ParseDisplayName(folder, name, out var item));
+        nint contextMenu = 0, menu = 0;
+        try
+        {
+            Marshal.ThrowExceptionForHR(GetUiObjectOf(folder, item, ContextMenuId, out contextMenu));
+            menu = CreatePopupMenu();
+            if (menu == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            var queryResult = At<QueryContextMenu>(contextMenu, 3)(contextMenu, menu, 0, 1, 0x7FFF, 0x10 | 0x800);
+            Marshal.ThrowExceptionForHR(queryResult);
+            var commandCount = queryResult & 0xFFFF;
+            var verbBuffer = Marshal.AllocHGlobal(512);
+            try
+            {
+                for (uint commandOffset = 0; commandOffset < commandCount; commandOffset++)
+                {
+                    Marshal.WriteInt16(verbBuffer, 0);
+                    if (At<GetCommandString>(contextMenu, 5)(contextMenu, commandOffset, 4, 0, verbBuffer, 256) != 0)
+                        continue;
+                    var verb = Marshal.PtrToStringUni(verbBuffer);
+                    if (!string.Equals(verb, "delete", StringComparison.OrdinalIgnoreCase)) continue;
+
+                    var invokeInfo = new NativeInvokeInfo
+                    {
+                        Size = Marshal.SizeOf<NativeInvokeInfo>(),
+                        // This generated fixture item is disposable; request permanent deletion without a modal confirmation.
+                        Mask = 0x00000400 | 0x00000100, // CMIC_MASK_FLAG_NO_UI | CMIC_MASK_SHIFT_DOWN
+                        Verb = (nint)commandOffset,
+                        Show = 0
+                    };
+                    Marshal.ThrowExceptionForHR(At<InvokeCommand>(contextMenu, 4)(contextMenu, ref invokeInfo));
+                    return commandOffset;
+                }
+            }
+            finally { Marshal.FreeHGlobal(verbBuffer); }
+            throw new InvalidOperationException("The native item menu did not expose a canonical Delete verb.");
+        }
+        finally
+        {
+            if (menu != 0) DestroyMenu(menu);
+            if (contextMenu != 0) Marshal.Release(contextMenu);
+            Marshal.FreeCoTaskMem(item);
+        }
+    }
+
     private static void ReadActiveFolder(nint browser, ref nint shellView, ref nint folderView, ref nint viewFolder, ref nint persist)
     {
         var shellViewId = ShellViewId;
@@ -650,6 +703,17 @@ internal static class ExplorerBrowserWrapperProbe
         public uint Type;
         public nint Filter;
     }
+    [StructLayout(LayoutKind.Sequential)] private struct NativeInvokeInfo
+    {
+        public int Size;
+        public uint Mask;
+        public nint Window, Verb, Parameters, Directory;
+        public int Show;
+        public uint HotKey;
+        public nint Icon, Title, VerbW, ParametersW, DirectoryW, TitleW;
+        public ProbePoint Point;
+    }
+    [StructLayout(LayoutKind.Sequential)] private struct ProbePoint { public int X, Y; }
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateAdapter(nint folder, out nint adapter);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int Initialize(nint self, nint parent, ref ProbeRect rect, ref ProbeFolderSettings settings);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int BrowseToObject(nint self, nint value, uint flags);
@@ -667,6 +731,8 @@ internal static class ExplorerBrowserWrapperProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewObjectNative(nint self, nint owner, ref Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int SetNameOfNative(nint self, nint owner, nint item, [MarshalAs(UnmanagedType.LPWStr)] string name, uint flags, out nint renamed);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryContextMenu(nint self, nint menu, uint index, uint first, uint last, uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCommandString(nint self, uint command, uint flags, nint reserved, nint buffer, uint bufferLength);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int InvokeCommand(nint self, ref NativeInvokeInfo info);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetFolderClassId(ref Guid classId);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int SetBackingPath([MarshalAs(UnmanagedType.LPWStr)] string path);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetProbeFlag(int enabled);
