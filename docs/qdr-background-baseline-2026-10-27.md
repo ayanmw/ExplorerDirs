@@ -37,6 +37,10 @@ NativeProbe 的 `--inspect-qdr-viewstate <path>` 直接调用生产 `QdrImporter
 
 本次仅读取文件内容及哈希/元数据，没有修改或导入用户会话。当前 `start.qdr` SHA-256 为 `A4B12E81EA8F4273DBA5C52A2D114D2F3DEB04858B3C3D57B5E390873C48D15B`，与 2026-10-27 基线记录的 hash、标签数不同，说明该文件自旧基线后已变化；旧基线原值保留，不覆盖。此处只验证 importer 的解析与键分布，不证明 Shell 对这些真实标签视图的可见恢复，也不等于 Q-Dir 消费本程序导出文件。
 
+随后以本机 `start.qdr` 运行 `--qdr-imported-view-state-restore-private-desktop`：选取第一个有列快照的已导入标签，把生产 importer 返回的 4 列、列宽、名称升序键与分组状态原样交给生产 `ShellViewStateRestore`，在隔离 synthetic `IShellView` 中应用。Shell 读回名称/日期/类型/大小四列与名称升序键，行视图保留两个合成条目；探针 exit 0，前台/输入/隔离清理守卫通过。NativeProbe Release build 0 警告/错误。
+
+这证明真实 Q-Dir 文件的一个标准文件视图快照可被生产恢复器和原生 Shell 接受；底层 folder 是合成 namespace，数据行不是 Q-Dir 标签路径，未创建/显示真实 Q-Dir 标签视图，也没有检查同一文件中其余 41 个标签逐个恢复、分组读回、模式切换或特殊 known-folder 列。产品 ExplorerBrowser、跨窗格可见行为及 Q-Dir 对本程序导出文件的消费仍未验证。
+
 ## 百分号目录与编码 PIDL 的身份边界
 
 后台原生路径解析回归新增两个实际临时目录：一个名称含 `%唯一变量名%`，另一个对应变量展开后的目标。变量仅写入测试进程并在 finally 移除，PIDL 指针在 finally 释放；不创建 Shell view/HWND。
