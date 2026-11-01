@@ -2064,3 +2064,9 @@ NativeProbe Release build 通过，0 警告/错误。按无窗口优先约束，
 在 `BindToObject("nested")` 与 `CreateViewObject(IShellView)` 增加 provider 边界日志后再次运行：nested `BindToObject` 多次被调用，均以 `S_OK` 返回目标 `fixture\child\nested`；但整个 nested 导航期间没有对应的 `CreateViewObject(IShellView)` 进入记录。Browser 仍报告 `pending → complete`，未报告失败；随后显式导航同一物理 nested 路径时，文件系统 view 创建成功并读回目标路径。由此进一步定位为 Shell/Browser 没有向 nested provider 请求 view 创建，不是 `SHCreateShellFolderView` 返回失败。
 
 Native adapter 与 NativeProbe Release 构建通过；Private Desktop watchdog 的 nested view 功能断言按预期以 exit 1 暴露 view 未创建，隔离守卫没有检测到前台或输入污染。日志：`src/.state/native-probe-watchdog/20261101-215746-2a0b9bee.stdout.log`。下一步核对嵌套 PIDL 的子项属性、folder binding interface / bind context 与 view site 初始化时序。证明 Shell view 可稳定创建前，不把递归列原型接入产品 ExplorerBrowser。
+
+### 2026-11-01：直接创建 nested IShellView 对照
+
+在已由 `BindToObject("nested")` 返回的 nested `IShellFolder2` 上，直接调用 `CreateViewObject(IID_IShellView)`，结果为 `S_OK` 且返回非空 view；随后释放该接口。这个调用单独触发了 nested provider 的 `CreateViewObject` 日志，证明 provider view factory 本身可工作。接着由 ExplorerBrowser 执行 `BrowseToObject`，它仍报告 `pending/complete`，但活动位置留在 `child` 且 PIDL 不匹配；直接物理路径导航依旧创建 filesystem view 并成功。
+
+NativeProbe Release build 0 警告/错误；Private Desktop 功能运行因既有 wrapped nested 导航断言失败而 exit 1，隔离守卫仍报告前台与 last-input 未变。日志：`src/.state/native-probe-watchdog/20261101-220048-ba141f85.stdout.log`。这排除了 nested `CreateViewObject` 不能创建 view 的假设；当前证据指向 ExplorerBrowser 对已注册包装 namespace 的深层 `BrowseToObject` 导航未切换 view。该调用只证明 view 对象能创建，未证明其 `CreateViewWindow`、菜单/命令、文件操作、通知及历史链路可用，也未接入产品。

@@ -427,6 +427,7 @@ internal static class ExplorerBrowserWrapperProbe
                     ref nestedFolderIid, out var directlyBoundNestedFolder);
                 Marshal.FreeCoTaskMem(nestedItem);
                 var directlyBoundNestedPidlMatches = false;
+                var directlyBoundNestedViewCreated = false;
                 if (nestedBindHr >= 0 && directlyBoundNestedFolder != 0)
                 {
                     var nestedPersistId = PersistFolder2Id;
@@ -440,10 +441,15 @@ internal static class ExplorerBrowserWrapperProbe
                         }
                         finally { Marshal.Release(directlyBoundPersist); }
                     }
+                    var nestedViewIid = ShellViewId;
+                    var nestedViewHr = At<CreateViewObjectNative>(directlyBoundNestedFolder, 8)(
+                        directlyBoundNestedFolder, 0, ref nestedViewIid, out var directlyCreatedNestedView);
+                    directlyBoundNestedViewCreated = nestedViewHr >= 0 && directlyCreatedNestedView != 0;
+                    if (directlyCreatedNestedView != 0) Marshal.Release(directlyCreatedNestedView);
                 }
                 var absoluteNestedNameMatches = absoluteNestedNameHr >= 0 &&
                     PidlBytesEqual(expectedNestedRoot, absoluteNestedNamePidl);
-                Console.WriteLine($"explorerbrowser-registered-namespace: direct-nested-bind-hr=0x{nestedBindHr:X8}; direct-nested-pidl-matches={directlyBoundNestedPidlMatches}; absolute-nested-parse-hr=0x{absoluteNestedNameHr:X8}; absolute-nested-pidl-matches={absoluteNestedNameMatches}");
+                Console.WriteLine($"explorerbrowser-registered-namespace: direct-nested-bind-hr=0x{nestedBindHr:X8}; direct-nested-pidl-matches={directlyBoundNestedPidlMatches}; direct-nested-view-created={directlyBoundNestedViewCreated}; absolute-nested-parse-hr=0x{absoluteNestedNameHr:X8}; absolute-nested-pidl-matches={absoluteNestedNameMatches}");
                 var nestedNavigationPidl = absoluteNestedNameHr >= 0 ? absoluteNestedNamePidl : expectedNestedRoot;
                 try
                 {
