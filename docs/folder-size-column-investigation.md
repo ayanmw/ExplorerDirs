@@ -2405,3 +2405,9 @@ HostProbe Release 构建通过，四种隐藏合成视图场景（正常/忽略�
 隔离发布脚本现在复制有效的 `ShellNamespace.ini`，为预览 profile 生成新 CLSID，并在副本的 `.ini` 状态文件与 `.qdr` 的 `ExplorerDirs.State` Base64 JSON payload 中重映射旧 GUID；测试确认 source profile 逐文件 hash 不变、QDR base 物理路径不变。无该文件的旧 profile 保持原复制行为；无效 GUID 与未来格式会在构建及创建 release 前被拒绝。`publish-smoke.ps1` 通过 fixture 真实执行打包脚本，没有真实 release 或 GUI。
 
 应用 `MainWindow` 现在从共享 profile 目录加载/首次创建该 CLSID，并将它传给 Q-Dir 导出、桌面工作区导出及导入前备份的 `QdrExporter.Prepare/Render/SaveBackup` 路径；App 与 SettingsSmoke Release build 0 警告/错误，profile-store 和 QDR location smoke 通过。应用尚未创建/回收 volatile Shell namespace，因此当前没有产品 view 会使用这个 CLSID；QuickLinks 下 `.lnk` 内部 PIDL 也未验证。以上只证明配置身份持久化、QDR 编码规则和隔离复制转换已接线，未证明产品 Shell 位置恢复、Q-Dir GUI 互操作或 Quick Link 的自定义 namespace 往返。
+
+### 2026-11-02：按需递归列无窗口合同复验
+
+重新构建 NativeProbe 时，首次编译发现它链接了应用 `QdrExporter.cs`，却漏掉该文件的 `QdrShellPathCodec.cs` 依赖；SettingsSmoke 已包含同一依赖。补齐 NativeProbe 项目源码链接后，Release 构建通过（0 警告、0 错误）。无窗口 synthetic-folder 探针复验：枚举不启动递归扫描，首次读取列值才扫描，重复读取命中缓存，`CompareIDs` 不触发额外扫描；异步探针的首次列读取立即返回，后台完成后发布 10 B/2 文件/1 子目录摘要，最多两个 worker，view 退役会取消 8 个排队请求。`--recursive-directory-scanner-smoke` 通过。
+
+这只是扫描器、provider 与异步快照的无窗口合同复验，没有启动 ExplorerBrowser/IShellView，也没有验证滚动进入新视口时的可见行覆盖、绘制稳定性、真实慢盘表现或产品接线。此前隔离宿主测得列开启后 Shell 会请求几乎所有可见文件夹，因此按需主要避免未启用列/未请求行的工作，并不能保证启用列后只扫描屏幕上的单行；该限制仍是进入产品评审前的关键验收项。

@@ -61,6 +61,7 @@
     <Compile Include="../ExplorerDirs.App/ShellViewStateRestore.cs" Link="ShellViewStateRestore.cs" />
     <Compile Include="../ExplorerDirs.App/QdrImporter.cs" Link="QdrImporter.cs" />
     <Compile Include="../ExplorerDirs.App/QdrExporter.cs" Link="QdrExporter.cs" />
+    <Compile Include="../ExplorerDirs.App/QdrShellPathCodec.cs" Link="QdrShellPathCodec.cs" />
     <Compile Include="../ExplorerDirs.App/QdrLayoutMap.cs" Link="QdrLayoutMap.cs" />
     <Compile Include="../ExplorerDirs.App/QdrProportions.cs" Link="QdrProportions.cs" />
     <Compile Include="../ExplorerDirs.App/LayoutProportionsStore.cs" Link="LayoutProportionsStore.cs" />
