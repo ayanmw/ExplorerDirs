@@ -307,16 +307,22 @@ public static class SyntheticShellSortProbe
             useWpfParent: true, viewStateToRestore: view, loadQdrStateFromFile: true);
     }
 
-    internal static int RunQdrImportedViewStateRestoreProbe(string qdrPath)
+    internal static int RunQdrImportedViewStateRestoreProbe(string qdrPath, uint? requiredMode = null,
+        bool requireDescending = false)
     {
         var imported = QdrImporter.Load(qdrPath);
-        var candidate = imported.Panes.SelectMany((pane, paneIndex) => pane.Select((tab, tabIndex) =>
+        var candidates = imported.Panes.SelectMany((pane, paneIndex) => pane.Select((tab, tabIndex) =>
                 (Tab: tab, Pane: paneIndex, Index: tabIndex)))
-            .FirstOrDefault(item => item.Tab.View.DisplayColumns is { Count: > 0 });
+            .Where(item => item.Tab.View.DisplayColumns is { Count: > 0 } &&
+                (requiredMode is null || item.Tab.View.Mode == requiredMode) &&
+                (!requireDescending || item.Tab.View.SortColumns.Any(sort => sort.Direction < 0))).ToArray();
+        var candidate = candidates.FirstOrDefault(item => item.Tab.View.DisplayColumns!
+            .Any(column => column.Key.FormatId != new Guid("B725F130-47EF-101A-A5F1-02608C9EEBAC")));
+        if (candidate.Tab is null) candidate = candidates.FirstOrDefault();
         if (candidate.Tab is null)
             throw new InvalidOperationException("The Q-Dir file contains no importable tab with a captured column layout.");
         var view = candidate.Tab.View;
-        Console.WriteLine($"qdr-file-view-restore: parsed=True; tabs={imported.TabCount}; selected-source=pane-{candidate.Pane + 1}-tab-{candidate.Index + 1}; columns={view.DisplayColumns!.Count}; sorts={view.SortColumns.Count}; grouped={view.GroupKey is not null}; warnings={imported.Warnings.Count}");
+        Console.WriteLine($"qdr-file-view-restore: parsed=True; tabs={imported.TabCount}; selected-source=pane-{candidate.Pane + 1}-tab-{candidate.Index + 1}; mode={view.Mode}/{view.IconSize}; columns=[{FormatColumns(view.DisplayColumns!)}]; sorts=[{string.Join('|', view.SortColumns.Select(sort => $"{sort.Key}/{sort.Direction}"))}]; grouped={view.GroupKey is not null}; warnings={imported.Warnings.Count}");
         return Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
             useWpfParent: true, viewStateToRestore: view, verifyRecursiveRowValues: false);
     }
@@ -802,12 +808,25 @@ public static class SyntheticShellSortProbe
                         new(column.Key.FormatId, column.Key.PropertyId), column.Direction))
                         .SequenceEqual(stateToRestore.SortColumns))
                     throw new InvalidOperationException("Native Shell did not read back the imported Q-Dir column layout/sort state.");
+                Check(At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var restoredMode, out var restoredIconSize));
+                if (restoredMode != stateToRestore.Mode || restoredIconSize != stateToRestore.IconSize)
+                    throw new InvalidOperationException($"Native Shell view mode differs from imported Q-Dir state: expected={stateToRestore.Mode}/{stateToRestore.IconSize}; actual={restoredMode}/{restoredIconSize}.");
+                PropertyKeyState? restoredGroup = null;
+                var restoredGroupAscending = true;
+                if (stateToRestore.GroupKey is not null)
+                {
+                    Check(At<GetGroupBy>(folderView, 18)(folderView, out var nativeGroup, out var nativeGroupAscending));
+                    restoredGroup = new(nativeGroup.FormatId, nativeGroup.PropertyId);
+                    restoredGroupAscending = nativeGroupAscending != 0;
+                    if (restoredGroup != stateToRestore.GroupKey || restoredGroupAscending != stateToRestore.GroupAscending)
+                        throw new InvalidOperationException("Native Shell did not read back the imported Q-Dir grouping state.");
+                }
                 Console.WriteLine($"shell-view-state-restore: native-restore=True; columns=[{FormatColumns(restoredColumns)}]; sorts=[{FormatSortColumns(CaptureNativeSortColumns(folderView))}]");
                 var restoreListView = FindListView(view);
                 if (!verifyRecursiveRowValues)
                 {
                     var restoredRowNames = WaitForNames(restoreListView, module, "child", expectedCount: 2);
-                    Console.WriteLine($"qdr-file-view-restore: native-restore=True; rows=[{string.Join('|', restoredRowNames)}]; columns={restoredColumns.Count}; sorts={CaptureNativeSortColumns(folderView).Length}");
+                    Console.WriteLine($"qdr-file-view-restore: native-restore=True; mode={restoredMode}/{restoredIconSize}; group={restoredGroup}/{restoredGroupAscending}; rows=[{string.Join('|', restoredRowNames)}]; columns={restoredColumns.Count}; sorts={CaptureNativeSortColumns(folderView).Length}");
                     return 0;
                 }
                 var restoredNames = WaitForNames(restoreListView, module, "child", expectedCount: 2);
@@ -4804,8 +4823,10 @@ public static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFolder(nint self, in Guid iid, out nint folder);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ActivateView(nint self, uint state);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetViewModeAndIconSize(nint self, uint mode, int iconSize);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetViewModeAndIconSize(nint self, out uint mode, out int iconSize);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSortColumns(nint self, nint columns, int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetGroupBy(nint self, ref ShellColumnManager.NativeKey key, int ascending);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetGroupBy(nint self, out ShellColumnManager.NativeKey key, out int ascending);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSortColumns(nint self, nint columns, int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSortColumnCount(nint self, out int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int RefreshView(nint self);

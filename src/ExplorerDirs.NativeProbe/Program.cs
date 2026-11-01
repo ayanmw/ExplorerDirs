@@ -97,6 +97,12 @@ internal static class Program
             return PrivateDesktopShellProbe.RunRecursiveSizeViewStateRestoreProbe();
         if (args.Length == 2 && args[0] == "--qdr-imported-view-state-restore-private-desktop")
             return PrivateDesktopShellProbe.RunQdrImportedViewStateRestoreProbe(args[1]);
+        if (args.Length == 3 && args[0] == "--qdr-imported-view-state-restore-private-desktop" &&
+            uint.TryParse(args[2], out var qdrViewMode))
+            return PrivateDesktopShellProbe.RunQdrImportedViewStateRestoreProbe(args[1], qdrViewMode);
+        if (args.Length == 3 && args[0] == "--qdr-imported-view-state-restore-private-desktop" &&
+            args[2] == "descending")
+            return PrivateDesktopShellProbe.RunQdrImportedViewStateRestoreProbe(args[1], requireDescending: true);
         if (args.Length == 1 && args[0] == "--synthetic-recursive-directory-size-on-demand-column-wpf-host-private-desktop")
             return PrivateDesktopShellProbe.RunSyntheticRecursiveDirectorySizeSortWithOnDemandColumnWpfHost();
         if (args.Length == 1 && args[0] == "--synthetic-recursive-directory-size-async-on-demand-column-wpf-host-private-desktop")

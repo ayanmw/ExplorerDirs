@@ -41,6 +41,18 @@ NativeProbe 的 `--inspect-qdr-viewstate <path>` 直接调用生产 `QdrImporter
 
 这证明真实 Q-Dir 文件的一个标准文件视图快照可被生产恢复器和原生 Shell 接受；底层 folder 是合成 namespace，数据行不是 Q-Dir 标签路径，未创建/显示真实 Q-Dir 标签视图，也没有检查同一文件中其余 41 个标签逐个恢复、分组读回、模式切换或特殊 known-folder 列。产品 ExplorerBrowser、跨窗格可见行为及 Q-Dir 对本程序导出文件的消费仍未验证。
 
+随后针对 `start2.qdr` 的变体继续验证：生产 importer 显示 44 个标签中 40 个保存视图快照；其中 mode 4/16、有分组的 pane-1/tab-12 含四列（两个标准列加两个 `{9B174B35-40FF-11D2-A27E-00C04FC30871}:3/:2` 列）。Shell 在隔离 synthetic `IShellView` 中读回四列及宽度、名称升序、mode `4/16` 和分组键 `{B725F130-47EF-101A-A5F1-02608C9EEBAC}:4`/升序；该结果只证明列身份和状态被接收，不证明两个特殊列在真实目录中能提供正确值。另选 mode 3/16 的 pane-1/tab-5，Shell 读回 mode、四个标准列、名称排序且无分组状态；两次 Private Desktop 守卫均通过，未打印路径。
+
+已读样本中的 mode-shape 覆盖目前仅确认 start2 有 Details（mode 4）和 List（mode 3），未覆盖图标/Tiles/Content 或每个窗格所有标签。特殊属性列的值提供、完整视觉次序、多列实际排序、Q-Dir 其他版本差异与用户可见 ExplorerBrowser 行为仍未验证。
+
+### 2026-11-02 Q-Dir 实际列/分组/方向状态变体恢复
+
+重新读取四份样本的状态分布，均为 mode 4（Details），`start.qdr`、`start2.qdr`、`default.qdr` 另含 mode 3（List）；可见快照中没有图标/Tiles/Content 模式。排序方向同时有升序 `+1` 和降序 `-1`，日期列分组样本为降序。NativeProbe 的 `--qdr-imported-view-state-restore-private-desktop <qdr> [3|descending]` 选择目标状态并在恢复后核对 Shell 原生的列宽、mode/icon size、sort key/direction、group key/direction。
+
+三种真实标签状态均通过：`start2.qdr` pane-1/tab-12 为 Details、分组升序、名称升序，含两个 `{9B174B35-40FF-11D2-A27E-00C04FC30871}:3/:2` 特殊列；同文件 pane-1/tab-5 为 List、未分组、名称升序；pane-3/tab-1 为 Details、日期列排序与分组均降序。Shell 均读回保存的状态，视图中两条合成夹具行保留。NativeProbe Release build 0 警告/错误，Private Desktop 守卫通过，未输出路径。
+
+这验证的是 importer 状态被原生 `IShellView` 接收/读回。特殊列没有在对应物理 Shell namespace 中验证值或标题；行数据、Shell folder 均为合成夹具。产品 ExplorerBrowser、Q-Dir GUI 消费本项目导出、其他查看模式及真实多标签 UI 恢复仍未验证。
+
 ## 百分号目录与编码 PIDL 的身份边界
 
 后台原生路径解析回归新增两个实际临时目录：一个名称含 `%唯一变量名%`，另一个对应变量展开后的目标。变量仅写入测试进程并在 finally 移除，PIDL 指针在 finally 释放；不创建 Shell view/HWND。

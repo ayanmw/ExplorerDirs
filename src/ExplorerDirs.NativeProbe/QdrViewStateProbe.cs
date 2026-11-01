@@ -14,13 +14,17 @@ internal static class QdrViewStateProbe
             .OrderByDescending(group => group.Count())
             .Select(group => $"{group.Key} x{group.Count()}");
         var sortKeys = tabs.SelectMany(tab => tab.View.SortColumns)
-            .Select(column => Format(column.Key.FormatId, column.Key.PropertyId))
+            .Select(column => $"{Format(column.Key.FormatId, column.Key.PropertyId)}/{column.Direction}")
             .GroupBy(key => key, StringComparer.OrdinalIgnoreCase)
             .OrderByDescending(group => group.Count())
             .Select(group => $"{group.Key} x{group.Count()}");
         var groupKeys = tabs.Where(tab => tab.View.GroupKey is not null)
-            .Select(tab => Format(tab.View.GroupKey!.FormatId, tab.View.GroupKey.PropertyId))
+            .Select(tab => $"{Format(tab.View.GroupKey!.FormatId, tab.View.GroupKey.PropertyId)}/{(tab.View.GroupAscending ? 1 : -1)}")
             .GroupBy(key => key, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(group => group.Count())
+            .Select(group => $"{group.Key} x{group.Count()}");
+        var modes = tabs.Where(tab => tab.View.DisplayColumns is not null)
+            .GroupBy(tab => $"mode={tab.View.Mode},icon={tab.View.IconSize},grouped={tab.View.GroupKey is not null}")
             .OrderByDescending(group => group.Count())
             .Select(group => $"{group.Key} x{group.Count()}");
 
@@ -28,6 +32,7 @@ internal static class QdrViewStateProbe
         Console.WriteLine($"qdr-viewstate: display-keys=[{string.Join("; ", displayKeys)}]");
         Console.WriteLine($"qdr-viewstate: sort-keys=[{string.Join("; ", sortKeys)}]");
         Console.WriteLine($"qdr-viewstate: group-keys=[{string.Join("; ", groupKeys)}]");
+        Console.WriteLine($"qdr-viewstate: mode-shapes=[{string.Join("; ", modes)}]");
         return 0;
     }
 

@@ -279,9 +279,10 @@ internal static class PrivateDesktopShellProbe
             () => SyntheticShellSortProbe.RunRecursiveSizeViewStateRestoreProbe(),
             TimeSpan.FromSeconds(45), initializeOle: true);
 
-    internal static int RunQdrImportedViewStateRestoreProbe(string path) =>
+    internal static int RunQdrImportedViewStateRestoreProbe(string path, uint? mode = null,
+        bool requireDescending = false) =>
         Run("qdr-imported-view-state-restore",
-            () => SyntheticShellSortProbe.RunQdrImportedViewStateRestoreProbe(path),
+            () => SyntheticShellSortProbe.RunQdrImportedViewStateRestoreProbe(path, mode, requireDescending),
             TimeSpan.FromSeconds(45), initializeOle: true);
 
     internal static int RunSyntheticRecursiveDirectorySizeSortWithOnDemandColumnWpfHost() =>
