@@ -173,6 +173,7 @@ internal static class ShellProviderLocationProbe
             }
 
             stage = "async-values";
+            ResetProductCompareDiagnostics(adapter);
             var readValues = typeof(ShellProviderLocationProbe).GetMethod("ReadRecursiveValues",
                 BindingFlags.Static | BindingFlags.NonPublic)!;
             string[] values = [];
@@ -183,6 +184,9 @@ internal static class ShellProviderLocationProbe
                     TryReadBytes(value, out var bytes) ? bytes : ulong.MaxValue)
                     .Order().SequenceEqual(expectedRecursiveValues);
             }, TimeSpan.FromSeconds(20), $"the product Shell view did not fill all {expectedFolderCount} recursive values asynchronously");
+            var compareDiagnosticsAfterAsyncFill = ReadProductCompareDiagnostics(adapter);
+            if (compareDiagnosticsAfterAsyncFill.Length > 0)
+                Console.WriteLine($"shell-provider-product-async-compare-trace: phase=async-fill; count={compareDiagnosticsAfterAsyncFill.Length}; records=[{string.Join(" || ", compareDiagnosticsAfterAsyncFill)}]");
 
             var nativeCellsBeforeNotification = notificationDirectory || notificationItems
                 ? ReadNativeListViewCells((nint)viewWindowField.GetValue(host)!, 3)
@@ -192,6 +196,7 @@ internal static class ShellProviderLocationProbe
             if (sortStrategy == "scheduled" || notificationBurst || notificationDirectory || notificationItems)
             {
                 stage = "item-update-delivery";
+                if (notificationDirectory) ResetProductCompareDiagnostics(adapter);
                 var notificationDeliverySamples = new List<string>();
                 var notificationShellItemCounts = new HashSet<int>();
                 var notificationNativeListViewCounts = new HashSet<int>();
@@ -301,6 +306,7 @@ internal static class ShellProviderLocationProbe
                     var selectedAfterNotification = viewStateAfterNotification.Selected;
                     var focusedRowAfterNotification = viewStateAfterNotification.Focused;
                     var shellFocusedRowAfterNotification = notificationDirectory ? ReadShellFocusedRow(hostType, host) : null;
+                    var compareDiagnosticsAfterUpdate = notificationDirectory ? ReadProductCompareDiagnostics(adapter) : [];
                     string? postSortShellFocusedRow = null;
                     string? postSortListViewFocusedRow = null;
                     var explicitSortActionResult = 0;
@@ -314,6 +320,7 @@ internal static class ShellProviderLocationProbe
                         var exportColumns = (string[])exported.GetType().GetField("Item1")!.GetValue(exported)!;
                         var exportNameColumnAfterNotify = Array.FindIndex(exportColumns, name => name.Equals("Name", StringComparison.OrdinalIgnoreCase) || name == "名称");
                         if (exportNameColumnAfterNotify < 0) throw new InvalidOperationException("The product Shell view export did not expose the Name column after SHCNE_UPDATEDIR.");
+                        ResetProductCompareDiagnostics(adapter);
                         explicitSortActionResult = InvokeBackgroundShellVerb(hostType, host, "sortascending");
                         Check(explicitSortActionResult);
                         explicitSortObservation = ObserveProductSort(hostType, host, exportSnapshot, readExport,
@@ -322,9 +329,11 @@ internal static class ShellProviderLocationProbe
                         postSortShellFocusedRow = ReadShellFocusedRow(hostType, host);
                         postSortListViewFocusedRow = ReadNativeListViewSelectionState((nint)viewWindowField.GetValue(host)!).Focused;
                     }
+                    var compareDiagnosticsAfterExplicitSort = notificationFollowupSort
+                        ? ReadProductCompareDiagnostics(adapter) : [];
                     var notificationTransitions = notificationStateSamples.OrderBy(pair => pair.Key)
                         .Select(pair => $"{pair.Key}:[{string.Join(',', pair.Value.Order(StringComparer.Ordinal))}]");
-                    Console.WriteLine($"shell-provider-product-async-view-after-{(notificationDirectory ? "updatedir" : "item-update")}: samples-by-send-attempts=[{string.Join('|', notificationTransitions)}]; during-shell-item-counts=[{string.Join('|', notificationShellItemCounts.Order())}]; during-native-listview-counts=[{string.Join('|', notificationNativeListViewCounts.Order())}]; shell-item-counts-after=[{string.Join('|', rowObservation.ShellItemCounts)}]; export-row-counts-after=[{string.Join('|', rowObservation.ExportRowCounts)}]; final-shell-items={rowObservation.FinalShellItems}; final-export-rows={rowObservation.FinalExportRows}; sort-columns-before=[{string.Join('|', sortColumnsBeforeNotification)}]; sort-columns-after=[{string.Join('|', sortColumnsAfterNotification)}]; native-cells-before=[{string.Join(" || ", nativeCellsBeforeNotification.Select(row => string.Join('|', row)))}]; native-cells-after=[{string.Join(" || ", nativeCellsAfterDirectoryNotify.Select(row => string.Join('|', row)))}]; selected-before=[{string.Join('|', selectedBeforeNotification)}]; selected-after=[{string.Join('|', selectedAfterNotification)}]; listview-focused-row-before={focusedRowBeforeNotification}; listview-focused-row-after={focusedRowAfterNotification}; shell-focused-row-before={shellFocusedRowBeforeNotification}; shell-focused-row-after={shellFocusedRowAfterNotification}; explicit-sort-hr=0x{explicitSortActionResult:X8}; explicit-sort-order=[{string.Join('|', explicitSortObservation.Names)}]; explicit-sort-shell-counts=[{string.Join('|', explicitSortObservation.ShellItemCounts)}]; explicit-sort-listview-counts=[{string.Join('|', explicitSortObservation.NativeListViewCounts)}]; explicit-sort-row-snapshots=[{string.Join(" || ", explicitSortObservation.NativeListViewRowSnapshots)}]; explicit-sort-shell-focus={postSortShellFocusedRow}; explicit-sort-listview-focus={postSortListViewFocusedRow}; view-callback-count={ReadProductDiagnosticCounter(adapter, "GetProductViewItemNotificationCallbackCount")}; desktop-events=[{desktopUpdateObserver.EventSummary}]");
+                    Console.WriteLine($"shell-provider-product-async-view-after-{(notificationDirectory ? "updatedir" : "item-update")}: samples-by-send-attempts=[{string.Join('|', notificationTransitions)}]; during-shell-item-counts=[{string.Join('|', notificationShellItemCounts.Order())}]; during-native-listview-counts=[{string.Join('|', notificationNativeListViewCounts.Order())}]; shell-item-counts-after=[{string.Join('|', rowObservation.ShellItemCounts)}]; export-row-counts-after=[{string.Join('|', rowObservation.ExportRowCounts)}]; final-shell-items={rowObservation.FinalShellItems}; final-export-rows={rowObservation.FinalExportRows}; sort-columns-before=[{string.Join('|', sortColumnsBeforeNotification)}]; sort-columns-after=[{string.Join('|', sortColumnsAfterNotification)}]; native-cells-before=[{string.Join(" || ", nativeCellsBeforeNotification.Select(row => string.Join('|', row)))}]; native-cells-after=[{string.Join(" || ", nativeCellsAfterDirectoryNotify.Select(row => string.Join('|', row)))}]; selected-before=[{string.Join('|', selectedBeforeNotification)}]; selected-after=[{string.Join('|', selectedAfterNotification)}]; listview-focused-row-before={focusedRowBeforeNotification}; listview-focused-row-after={focusedRowAfterNotification}; shell-focused-row-before={shellFocusedRowBeforeNotification}; shell-focused-row-after={shellFocusedRowAfterNotification}; update-compare-trace=[{string.Join(" || ", compareDiagnosticsAfterUpdate)}]; explicit-sort-hr=0x{explicitSortActionResult:X8}; explicit-sort-order=[{string.Join('|', explicitSortObservation.Names)}]; explicit-sort-shell-counts=[{string.Join('|', explicitSortObservation.ShellItemCounts)}]; explicit-sort-listview-counts=[{string.Join('|', explicitSortObservation.NativeListViewCounts)}]; explicit-sort-row-snapshots=[{string.Join(" || ", explicitSortObservation.NativeListViewRowSnapshots)}]; explicit-sort-shell-focus={postSortShellFocusedRow}; explicit-sort-listview-focus={postSortListViewFocusedRow}; explicit-sort-compare-trace=[{string.Join(" || ", compareDiagnosticsAfterExplicitSort)}]; view-callback-count={ReadProductDiagnosticCounter(adapter, "GetProductViewItemNotificationCallbackCount")}; desktop-events=[{desktopUpdateObserver.EventSummary}]");
                     if (rowObservation.FinalShellItems != expectedFolderCount || rowObservation.FinalExportRows != expectedFolderCount)
                         throw new InvalidOperationException($"The Shell view did not retain its {expectedFolderCount} rows after SHCNE_UPDATEDIR.");
                     if (notificationDirectory && (!selectedBeforeNotification.SequenceEqual(selectedAfterNotification, StringComparer.OrdinalIgnoreCase) ||
@@ -404,12 +413,15 @@ internal static class ShellProviderLocationProbe
                 stage = "production-delayed-sort";
                 var scheduleSort = hostType.GetMethod("ScheduleInitialVirtualSort", BindingFlags.Instance | BindingFlags.NonPublic)!;
                 var restoredSort = sorts.GetValue(0)!;
+                ResetProductCompareDiagnostics(adapter);
                 scheduleSort.Invoke(host, [restoredSort, new Func<bool>(() => true)]);
                 var observation = ObserveProductSort(hostType, host, capture, readRows, readItemCounts,
                     nameColumn, TimeSpan.FromSeconds(10), ["folder-small", "folder-large"]);
+                var compareDiagnosticsAfterScheduledSort = ReadProductCompareDiagnostics(adapter);
                 if (!observation.Names.SequenceEqual(["folder-small", "folder-large"], StringComparer.OrdinalIgnoreCase))
                     throw new TimeoutException("The production delayed virtual-sort scheduler did not restore ascending recursive-size order.");
                 ReportSortExperiment(sortStrategy, orderAfterAsyncFill, autoResorted, 0, observation, classId);
+                Console.WriteLine($"shell-provider-product-async-scheduled-sort-state: sort-columns=[{string.Join('|', CaptureSortColumns(hostType, host))}]; compare-trace=[{string.Join(" || ", compareDiagnosticsAfterScheduledSort)}]");
             }
             else if (sortStrategy == "header-click")
             {
@@ -1279,6 +1291,28 @@ internal static class ShellProviderLocationProbe
             ? Marshal.GetDelegateForFunctionPointer<GetCounter>(address)().ToString(CultureInfo.InvariantCulture)
             : "unavailable";
 
+    private static void ResetProductCompareDiagnostics(nint adapter)
+    {
+        if (NativeLibrary.TryGetExport(adapter, "ResetProductCompareDiagnostics", out var address))
+            Marshal.GetDelegateForFunctionPointer<ResetProductCompareDiagnosticsDelegate>(address)();
+    }
+
+    private static string[] ReadProductCompareDiagnostics(nint adapter)
+    {
+        if (!NativeLibrary.TryGetExport(adapter, "GetProductCompareDiagnosticCount", out var countAddress) ||
+            !NativeLibrary.TryGetExport(adapter, "GetProductCompareDiagnostic", out var recordAddress)) return [];
+        var count = Marshal.GetDelegateForFunctionPointer<GetCounter>(countAddress)();
+        var read = Marshal.GetDelegateForFunctionPointer<GetProductCompareDiagnostic>(recordAddress);
+        var records = new string[count];
+        for (var index = 0; index < count; index++)
+        {
+            var buffer = new StringBuilder(1024);
+            Check(read(index, buffer, (uint)buffer.Capacity));
+            records[index] = buffer.ToString();
+        }
+        return records;
+    }
+
     private static string ReadProductDiagnosticString(nint adapter, string exportName)
     {
         if (!NativeLibrary.TryGetExport(adapter, exportName, out var address)) return "unavailable";
@@ -2097,6 +2131,9 @@ internal static class ShellProviderLocationProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetClassId(ref Guid classId);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetFlag(int enabled);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCounter();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ResetProductCompareDiagnosticsDelegate();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)]
+    private delegate int GetProductCompareDiagnostic(int index, StringBuilder buffer, uint capacity);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SelectFolderViewItem(nint self, int index, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFocusedFolderViewItem(nint self, out int index);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)]

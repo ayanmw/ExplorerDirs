@@ -11,6 +11,9 @@ EXPORTS
     GetProductAsyncItemNotificationIdentityCount
     GetProductAsyncItemNotificationIdentity
     GetProductViewItemNotificationCallbackCount
+    ResetProductCompareDiagnostics
+    GetProductCompareDiagnosticCount
+    GetProductCompareDiagnostic
     GetProductViewGetNotifyCallCount
     GetProductViewGetNotifyEventMask
     GetProductViewGetNotifyRootIdentity

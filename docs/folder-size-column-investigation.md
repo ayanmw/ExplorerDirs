@@ -2687,3 +2687,13 @@ HostProbe 在发送 `SHCNE_UPDATEDIR` 前，先通过生产 ExplorerBrowser 的 
 新增 `--shell-provider-product-async-notification-updatedir-sort` 对照：在 UPDATEDIR 后直接调用 Shell `sortascending` 返回 `S_OK`，但本轮仍未改变 `29→5 B` 顺序，行数和焦点保持。生产延迟排序调度器在本 UPDATEDIR 状态下一次尝试也未改变顺序。普通逐项通知的两轮基线则一轮初始已为大小顺序，另一轮由生产延迟调度器恢复大小顺序，但后者观察到 Shell/ListView 行数 `0→2`。所以当前尚无同时具备可靠排序和无空列表状态的重排合同；也不能以通知/命令 HRESULT 成功代替顺序验证。产品刷新回调保持未接线。
 
 HostProbe Release 构建 0 警告/错误；测试均为隐藏 ExplorerBrowser，不采集可见像素。下一步应检查异步值填充时的实际 `CompareIDs` 调用与 comparer 读值，再决定是排序回调时序问题还是 Shell provider 属性比较实现问题；在获得证据前不再用 UPDATEDIR 自动排序通过作为路线依据。
+
+### 2026-11-02：产品诊断比较器轨迹定位排序触发点
+
+仅在 `EXPLORERDIRS_PRODUCT_DIAGNOSTICS` 诊断 DLL 增加最多 512 条的 `CompareIDs` 轨迹，记录列号、左右项目名、`SizeForItem` 实际字节值和比较结果；产品 DLL 的诊断接口不导出且不记录。HostProbe 在异步填值、UPDATEDIR 和显式排序命令阶段分别清空/读取轨迹。
+
+四轮 2 项 UPDATEDIR 复验均读回 Recursive Size 升序键、行数 2，且目录更新阶段 `CompareIDs` 调用数为 0；列表仍按 29→5 B 排列。因此 UPDATEDIR 本身未要求 DefView 按当前排序键重新比较。第五轮当 Shell 实际方向为降序时，29→5 B 则符合该方向；之前把保存时的升序意图当成当前实际方向，造成一次方向误判。
+
+显式 `sortascending` 的诊断轮触发一次列 1 `CompareIDs(folder-large=29, folder-small=5)`，返回正值，随后列表变为 5→29 B，证明当前比较器会读取正确缓存值并给出正确数值顺序。但该轮 Shell/ListView 行数从 2 暂时变为 0 再回到 2，且选中项/焦点身份保持。普通异步启动中，单轮轨迹曾记录 `0/0` 的早期比较，也曾记录回填完成后的 `29/5` 正确比较；其调用时机受异步回填与 Shell 初始排序时序影响。当前根因已收窄为 Shell 没有在 UPDATEDIR 后重排、异步比较调用时序不稳定，而非 `CompareIDs` 对已缓存值算错。
+
+诊断 adapter 与 HostProbe Release 构建通过。轨迹仅来自隐藏 ExplorerBrowser，不是可见帧证据。产品仍未接入自动排序回调；下一步实验目标是评估一次排序所需的方向切换能否在同一 UI 绘制周期内完成并保留最终行/焦点，同时确认是否可避免用户可见空列表帧。未通过前不改产品排序策略。

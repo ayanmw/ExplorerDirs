@@ -163,6 +163,21 @@ namespace
     };
     std::mutex g_syntheticRootConfigurationMutex;
     std::map<CLSID, std::wstring, SyntheticRootClassIdLess> g_syntheticRootBackingPaths;
+#if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
+    std::mutex g_productCompareDiagnosticMutex;
+    std::vector<std::wstring> g_productCompareDiagnostics;
+
+    void RecordProductCompareDiagnostic(LPARAM column, PCWSTR leftName, ULONGLONG leftSize,
+        PCWSTR rightName, ULONGLONG rightSize, short comparison)
+    {
+        std::lock_guard<std::mutex> lock(g_productCompareDiagnosticMutex);
+        if (g_productCompareDiagnostics.size() >= 512) return;
+        g_productCompareDiagnostics.push_back(L"column=" + std::to_wstring(LOWORD(column)) +
+            L";left=" + (leftName ? leftName : L"<null>") + L";left-bytes=" + std::to_wstring(leftSize) +
+            L";right=" + (rightName ? rightName : L"<null>") + L";right-bytes=" + std::to_wstring(rightSize) +
+            L";result=" + std::to_wstring(comparison));
+    }
+#endif
     // This adapter is loaded only by the opt-in NativeProbe. It forwards normal
     // filesystem PIDLs and Shell operations while adding deterministic test columns.
     constexpr PROPERTYKEY kStaticSizeKey =
@@ -3441,6 +3456,9 @@ namespace
                 const auto rightSize = ignoreFolderSize && (rightChild->attributes & FILE_ATTRIBUTE_DIRECTORY)
                     ? 0 : SizeForItem(reinterpret_cast<PCUITEMID_CHILD>(right));
                 comparison = leftSize < rightSize ? -1 : leftSize > rightSize ? 1 : 0;
+#if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
+                RecordProductCompareDiagnostic(column, leftChild->name, leftSize, rightChild->name, rightSize, comparison);
+#endif
                 break;
             }
             case 2: comparison = 0; break;
@@ -5173,6 +5191,26 @@ extern "C" HRESULT WINAPI GetProductAsyncItemNotificationIdentity(LONG index, LP
 
 extern "C" LONG WINAPI GetProductViewItemNotificationCallbackCount()
 { return InterlockedCompareExchange(&g_productViewItemNotificationCallbacks, 0, 0); }
+
+extern "C" void WINAPI ResetProductCompareDiagnostics()
+{
+    std::lock_guard<std::mutex> lock(g_productCompareDiagnosticMutex);
+    g_productCompareDiagnostics.clear();
+}
+
+extern "C" LONG WINAPI GetProductCompareDiagnosticCount()
+{
+    std::lock_guard<std::mutex> lock(g_productCompareDiagnosticMutex);
+    return static_cast<LONG>(g_productCompareDiagnostics.size());
+}
+
+extern "C" HRESULT WINAPI GetProductCompareDiagnostic(LONG index, LPWSTR buffer, UINT capacity)
+{
+    if (!buffer || capacity == 0) return E_INVALIDARG;
+    std::lock_guard<std::mutex> lock(g_productCompareDiagnosticMutex);
+    if (index < 0 || static_cast<size_t>(index) >= g_productCompareDiagnostics.size()) return E_BOUNDS;
+    return StringCchCopyW(buffer, capacity, g_productCompareDiagnostics[static_cast<size_t>(index)].c_str());
+}
 
 extern "C" LONG WINAPI GetProductViewGetNotifyCallCount()
 { return InterlockedCompareExchange(&g_productViewGetNotifyCalls, 0, 0); }
