@@ -387,10 +387,29 @@ internal static class ShellViewHostFilterProbe
         string sortAfterNativeColumnOneFirstClick = "not-run";
         string sortAfterSnapshotColumnFirstClick = "not-run";
         var headerSlotProbes = new List<string>();
+        var columnOrderSortKeyProbes = new List<string>();
         try
         {
             if (recursiveColumnIndex < 0)
                 throw new InvalidOperationException("The saved recursive-size column is not present in the native header.");
+            if (stage == "initial-root")
+            {
+                try
+                {
+                    columnOrderSortKeyProbes.AddRange(ProbeSortKeysAfterColumnReorder(shellView, view, viewWindow, saved));
+                }
+                finally
+                {
+                    var savedColumns = saved.DisplayColumns
+                        ?? throw new InvalidOperationException("The original Shell view did not provide a display-column snapshot.");
+                    Check(ShellColumnManager.Apply(view, savedColumns));
+                    var restoreTarget = new NativeShellViewStateTarget(view);
+                    if (!ShellViewStateRestore.Restore(saved, restoreTarget, (_, _) => { }, () => true))
+                        throw new InvalidOperationException("Could not restore the original Shell column/sort state after column-order probing.");
+                    InvokeBackgroundVerb(shellView, GetParent(viewWindow),
+                        saved.SortColumns[0].Direction > 0 ? "sortascending" : "sortdescending");
+                }
+            }
             // The shared setter restores metadata but may not establish the DefView's comparator for provider columns.
             if (stage == "initial-root")
             {
@@ -439,8 +458,73 @@ internal static class ShellViewHostFilterProbe
                 sortAfterHeader[0].Key.PropertyId == saved.SortColumns[0].Key.PropertyId &&
                 sortAfterHeader[0].Direction == saved.SortColumns[0].Direction;
         }
-        var result = $"restored={restored}; failures=[{string.Join(',', failures)}]; mode-reapply-hr=0x{modeReapplyResult:X8}; current-mode-reapply-hr=0x{currentModeReapplyResult:X8}; refresh-hr=0x{refreshResult:X8}; columns-hr=0x{columnCaptureResult:X8}; recursive-column-visible={recursiveColumnVisible}; sort-count-hr=0x{countResult:X8}; sort-readback-hr=0x{sortReadbackResult:X8}; sort-matches={sortMatches}; header-diagnostics={headerDiagnostics}; direct-size-compare={directSizeCompare}; order=[{orderBeforeRestoreRetry}]; recursive-values=[{string.Join('|', valuesBeforeRestoreRetry)}]; order-matches-saved-sort={orderMatchesSavedSort}; programmatic-sort-state=[{sortAfterProgrammaticSortState}]/[{string.Join('|', namesAfterProgrammaticSortState)}]; shell-menu-sort-failure={shellMenuSortFailure ?? "none"}; shell-menu-verb-orders=[{string.Join(" || ", shellMenuVerbOrders)}]; sort-after-shell-menu=[{shellMenuSortReadback}]; order-after-shell-menu-sort=[{string.Join('|', namesAfterShellMenuSort)}]; values-after-shell-menu-sort=[{string.Join('|', valuesAfterShellMenuSort)}]; header-sort-failure={headerSortFailure ?? "none"}; header-slot-probes=[{string.Join(" || ", headerSlotProbes)}]; order-after-native-column-one-first-click=[{string.Join('|', namesAfterNativeColumnOneFirstClick)}]; sort-after-native-column-one-first-click=[{sortAfterNativeColumnOneFirstClick}]; order-after-native-column-one=[{string.Join('|', namesAfterNativeColumnOne)}]; order-after-snapshot-column-first-click=[{string.Join('|', namesAfterSnapshotColumnFirstClick)}]; sort-after-snapshot-column-first-click=[{sortAfterSnapshotColumnFirstClick}]; order-after-snapshot-column=[{string.Join('|', namesAfterSnapshotColumn)}]; order-after-header-sort=[{string.Join('|', namesAfterHeaderSort)}]; values-after-header-sort=[{string.Join('|', valuesAfterHeaderSort)}]; header-sort-matches-saved-sort={headerSortMatchesSavedSort}; sort-after-header-matches={sortAfterHeaderMatches}";
+        var result = $"restored={restored}; failures=[{string.Join(',', failures)}]; mode-reapply-hr=0x{modeReapplyResult:X8}; current-mode-reapply-hr=0x{currentModeReapplyResult:X8}; refresh-hr=0x{refreshResult:X8}; columns-hr=0x{columnCaptureResult:X8}; recursive-column-visible={recursiveColumnVisible}; sort-count-hr=0x{countResult:X8}; sort-readback-hr=0x{sortReadbackResult:X8}; sort-matches={sortMatches}; header-diagnostics={headerDiagnostics}; direct-size-compare={directSizeCompare}; order=[{orderBeforeRestoreRetry}]; recursive-values=[{string.Join('|', valuesBeforeRestoreRetry)}]; order-matches-saved-sort={orderMatchesSavedSort}; programmatic-sort-state=[{sortAfterProgrammaticSortState}]/[{string.Join('|', namesAfterProgrammaticSortState)}]; shell-menu-sort-failure={shellMenuSortFailure ?? "none"}; shell-menu-verb-orders=[{string.Join(" || ", shellMenuVerbOrders)}]; column-order-sort-key-probes=[{string.Join(" || ", columnOrderSortKeyProbes)}]; sort-after-shell-menu=[{shellMenuSortReadback}]; order-after-shell-menu-sort=[{string.Join('|', namesAfterShellMenuSort)}]; values-after-shell-menu-sort=[{string.Join('|', valuesAfterShellMenuSort)}]; header-sort-failure={headerSortFailure ?? "none"}; header-slot-probes=[{string.Join(" || ", headerSlotProbes)}]; order-after-native-column-one-first-click=[{string.Join('|', namesAfterNativeColumnOneFirstClick)}]; sort-after-native-column-one-first-click=[{sortAfterNativeColumnOneFirstClick}]; order-after-native-column-one=[{string.Join('|', namesAfterNativeColumnOne)}]; order-after-snapshot-column-first-click=[{string.Join('|', namesAfterSnapshotColumnFirstClick)}]; sort-after-snapshot-column-first-click=[{sortAfterSnapshotColumnFirstClick}]; order-after-snapshot-column=[{string.Join('|', namesAfterSnapshotColumn)}]; order-after-header-sort=[{string.Join('|', namesAfterHeaderSort)}]; values-after-header-sort=[{string.Join('|', valuesAfterHeaderSort)}]; header-sort-matches-saved-sort={headerSortMatchesSavedSort}; sort-after-header-matches={sortAfterHeaderMatches}";
         Console.WriteLine($"ishellview-state-restore: stage={stage}; {result}");
+        return result;
+    }
+
+    private static IReadOnlyList<string> ProbeSortKeysAfterColumnReorder(nint shellView, nint view, nint viewWindow, ViewState saved)
+    {
+        var original = saved.DisplayColumns?.ToArray()
+            ?? throw new InvalidOperationException("The saved view state has no display-column snapshot.");
+        if (original.Length != 3)
+            throw new InvalidOperationException($"Expected the three-column synthetic fixture, got {original.Length} columns.");
+        var permutations = new[]
+        {
+            new[] { original[1], original[2], original[0] },
+            new[] { original[2], original[0], original[1] }
+        };
+        var results = new List<string>();
+        var view2 = QueryInterface(view, FolderView2Id);
+        try
+        {
+            foreach (var permutation in permutations)
+            {
+                Check(ShellColumnManager.Apply(view, permutation));
+                var refreshResult = At<RefreshView>(shellView, 8)(shellView);
+                var settleDeadline = DateTime.UtcNow + TimeSpan.FromMilliseconds(100);
+                do
+                {
+                    Application.DoEvents();
+                    Thread.Sleep(10);
+                } while (DateTime.UtcNow < settleDeadline);
+                var captureResult = ShellColumnManager.Capture(view, out var captured);
+                Check(captureResult);
+                if (captured is null || captured.Count != permutation.Length)
+                    throw new InvalidOperationException("IColumnManager did not return a complete visible-column snapshot after reorder.");
+                var listView = FindChildByClass(viewWindow, "SysListView32");
+                var header = listView == 0 ? 0 : SendMessageW(listView, 0x101F, 0, 0);
+                var headerCount = header == 0 ? -1 : SendMessageW(header, 0x1200, 0, 0).ToInt32();
+                var itemTitles = header == 0 ? [] : ReadNativeHeaderTitles(header, headerCount);
+                var displayOrder = header == 0 ? [] : ReadNativeHeaderOrder(header, headerCount);
+                if (headerCount != captured.Count || itemTitles.Length != captured.Count || displayOrder.Length != captured.Count)
+                    throw new InvalidOperationException($"Reordered native header did not match the column snapshot: headers={headerCount}; snapshot={captured.Count}; titles=[{string.Join('|', itemTitles)}]; order=[{string.Join('|', displayOrder)}].");
+                // Shell column keys follow their display order, while header item indices remain independently addressable.
+                var displayTitles = displayOrder.Select(index => itemTitles[index]).ToArray();
+                var stateColumnOrder = string.Join('|', captured.Select(column => $"{column.Key.FormatId:B}:{column.Key.PropertyId}"));
+                var requestedColumnOrder = string.Join('|', permutation.Select(column => $"{column.Key.FormatId:B}:{column.Key.PropertyId}"));
+                for (var visualSlot = 0; visualSlot < captured.Count; visualSlot++)
+                {
+                    var itemIndex = displayOrder[visualSlot];
+                    ClickHeaderItem(viewWindow, itemIndex);
+                    var sortCountResult = At<GetSortColumnCount>(view2, 26)(view2, out var sortCount);
+                    Check(sortCountResult);
+                    if (sortCount is 0 or > 8)
+                        throw new InvalidOperationException($"Native header visual slot {visualSlot} returned invalid sort-column count {sortCount}.");
+                    var sorts = new NativeSortColumn[sortCount];
+                    Check(At<GetSortColumns>(view2, 28)(view2, sorts, sortCount));
+                    var sortSummary = string.Join('|', sorts.Select(sort => $"{sort.Key.FormatId:B}:{sort.Key.PropertyId}:{sort.Direction}"));
+                    results.Add($"refresh-hr=0x{refreshResult:X8};requested=[{requestedColumnOrder}];snapshot=[{stateColumnOrder}];item-titles=[{string.Join('|', itemTitles)}];display-order=[{string.Join('|', displayOrder)}];visual-slot={visualSlot}:{displayTitles[visualSlot]};item-index={itemIndex};sort=[{sortSummary}]");
+                }
+            }
+        }
+        finally { Marshal.Release(view2); }
+        return results;
+    }
+
+    private static nint QueryInterface(nint instance, Guid interfaceId)
+    {
+        Check(Marshal.QueryInterface(instance, in interfaceId, out var result));
         return result;
     }
 
@@ -517,6 +601,26 @@ internal static class ShellViewHostFilterProbe
                 else titles[index] = Marshal.PtrToStringUni(buffer) ?? string.Empty;
             }
             return titles;
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+
+    private static int[] ReadNativeHeaderOrder(nint header, int count)
+    {
+        if (count < 0 || count > 64) return [];
+        var buffer = Marshal.AllocHGlobal(sizeof(int) * count);
+        try
+        {
+            if (SendMessageW(header, 0x1211, count, buffer) == 0) // HDM_GETORDERARRAY.
+                throw new InvalidOperationException("The native Shell header did not return its visual item order.");
+            var order = new int[count];
+            for (var index = 0; index < count; index++)
+            {
+                order[index] = Marshal.ReadInt32(buffer, sizeof(int) * index);
+                if ((uint)order[index] >= (uint)count)
+                    throw new InvalidOperationException($"The native Shell header returned invalid order item {order[index]} at visual slot {index}.");
+            }
+            return order;
         }
         finally { Marshal.FreeHGlobal(buffer); }
     }
