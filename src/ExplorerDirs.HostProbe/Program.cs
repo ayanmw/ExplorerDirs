@@ -112,6 +112,11 @@ internal static class Program
             try { return ShellTreeKeyboardProbe.Run(); }
             catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
         }
+        if (args is ["--shell-tree-icons"])
+        {
+            try { return ShellTreeIconHostProbe.Run(); }
+            catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+        }
         if (args is ["--quick-filter-tabs"])
         {
             try { return QuickFilterTabStateProbe.Run(); }
