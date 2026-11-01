@@ -2271,3 +2271,13 @@ NativeProbe Release build 0 警告/错误，探针 exit 0、`git diff --check` �
 新增隐藏 HostProbe：临时创建两个不同物理根目录，注册随机 CLSID 的 synthetic Shell-folder adapter，并把它的默认 backing 路径设为 A；再通过产品实际 `ExplorerBrowserHost` 导航到包含路径 marker 的 B parsing name。生产 host 的 `CurrentPath` 保持 B 身份、`ShellLocationIdentity` 将其判为非普通文件系统路径，`ReadItemCounts` 读到 B 独有的 2 项，而不是 fallback A 的 decoy 项。WPF/HwndSource 父窗口没有 `WS_VISIBLE`，运行结果也确认不可见；测试结束清理临时注册与目录。
 
 `ExplorerDirs.HostProbe` Release build 通过（0 警告/错误），`--shell-provider-location` exit 0。输出：`product-host-navigation=True; is-filesystem=False; rows=2; target=session-root; fallback=default-root; parent-visible=False`。因此正式 ExplorerBrowserHost 的导航/枚举接口能消费原型 parsing name；仍未验证产品 provider 注册/卸载和便携部署、应用 SessionStore 跨重启接线、可配置递归列在产品 host 中显示/排序、异步扫描回填、菜单/拖放/通知的产品生命周期或可见 UI。本次仅扩展隔离 HostProbe，没有修改产品 host 或发布版。
+
+### 2026-11-02：产品 Host 的递归列值可读但排序未闭环
+
+扩展隐藏 HostProbe，将两项不同大小的目录（5 B、29 B）通过真实产品 `ExplorerBrowserHost` 浏览，并从 host 的 `ViewState` 恢复 Name + Recursive Size 列和该列升序排序键。实际 `IFolderView2` 行序仍为 `folder-large → folder-small`；直接调用当前 `IShellFolder2.GetDetailsEx` 则按行读到 `29 → 5`。provider 的 `MapColumnToSCID(1)` 返回递归数据键 `{7e1f…}:1`，直接对大/小目录调用 `CompareIDs(1, large, small)` 返回 `+1`，证明该 provider ordinal 的递归值比较结果本身符合升序关系。产品 view 恢复的 Shell 排序键是 `{9e5e…}:1`；从该 view 的原生背景 `IContextMenu` 查询并执行 canonical `sortascending`，HRESULT 为 `S_OK`，但行序未改变，`CompareIDs` 总计数及 8 个列槽计数增量均为 0。最新连续两次运行复现一致，前序运行也一致。
+
+证据将问题限定在产品 ExplorerBrowser 当前显示列/排序命令到 provider ordinal 比较器的接线路径：递归属性可读，provider 列映射可查询，直接比较器有效，但 Shell 排序命令没有调用它。Shell sort key `{9e5e…}:1` 与 provider data key `{7e1f…}:1` 是不同职责的键；仍需把产品 host 的列槽和命令路由与已通过的 NativeProbe 原生 `IShellView` 标题交互逐项比对，当前不能断言根因是其中某一项。
+
+产品 `CaptureFileViewExportSnapshot` 另读到该递归列的导出值为空，列名回退为 `{9e5e…}:1`；该路径消费 Shell `IPropertyStore` 快速属性，当前 provider 没有把派生值映射到这一读取合同。这是应用导出快照读取路径的限制；没有可见 UI 验收，不能据此判断屏幕列是否为空。排序和值读取/显示/应用导出仍是不同合同。本验证未改产品 host、Shell provider 产品部署、配置或 release。
+
+`ExplorerDirs.HostProbe` Release 构建 0 警告/错误，`--shell-provider-location` 多次 exit 0；重复运行均确认目标根 B（非 fallback A）、2 项、递归列存在、GetDetailsEx 值为 29/5、provider 映射为 `{7e1f…}:1`、直接比较结果为 `+1`、升序键 `{9e5e…}:1` 可恢复，但原生排序命令不触发比较器且不改变行序、父窗口不可见。临时 CLSID/NameSpace 注册及夹具按探针 finally 清理。
