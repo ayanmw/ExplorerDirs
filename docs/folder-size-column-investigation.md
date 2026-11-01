@@ -1658,3 +1658,11 @@ NativeProbe Release 构建通过，子进程均退出码 0；Private Desktop 探
 RED 基线仅在递归函数内部无取消检查时失败：关闭前累计 32 项，关闭后升至 400 项。加入检查后连续三轮均维持 32 项不增，2 个已开始扫描没有发布值或发 Shell 通知，4 个 view 批次全部结束；Private Desktop 前台、最后输入和隔离清理守卫通过。证据日志：RED `src/.state/native-probe-watchdog/20261101-162832-390999ae.stdout.log`；GREEN `src/.state/native-probe-watchdog/20261101-163006-e0757d4b.stdout.log`、`src/.state/native-probe-watchdog/20261101-163059-deb89a14.stdout.log`、`src/.state/native-probe-watchdog/20261101-163141-d27bc352.stdout.log`。NativeProbe Release 与原生 adapter `/W4 /WX` 构建通过；无窗口异步按需列和 Shell 文件夹/缓存失效 smoke 通过。
 
 该改进仅在隔离 NativeProbe 适配器中验证，尚未接入产品 ExplorerBrowser；注入延迟模拟慢目录条目处理，不是网络盘真实时延测量，也不代表用户可见列表刷新体验。原生文件系统枚举仍只能在条目边界观察取消；单次 `FindFirstFileW`/`FindNextFileW` 调用和当前条目注入延迟不会被强制中断。
+
+### 2026-11-01：按需递归大小列的队列容量超限对照
+
+为验证逐项任务在有界队列被真实压满后的恢复行为，临时将 NativeProbe 的四个不同根视图各扩为 520 个目录，并使用每目录一个文件的最小夹具；递归大小缓存设为 4,096，避免把缓存淘汰混入队列结果。逐项模式在 2,048 项队列中于释放 worker 前拒绝 34 项。worker 排空后，探针重复读取列值仍只扫描 2,050/2,084 个目录；一份视图为 488/522 行，留下 34 行空值，另三份视图完整。隔离桌面前台、最后输入及资源清理守卫通过。日志：`src/.state/native-probe-watchdog/20261101-163719-cb55351b.stdout.log`、`20261101-163719-cb55351b.stderr.log`。
+
+相同夹具切换为按 view 合并批次后，2,084 个目录全部唯一扫描并回填，队列拒绝 0、重复扫描 0、Shell 更新通知 4、四视图 `EnumObjects` 增量各 1，四份选择/焦点均保留；缓存快照 2,084、估算载荷 687,680 B，进程 Private Bytes 为 95,899,648 B（没有同进程基线差值，不能将该进程值归因于缓存）。日志：`src/.state/native-probe-watchdog/20261101-163837-a5b3382e.stdout.log`、`20261101-163837-a5b3382e.stderr.log`。两次 Private Desktop watchdog 均确认前台 HWND 与 last-input tick 不变，隔离清理通过。
+
+结论：逐项模式在超过 2,048 个排队任务时会丢失被拒绝的列请求；Shell 后续重读并未保证所有视图重新请求这些行。view-batch 模式以每个 view 一个外层协调任务及至多一个子批次完成同一压力夹具，没有触及队列上限，因此目前更适合作为递归列原型的默认调度方向。逐项失败负载超出既有 500 目录上限，不代表常规 4×500 负载会拒绝；但并发其它任务或更大目录仍可能达到此边界。该结果仅在 NativeProbe 合成 provider/隐藏 DefView 中成立，未接入产品 ExplorerBrowser，也没有可见 UI、真实磁盘/网络或慢 I/O 证据。若保留逐项调度，仍须增加明确的有界拒绝重试机制；不能把重读列值当作已验证的恢复路径。

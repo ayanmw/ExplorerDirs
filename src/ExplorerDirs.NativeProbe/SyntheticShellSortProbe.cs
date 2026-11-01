@@ -247,8 +247,11 @@ public static class SyntheticShellSortProbe
         var folderCountText = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ONDEMAND_FOLDER_COUNT");
         var folderCount = string.IsNullOrWhiteSpace(folderCountText) ? 100 :
             int.TryParse(folderCountText, out var parsedFolderCount) ? parsedFolderCount : -1;
-        if (folderCount is < 1 or > 500)
-            throw new ArgumentOutOfRangeException(nameof(folderCountText), "The on-demand Shell load probe accepts 1–500 sibling folders.");
+        var saturationRequested = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_FORCE_QUEUE_SATURATION") == "1";
+        var batchRequested = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_BATCH_BY_VIEW") == "1";
+        var maximumFolderCount = saturationRequested || batchRequested ? 600 : 500;
+        if (folderCount < 1 || folderCount > maximumFolderCount)
+            throw new ArgumentOutOfRangeException(nameof(folderCountText), $"The on-demand Shell load probe accepts 1–{maximumFolderCount} sibling folders in this mode.");
         return folderCount;
     }
 

@@ -5720,3 +5720,7 @@ Q-Dir 对照确认 Type 列的递归 counts 也需要复用后台扫描值。Nat
 ### 2026-11-01：包装 namespace IDataObject 复制与移动
 
 注册 namespace 的文件项 `IDataObject` 已可直接交给 `IFileOperation::CopyItems` 与 `MoveItems`：隔离夹具中复制后源仍在、移动后源消失，两份目标内容均读回正确，操作未取消且无 UI。Private Desktop 前台/输入和临时注册清理通过。此证据不涵盖 Explorer 菜单复制/粘贴、拖放、多选或真实 PIDL 包装；产品与 release 未变。详见[调查记录](folder-size-column-investigation.md#2026-11-01包装-namespace-idataobject-的-shell-复制与移动)。
+
+### 2026-11-01：递归大小列队列超限与 view-batch 对照
+
+在四个不同根的隐藏 Shell view 中将逐项需求扩大到 2,084 个目录，令 2,048 项队列实际拒绝 34 项；排空后只扫描 2,050 项，一份视图仍缺 34 行列值，说明 Shell 重读不能保证已拒绝请求恢复。相同夹具使用 view-batch 后 2,084/2,084 项完成、拒绝/重复扫描均为 0，四视图更新及选区/焦点均保持。NativeProbe 的递归列原型优先采用按 view 合并批次；若逐项模式继续保留，必须先设计并验证有界的拒绝重试。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01按需递归大小列的队列容量超限对照)。产品仍为 ExplorerBrowser，未接入该列。
