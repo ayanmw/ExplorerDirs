@@ -2697,3 +2697,7 @@ HostProbe Release 构建 0 警告/错误；测试均为隐藏 ExplorerBrowser，
 显式 `sortascending` 的诊断轮触发一次列 1 `CompareIDs(folder-large=29, folder-small=5)`，返回正值，随后列表变为 5→29 B，证明当前比较器会读取正确缓存值并给出正确数值顺序。但该轮 Shell/ListView 行数从 2 暂时变为 0 再回到 2，且选中项/焦点身份保持。普通异步启动中，单轮轨迹曾记录 `0/0` 的早期比较，也曾记录回填完成后的 `29/5` 正确比较；其调用时机受异步回填与 Shell 初始排序时序影响。当前根因已收窄为 Shell 没有在 UPDATEDIR 后重排、异步比较调用时序不稳定，而非 `CompareIDs` 对已缓存值算错。
 
 诊断 adapter 与 HostProbe Release 构建通过。轨迹仅来自隐藏 ExplorerBrowser，不是可见帧证据。产品仍未接入自动排序回调；下一步实验目标是评估一次排序所需的方向切换能否在同一 UI 绘制周期内完成并保留最终行/焦点，同时确认是否可避免用户可见空列表帧。未通过前不改产品排序策略。
+
+### 2026-11-02 隐藏视图成对排序与 redraw 对照
+
+HostProbe 在同一 STA 调度流程内先发相反方向 Shell 排序，再发回用户要求的方向。未抑制重绘的此前三轮只有 1/3 轮最终顺序符合请求；`S_OK` 与 comparer 读值正确并不能保证 DefView 最终次序可靠。新增 redraw-suppressed 对照在两条命令之间关闭原生 ListView redraw，并泵送 100 ms：最近三轮结果均为目标排序方向和数值顺序，选中行及 Shell/ListView 焦点身份保持。两条 Shell 命令仍分别观察到 ListView 行数短暂为 0，调度间隔时恢复为 2，第二条命令后再次出现 0→2；隐藏窗口没有捕获到 WM_PAINT/WM_ERASEBKGND，因此不据此宣称可见空白帧已消除。该措施目前仅为 HostProbe 实验，不接入产品；下一阶段转向用户已选择的按需递归列原型，保留排序/重绘作为待可见验收的集成风险。

@@ -23,8 +23,10 @@ internal static class ShellProviderLocationProbe
         var largeFolder = Path.Combine(viewRoot, "folder-large");
         var notificationBurst = sortStrategy.StartsWith("notification-burst", StringComparison.Ordinal);
         var notificationDirectoryLarge = sortStrategy == "notification-updatedir-large";
-        var notificationFollowupSort = sortStrategy == "notification-updatedir-sort";
-        var notificationDirectory = sortStrategy is "notification-updatedir" or "notification-updatedir-large" or "notification-updatedir-sort";
+        var notificationRedrawSuppressedSort = sortStrategy == "notification-updatedir-paired-sort-redraw";
+        var notificationPairedSort = sortStrategy is "notification-updatedir-paired-sort" or "notification-updatedir-paired-sort-redraw";
+        var notificationFollowupSort = sortStrategy is "notification-updatedir-sort" or "notification-updatedir-paired-sort" or "notification-updatedir-paired-sort-redraw";
+        var notificationDirectory = sortStrategy is "notification-updatedir" or "notification-updatedir-large" or "notification-updatedir-sort" or "notification-updatedir-paired-sort" or "notification-updatedir-paired-sort-redraw";
         var notificationItems = sortStrategy == "notification-items-flush";
         var flushNotifications = sortStrategy is "notification-burst-flush" or "notification-items-flush";
         var notificationDelayMilliseconds = sortStrategy == "notification-burst-spaced" ? 150 :
@@ -310,6 +312,13 @@ internal static class ShellProviderLocationProbe
                     string? postSortShellFocusedRow = null;
                     string? postSortListViewFocusedRow = null;
                     var explicitSortActionResult = 0;
+                    var firstPairedSortActionResult = 0;
+                    var rowCountAfterFirstPairedSort = -1;
+                    var rowCountAfterSortInterval = -1;
+                    var rowCountAfterSecondPairedSort = -1;
+                    string[] sortColumnsAfterOpposite = [];
+                    string[] sortColumnsAfterSavedVerb = [];
+                    string[] paintMessages = [];
                     var explicitSortObservation = (Names: Array.Empty<string>(), ShellItemCounts: Array.Empty<int>(), NativeListViewCounts: Array.Empty<int>(), NativeListViewRowSnapshots: Array.Empty<string>(), ExportRowCounts: Array.Empty<int>(), TransientReadErrors: 0);
                     if (notificationFollowupSort)
                     {
@@ -321,13 +330,70 @@ internal static class ShellProviderLocationProbe
                         var exportNameColumnAfterNotify = Array.FindIndex(exportColumns, name => name.Equals("Name", StringComparison.OrdinalIgnoreCase) || name == "名称");
                         if (exportNameColumnAfterNotify < 0) throw new InvalidOperationException("The product Shell view export did not expose the Name column after SHCNE_UPDATEDIR.");
                         ResetProductCompareDiagnostics(adapter);
-                        explicitSortActionResult = InvokeBackgroundShellVerb(hostType, host, "sortascending");
-                        Check(explicitSortActionResult);
+                        var sortListView = FindNativeListView((nint)viewWindowField.GetValue(host)!);
+                        if (notificationPairedSort)
+                        {
+                            using var paintProbe = new NativePaintMessageProbe(sortListView);
+                            var requestedDirection = (int)sorts.GetValue(0)!.GetType().GetProperty("Direction")!.GetValue(sorts.GetValue(0))!;
+                            var oppositeVerb = requestedDirection > 0 ? "sortdescending" : "sortascending";
+                            var savedVerb = requestedDirection > 0 ? "sortascending" : "sortdescending";
+                            if (notificationRedrawSuppressedSort)
+                                _ = SendMessageW(sortListView, 0x000B, 0, 0); // WM_SETREDRAW(FALSE).
+                            try
+                            {
+                                firstPairedSortActionResult = InvokeBackgroundShellVerb(hostType, host, oppositeVerb);
+                                Check(firstPairedSortActionResult);
+                                rowCountAfterFirstPairedSort = ReadNativeListViewItemCount((nint)viewWindowField.GetValue(host)!);
+                                sortColumnsAfterOpposite = CaptureSortColumns(hostType, host);
+                                if (notificationRedrawSuppressedSort) PumpDispatcher(TimeSpan.FromMilliseconds(100));
+                                rowCountAfterSortInterval = ReadNativeListViewItemCount((nint)viewWindowField.GetValue(host)!);
+                                explicitSortActionResult = InvokeBackgroundShellVerb(hostType, host, savedVerb);
+                                Check(explicitSortActionResult);
+                                rowCountAfterSecondPairedSort = ReadNativeListViewItemCount((nint)viewWindowField.GetValue(host)!);
+                                sortColumnsAfterSavedVerb = CaptureSortColumns(hostType, host);
+                                explicitSortObservation = ObserveProductSort(hostType, host, exportSnapshot, readExport,
+                                    hostType.GetMethod("ReadItemCounts", BindingFlags.Instance | BindingFlags.NonPublic)!, exportNameColumnAfterNotify,
+                                    TimeSpan.FromSeconds(2), requestedDirection > 0 ? ["folder-small", "folder-large"] : ["folder-large", "folder-small"]);
+                            }
+                            finally
+                            {
+                                if (notificationRedrawSuppressedSort)
+                                {
+                                    _ = SendMessageW(sortListView, 0x000B, 1, 0); // WM_SETREDRAW(TRUE).
+                                    _ = RedrawWindow(sortListView, 0, 0, 0x0001 | 0x0004 | 0x0080 | 0x0100);
+                                }
+                            }
+                            paintMessages = paintProbe.Messages.ToArray();
+                            postSortShellFocusedRow = ReadShellFocusedRow(hostType, host);
+                            postSortListViewFocusedRow = ReadNativeListViewSelectionState((nint)viewWindowField.GetValue(host)!).Focused;
+                            var selectedAfterPairedSort = ReadNativeListViewSelectionState((nint)viewWindowField.GetValue(host)!).Selected;
+                            var expectedFinalOrder = requestedDirection > 0
+                                ? new[] { "folder-small", "folder-large" }
+                                : new[] { "folder-large", "folder-small" };
+                            var finalDirectionIsSaved = sortColumnsAfterSavedVerb.Any(column =>
+                                column.EndsWith(requestedDirection > 0 ? "/1" : "/-1", StringComparison.Ordinal));
+                            if (!explicitSortObservation.Names.SequenceEqual(expectedFinalOrder, StringComparer.OrdinalIgnoreCase) ||
+                                !finalDirectionIsSaved ||
+                                !selectedBeforeNotification.SequenceEqual(selectedAfterPairedSort, StringComparer.OrdinalIgnoreCase) ||
+                                !string.Equals(focusedRowBeforeNotification, postSortShellFocusedRow, StringComparison.OrdinalIgnoreCase) ||
+                                !string.Equals(focusedRowBeforeNotification, postSortListViewFocusedRow, StringComparison.OrdinalIgnoreCase))
+                                throw new InvalidOperationException($"The paired Shell sort did not restore the requested view state: expected-order=[{string.Join('|', expectedFinalOrder)}]; actual-order=[{string.Join('|', explicitSortObservation.Names)}]; expected-direction={requestedDirection}; actual-direction=[{string.Join('|', sortColumnsAfterSavedVerb)}]; selected=[{string.Join('|', selectedBeforeNotification)}]=>[{string.Join('|', selectedAfterPairedSort)}]; shell-focus={focusedRowBeforeNotification}=>{postSortShellFocusedRow}; listview-focus={focusedRowBeforeNotification}=>{postSortListViewFocusedRow}.");
+                            var compareTraceAfterSecond = ReadProductCompareDiagnostics(adapter);
+                            Console.WriteLine($"shell-provider-product-async-paired-sort: redraw-suppressed={notificationRedrawSuppressedSort}; requested-direction={requestedDirection}; opposite-verb={oppositeVerb}; opposite-hr=0x{firstPairedSortActionResult:X8}; rows-after-opposite={rowCountAfterFirstPairedSort}; rows-after-interval={rowCountAfterSortInterval}; direction-after-opposite=[{string.Join('|', sortColumnsAfterOpposite)}]; saved-verb={savedVerb}; saved-hr=0x{explicitSortActionResult:X8}; rows-after-saved={rowCountAfterSecondPairedSort}; final-direction=[{string.Join('|', sortColumnsAfterSavedVerb)}]; final-order=[{string.Join('|', explicitSortObservation.Names)}]; shell-row-counts=[{string.Join('|', explicitSortObservation.ShellItemCounts)}]; listview-row-counts=[{string.Join('|', explicitSortObservation.NativeListViewCounts)}]; row-snapshots=[{string.Join(" || ", explicitSortObservation.NativeListViewRowSnapshots)}]; selected-after={string.Join('|', selectedAfterPairedSort)}; shell-focus-after={postSortShellFocusedRow}; listview-focus-after={postSortListViewFocusedRow}; paint-messages=[{string.Join('|', paintMessages)}]; compare-trace=[{string.Join(" || ", compareTraceAfterSecond)}]");
+                        }
+                        else
+                        {
+                            explicitSortActionResult = InvokeBackgroundShellVerb(hostType, host, "sortascending");
+                            Check(explicitSortActionResult);
+                        }
+                        if (!notificationPairedSort)
+                        {
                         explicitSortObservation = ObserveProductSort(hostType, host, exportSnapshot, readExport,
                             hostType.GetMethod("ReadItemCounts", BindingFlags.Instance | BindingFlags.NonPublic)!, exportNameColumnAfterNotify,
                             TimeSpan.FromSeconds(2), ["folder-small", "folder-large"]);
                         postSortShellFocusedRow = ReadShellFocusedRow(hostType, host);
                         postSortListViewFocusedRow = ReadNativeListViewSelectionState((nint)viewWindowField.GetValue(host)!).Focused;
+                        }
                     }
                     var compareDiagnosticsAfterExplicitSort = notificationFollowupSort
                         ? ReadProductCompareDiagnostics(adapter) : [];
@@ -2045,6 +2111,50 @@ internal static class ShellProviderLocationProbe
         finally { Marshal.FreeHGlobal(itemPointer); }
     }
 
+    private sealed class NativePaintMessageProbe : IDisposable
+    {
+        private static int _nextSubclassId;
+        private readonly nint _window;
+        private readonly nuint _subclassId;
+        private readonly SubclassProc _callback;
+        private GCHandle _self;
+        private readonly List<string> _messages = [];
+
+        public NativePaintMessageProbe(nint window)
+        {
+            _window = window;
+            _subclassId = unchecked((nuint)Interlocked.Increment(ref _nextSubclassId));
+            _callback = OnMessage;
+            _self = GCHandle.Alloc(this);
+            if (!SetWindowSubclass(_window, _callback, _subclassId, GCHandle.ToIntPtr(_self)))
+            {
+                _self.Free();
+                throw new InvalidOperationException($"Could not observe native ListView paint messages: {Marshal.GetLastWin32Error()}.");
+            }
+        }
+
+        public IReadOnlyList<string> Messages => _messages;
+
+        private nint OnMessage(nint window, uint message, nint wParam, nint lParam, nuint subclassId, nint referenceData)
+        {
+            if (message is 0x000F or 0x0014) // WM_PAINT / WM_ERASEBKGND.
+            {
+                var count = SendMessageW(window, 0x1004, 0, 0); // LVM_GETITEMCOUNT.
+                _messages.Add($"0x{message:X}:rows={count}");
+            }
+            return DefSubclassProc(window, message, wParam, lParam);
+        }
+
+        public void Dispose()
+        {
+            if (_self.IsAllocated)
+            {
+                _ = RemoveWindowSubclass(_window, _callback, _subclassId);
+                _self.Free();
+            }
+        }
+    }
+
     private static void ClickHeaderColumn(nint header, int columnIndex)
     {
         var rectanglePointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeRect>());
@@ -2210,6 +2320,11 @@ internal static class ShellProviderLocationProbe
     [DllImport("user32.dll", EntryPoint = "EnumChildWindows")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool EnumChildWindows(nint parent, EnumChildProc callback, nint parameter);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(nint window, StringBuilder className, int maxCount);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint SendMessageW(nint window, uint message, nint wParam, nint lParam);
+    [DllImport("user32.dll")] private static extern bool RedrawWindow(nint window, nint rectangle, nint updateRegion, uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate nint SubclassProc(nint window, uint message, nint wParam, nint lParam, nuint subclassId, nint referenceData);
+    [DllImport("comctl32.dll", SetLastError = true)] private static extern bool SetWindowSubclass(nint window, SubclassProc callback, nuint subclassId, nint referenceData);
+    [DllImport("comctl32.dll", SetLastError = true)] private static extern bool RemoveWindowSubclass(nint window, SubclassProc callback, nuint subclassId);
+    [DllImport("comctl32.dll")] private static extern nint DefSubclassProc(nint window, uint message, nint wParam, nint lParam);
     [DllImport("ole32.dll")] private static extern int PropVariantClear(nint variant);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SHParseDisplayName(string name, nint bindContext, out nint pidl, uint attributes, out uint attributesOut);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);
