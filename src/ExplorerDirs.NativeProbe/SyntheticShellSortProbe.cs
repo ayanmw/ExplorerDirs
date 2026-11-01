@@ -326,8 +326,8 @@ public static class SyntheticShellSortProbe
             throw new ArgumentException("Distinct recursive-size roots require the four-view shared-store probe.", nameof(asyncSharedViewRootMode));
         if (asyncQueueSaturationRequested && !asyncQueueSaturationProbe)
             throw new ArgumentException("Forced queue saturation requires four active views on distinct roots.", nameof(asyncQueueSaturationRequested));
-        if (asyncParentBatchProbe && !asyncSharedViewDistinctRoots)
-            throw new ArgumentException("View-batched recursive-size scanning requires four active views on distinct roots.", nameof(asyncParentBatchProbe));
+        if (asyncParentBatchProbe && (!asyncSharedViewProbe || asyncSharedViewCount != 4))
+            throw new ArgumentException("View-batched recursive-size scanning requires four active views.", nameof(asyncParentBatchProbe));
         if (asyncSharedViewProbe && (!recursiveDirectorySizeSortOnly || largeViewSortProbe || twoViewDistinctLocations || onDemandFolderCount < 2))
             throw new ArgumentException("The async shared-view probe requires the recursive-size view fixture, a single shared root, and no separate large-view sort strategy.");
         if (largeViewSortProbe && (!onDemandRecursiveSize || onDemandFolderCount == 0))
@@ -818,12 +818,13 @@ public static class SyntheticShellSortProbe
                     }
                     if (asyncParentBatchProbe)
                     {
+                        var requiredUpdateNotifications = asyncSharedViewDistinctRoots ? asyncSharedViewCount : 1;
                         var notificationDeadline = Math.Min(deadline, Environment.TickCount64 + 10_000);
-                        while ((ReadCounter(module, "GetSyntheticAsyncRecursiveSizeNotificationCountForProbe") < asyncSharedViewCount ||
+                        while ((ReadCounter(module, "GetSyntheticAsyncRecursiveSizeNotificationCountForProbe") < requiredUpdateNotifications ||
                             ReadCounter(module, "GetSyntheticEnumObjectsCount") - initialEnumerationCount < asyncSharedViewCount) &&
                             Environment.TickCount64 < notificationDeadline)
                             Pump(25);
-                        if (ReadCounter(module, "GetSyntheticAsyncRecursiveSizeNotificationCountForProbe") < asyncSharedViewCount ||
+                        if (ReadCounter(module, "GetSyntheticAsyncRecursiveSizeNotificationCountForProbe") < requiredUpdateNotifications ||
                             ReadCounter(module, "GetSyntheticEnumObjectsCount") - initialEnumerationCount < asyncSharedViewCount)
                             throw new TimeoutException("The batched recursive-size probe did not observe one completed Shell update per distinct view.");
                         Pump(300);

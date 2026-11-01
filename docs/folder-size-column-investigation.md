@@ -1439,4 +1439,8 @@ NativeProbe Release build 成功，0 警告/错误；原生 adapter `/W4 /WX` �
 
 随后在 NativeProbe 中实现按需行请求收集：Shell 对某个未缓存目录请求列值时，provider 将该目录加入本视图的小批次，同一 view 只排入一个 worker task；工作线程在短暂收集窗口后逐行扫描，按目录身份核验并写回共享快照，结束后合并发出一次 `SHCNE_UPDATEDIR`。它不枚举/扫描未被 Shell 请求的同级目录。四个不同根目录、每根 80 个普通目录及一个嵌套目录，缓存 512 时，在队列门闩释放前恰好排入 4 个 view task；所有 324 个唯一扫描完成、拒绝 0、重复 0、峰值 worker 2、通知 4、聚合重枚举 4；四 view 的 82/82 列值正确。一次相同参数的运行报告第四 view 的焦点未保留（`20261101-133304-2a875366.stdout.log`）；加入失败状态诊断后，最新源码连续两轮均保留四 view 的选区/焦点：`20261101-133349-610344cd.stdout.log`、`20261101-133449-9a54509f.stdout.log`。更早同策略轮次：`20261101-133104-70074f0d.stdout.log`。焦点结果仍有过一次不稳定，暂不视为产品验收完成。
 
-对照原逐行队列：固定同样的 512 缓存和 324 个请求，门闩释放前拒绝 66 项，之后只扫描 258 项；`LVM_UPDATE` 与 `IShellView.Refresh` 没有补回缺失的 66 个值，日志：`src/.state/native-probe-watchdog/20261101-133136-05dbf78f.stdout.log`。该结果说明按需行批次在本机合成四 view 压力场景能减少队列项并消除本次拒绝，但它仍只是 NativeProbe 的 `IShellView` 原型，不是 ExplorerBrowser 产品行为，也未证明普通低负载时的延迟、同根视图并发去重、取消/关闭竞争、慢磁盘/网络或可见排序体验。下一步应增加焦点状态稳定复测，并覆盖同根共享缓存、仅请求少量行和 view 关闭取消，再评审是否接入产品。原生 adapter `/W4 /WX` 与 NativeProbe Release 均构建成功，0 警告/错误。
+对照原逐行队列：固定同样的 512 缓存和 324 个请求，门闩释放前拒绝 66 项，之后只扫描 258 项；`LVM_UPDATE` 与 `IShellView.Refresh` 没有补回缺失的 66 个值，日志：`src/.state/native-probe-watchdog/20261101-133136-05dbf78f.stdout.log`。该结果说明按需行批次在本机合成四 view 压力场景能减少队列项并消除本次拒绝，但它仍只是 NativeProbe 的 `IShellView` 原型，不是 ExplorerBrowser 产品行为，也未证明普通低负载时的延迟、取消/关闭竞争、慢磁盘/网络或可见排序体验。后续应验证只请求少量行和 view 关闭取消，再评审产品接线。原生 adapter `/W4 /WX` 与 NativeProbe Release 均构建成功，0 警告/错误。
+
+### 2026-11-01：按视图批次的同根四视图共享缓存
+
+放开 batch probe 的同根四视图组合后，使用相同 80 目录夹具和 512 缓存跑两轮。四个共享同一 backing root 的 view 都读回 82/82 行，累计只扫描 81 个唯一目录（child、80 个同级目录），重复扫描 0、队列拒绝 0、峰值 worker 1、通知 2、聚合 `EnumObjects` 增量 4；四份选区和焦点保留。日志：`src/.state/native-probe-watchdog/20261101-133655-890a7c79.stdout.log`、`src/.state/native-probe-watchdog/20261101-133713-ac00c843.stdout.log`。这是同进程 synthetic provider 的隐藏 `IShellView` 证据；尚未测试只请求部分行时的扫描范围，也尚未验证关闭/取消竞争。下一步先补这两项生命周期和按需范围，再评估产品接线。
