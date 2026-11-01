@@ -87,6 +87,13 @@ public static class SyntheticShellSortProbe
         Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
             useWpfParent: true, exerciseUpdateNotifications: true);
 
+    internal static int RunRelativePercentColumnMetadata(uint type)
+    {
+        if (type is not (0u or 1u or 2u)) throw new ArgumentOutOfRangeException(nameof(type));
+        return Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
+            useWpfParent: true, relativePercentColumnType: type);
+    }
+
     internal static int RunFactorySnapshotCacheSmoke() =>
         Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
             factorySnapshotCacheOnly: true);
@@ -108,8 +115,11 @@ public static class SyntheticShellSortProbe
     internal static int Run(bool recursiveDirectorySizeSortOnly = false, bool maskFilesystemAttributes = false,
         bool selfOwnedAttributes = false, bool customSizeColumn = false, bool useWpfParent = false,
         bool exerciseUpdateNotifications = false, bool slowCustomSizeColumn = false, bool twoViewDistinctLocations = false,
-        bool focusRecoveryExperiment = false, bool factorySnapshotCacheOnly = false)
+        bool focusRecoveryExperiment = false, bool factorySnapshotCacheOnly = false,
+        uint? relativePercentColumnType = null)
     {
+        if (relativePercentColumnType is not null && !recursiveDirectorySizeSortOnly)
+            throw new ArgumentException("The relative-percent metadata probe requires the isolated recursive-size view.", nameof(relativePercentColumnType));
         var sizeUpdateStrategy = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_SIZE_UPDATE_STRATEGY") ?? "single-item";
         var shellWindowScrollProbe = sizeUpdateStrategy == "single-item-recreate-shell-window-scroll";
         if (exerciseUpdateNotifications && sizeUpdateStrategy == "all")
@@ -231,6 +241,9 @@ public static class SyntheticShellSortProbe
                 "SetSyntheticCustomSizeColumnForProbe"))(customSizeColumn ? 1 : 0));
             Check(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
                 "SetSyntheticSlowCustomSizeColumnForProbe"))(slowCustomSizeColumn ? 1 : 0));
+            if (relativePercentColumnType is { } percentColumnType)
+                Check(Marshal.GetDelegateForFunctionPointer<SetRelativePercentColumnType>(NativeLibrary.GetExport(module,
+                    "SetSyntheticRelativePercentColumnTypeForProbe"))(1, percentColumnType));
             Check(Marshal.GetDelegateForFunctionPointer<SetBackingPath>(NativeLibrary.GetExport(module, "SetSyntheticSortBackingPath"))(backingFolder));
             RegisterSyntheticFolder(classKeyPath, syntheticFolderClassId);
             classRegistrationCreated = true;
@@ -328,6 +341,40 @@ public static class SyntheticShellSortProbe
                 var expectedInitialCount = shellWindowScrollProbe ? 302 : 2;
                 var initialNames = WaitForNames(sizeListView, module, "child", expectedCount: expectedInitialCount);
                 var initialSizes = ReadColumnTexts(sizeListView, module, 1, expectedCount: expectedInitialCount);
+                if (relativePercentColumnType is { } relativeType)
+                {
+                    var headers = ReadHeaderColumnTitles(sizeListView);
+                    var percentTexts = ReadColumnTexts(sizeListView, module, 3, expectedInitialCount);
+                    var columnsResult = ShellColumnManager.Capture(folderView, out var capturedColumns);
+                    var initialSort = CaptureNativeSortColumns(folderView);
+                    string[]? ascendingPercentNames = null;
+                    string[]? descendingPercentNames = null;
+                    if (headers.Length > 3 && string.Equals(headers[3], "Relative %", StringComparison.Ordinal))
+                    {
+                        ascendingPercentNames = SortByHeader(module, sizeListView, 3, expectedInitialCount,
+                            "relative-percent-header-sort-ascending");
+                        descendingPercentNames = SortByHeader(module, sizeListView, 3, expectedInitialCount,
+                            "relative-percent-header-sort-descending");
+                    }
+                    var finalSort = CaptureNativeSortColumns(folderView);
+                    var percentColumnVisible = headers.Length > 3 && string.Equals(headers[3], "Relative %", StringComparison.Ordinal);
+                    var percentValuesValid = initialNames.SequenceEqual(["child", "small.bin"], StringComparer.OrdinalIgnoreCase) &&
+                        percentTexts.SequenceEqual(["71.428571%", "28.571429%"], StringComparer.Ordinal);
+                    var percentSortValid = ascendingPercentNames?.SequenceEqual(["small.bin", "child"], StringComparer.OrdinalIgnoreCase) == true &&
+                        descendingPercentNames?.SequenceEqual(["child", "small.bin"], StringComparer.OrdinalIgnoreCase) == true;
+                    var capturedFourColumns = columnsResult >= 0 && capturedColumns?.Count == 4;
+                    Console.WriteLine($"synthetic-relative-percent-column: type=0x{relativeType:X}; visible={percentColumnVisible}; " +
+                        $"values-valid={percentValuesValid}; sort-valid={percentSortValid}; captured-four-columns={capturedFourColumns}; " +
+                        $"headers=[{string.Join('|', headers)}]; " +
+                        $"rows=[{FormatProbeRows(initialNames)}]; percent-text=[{FormatProbeRows(percentTexts)}]; " +
+                        $"columns-hr=0x{columnsResult:X8}; columns=[{FormatColumns(capturedColumns)}]; " +
+                        $"sort-before=[{FormatSortColumns(initialSort)}]; sort-after=[{FormatSortColumns(finalSort)}]; " +
+                        $"ascending=[{(ascendingPercentNames is null ? "<unavailable>" : FormatProbeRows(ascendingPercentNames))}]; " +
+                        $"descending=[{(descendingPercentNames is null ? "<unavailable>" : FormatProbeRows(descendingPercentNames))}]; " +
+                        $"window-created=True; foreground-unchanged={GetForegroundWindow() == foreground}");
+                    return percentColumnVisible && percentValuesValid && percentSortValid && capturedFourColumns &&
+                        GetForegroundWindow() == foreground ? 0 : 1;
+                }
                 var detailsExRequests = ReadCounter(module, "GetSyntheticSizeDetailsExCount");
                 var detailsExFolderRequests = ReadCounter(module, "GetSyntheticSizeDetailsExFolderCount");
                 var detailsExFileRequests = ReadCounter(module, "GetSyntheticSizeDetailsExFileCount");
@@ -1024,6 +1071,9 @@ public static class SyntheticShellSortProbe
             if (module != 0 && exerciseUpdateNotifications)
                 _ = Marshal.GetDelegateForFunctionPointer<SetSyntheticSizeOverrideDelegate>(
                     NativeLibrary.GetExport(module, "SetSyntheticChildSizeOverrideForProbe"))(-1);
+            if (module != 0 && relativePercentColumnType is not null)
+                _ = Marshal.GetDelegateForFunctionPointer<SetRelativePercentColumnType>(
+                    NativeLibrary.GetExport(module, "SetSyntheticRelativePercentColumnTypeForProbe"))(0, 2);
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-native-release-view-holds");
             if (module != 0) Marshal.GetDelegateForFunctionPointer<ReleaseViewHold>(NativeLibrary.GetExport(module, "ReleaseSyntheticSortViewHold"))();
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-release-folder-view-1");
@@ -3100,6 +3150,7 @@ public static class SyntheticShellSortProbe
     }
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ResetCounters();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetProbeFlag(int enabled);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetRelativePercentColumnType(int enabled, uint type);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSyntheticFolderClassId(ref Guid classId);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSyntheticSizeOverrideDelegate(long size);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateSyntheticView(nint rootPidl, out nint folder, out nint view);

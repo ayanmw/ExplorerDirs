@@ -1229,4 +1229,12 @@ NativeProbe Release 构建 0 警告/错误；`--shell-change-reconciliation` 退
 
 复核 NativeProbe 类型实验后确认，递归总大小是列 1：`GetDefaultColumnState` 返回 `SHCOLSTATE_TYPE_INT`，`GetDetailsEx` 返回 `VT_UI8` 字节值，`GetDetailsOf` 输出十进制字节文本，并由 `CompareIDs` 数值排序。待核查的 `VT_R8` 是隔离合成视图额外的相对百分比列 3，不是递归总大小列。将这两列统称为“递归大小列类型不一致”会扩大问题范围。
 
-恢复原型列状态后，`build-static-shell-folder-adapter.ps1` 与 `dotnet run --project src/ExplorerDirs.NativeProbe -c Release -- --static-shell-column-folder-smoke` 均通过；该静态合同明确 `window-created=False`。此前对列 3 的类型尝试没有形成足以判定其 Shell 显示/排序行为的隔离 A/B 证据；不得据此修改列 1 或宣称百分比列已修正。下一步如继续，需在同一隔离 `IShellView` fixture 中只变更列 3 的状态，记录列标题、行显示、排序和 `IColumnManager` 读回；产品 ExplorerBrowser 和可见用户体验仍需单独验收。
+恢复原型列状态后，`build-static-shell-folder-adapter.ps1` 与 `dotnet run --project src/ExplorerDirs.NativeProbe -c Release -- --static-shell-column-folder-smoke` 均通过；该静态合同明确 `window-created=False`。此前对列 3 的类型尝试没有形成足以判定其 Shell 显示/排序行为的隔离 A/B 证据；不得据此修改列 1 或宣称百分比列已修正。后续在同一隔离 `IShellView` fixture 中只变更列 3 状态，并记录列标题、行显示、排序及 `IColumnManager` 读回；结果见下一节。产品 ExplorerBrowser 和可见用户体验仍需单独验收。
+
+### 2026-11-01：相对百分比列状态位的隐藏 `IShellView` A/B
+
+NativeProbe 增加三种状态模式，仅对隔离合成 view 的列 3（Relative %）设置 `SHCOLSTATE_TYPE_INT`、`SHCOLSTATE_TYPE_STR` 或 `SHCOLSTATE_DEFAULT`；列 1 递归总大小保持 `TYPE_INT`。三种模式均在 WPF `HwndSource` Private Desktop 宿主独立运行并正常清理。状态回读分别为 `0x12`、`0x11`、`0x10`；三轮均保留 `Name / Recursive Size / Type / Relative %` 表头、同一 `IColumnManager` 四列键及宽度，行文本均为 `child=71.428571%`、`small.bin=28.571429%`，列头升序为 `small.bin|child`、降序为 `child|small.bin`。前台 HWND 与最后输入 tick 均不变。
+
+这说明在该 Windows 合成 `IShellView`/DefView 场景下，列 3 的三个类型状态位没有改变可观察的显示、排序或列管理器布局；它没有证明其它 provider、ExplorerBrowser 产品宿主或用户配置文件中的列状态也相同。当前没有理由为追求该探针的差异而改产品元数据。
+
+第一次整数对照使用旧的 `STATIC` parent 路径：列内容和排序读回正确，但 worker 在销毁 parent 时超时，wait-chain 含 COM activation / `ChsIME`，前台和输入守卫未变化。该轮不纳入清理成功的 A/B 集；watchdog 终止进程后仍留有仅属于该轮随机 CLSID `{f2be1c4d-259f-42e7-9389-343c0d1123f0}` 的 HKCU Shell 注册，以及 `%TEMP%\ExplorerDirs-SyntheticShellSort-f2be1c4d259f42e79389343c0d1123f0` 和 `%TEMP%\ExplorerDirs-SyntheticShellSort-Copy-f2be1c4d259f42e79389343c0d1123f0` 夹具。递归清理被本机执行策略拒绝，没有换用其它删除路径。随后相同整数模式改用 WPF Private Desktop parent 复验成功并清理。该超时没有证据表明是列实验或产品卡死。

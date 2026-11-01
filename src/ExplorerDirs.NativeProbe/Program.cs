@@ -87,6 +87,12 @@ internal static class Program
             return PrivateDesktopShellProbe.RunSyntheticRecursiveDirectorySizeSortWithSlowColumn();
         if (args.Length == 1 && args[0] == "--synthetic-recursive-directory-size-wpf-host-private-desktop")
             return PrivateDesktopShellProbe.RunSyntheticRecursiveDirectorySizeSortWithWpfHost();
+        if (args.Length == 1 && args[0] == "--synthetic-relative-percent-column-int-private-desktop")
+            return PrivateDesktopShellProbe.RunRelativePercentColumnMetadata(0x2);
+        if (args.Length == 1 && args[0] == "--synthetic-relative-percent-column-string-private-desktop")
+            return PrivateDesktopShellProbe.RunRelativePercentColumnMetadata(0x1);
+        if (args.Length == 1 && args[0] == "--synthetic-relative-percent-column-default-private-desktop")
+            return PrivateDesktopShellProbe.RunRelativePercentColumnMetadata(0x0);
         if (args.Length == 1 && args[0] == "--synthetic-shell-factory-snapshot-cache-private-desktop")
             return PrivateDesktopShellProbe.RunSyntheticShellFactorySnapshotCache();
         if (args.Length == 1 && args[0] == "--synthetic-shell-folder-tree-smoke")

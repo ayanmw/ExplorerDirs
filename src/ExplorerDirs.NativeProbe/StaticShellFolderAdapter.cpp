@@ -1559,6 +1559,7 @@ namespace
     volatile LONG g_syntheticCustomSizeColumnForProbe = 0;
     volatile LONG g_syntheticSlowCustomSizeColumnForProbe = 0;
     volatile LONG g_syntheticExtendedMetadataColumnsForProbe = 0;
+    volatile LONG g_syntheticRelativePercentColumnTypeForProbe = SHCOLSTATE_TYPE_INT;
     volatile LONG64 g_syntheticChildSizeOverride = -1;
     // Exclude synchronous property callbacks caused by the probe's own
     // ListView text reads from notification-strategy counters.
@@ -2722,7 +2723,10 @@ namespace
                 RecordSyntheticColumnMetadata(2, column, {}, E_INVALIDARG, nullptr);
                 return E_INVALIDARG;
             }
-            *state = SHCOLSTATE_ONBYDEFAULT | (column == 1 || column == 3 ? SHCOLSTATE_TYPE_INT : SHCOLSTATE_TYPE_STR);
+            const auto relativePercentType = static_cast<SHCOLSTATEF>(
+                InterlockedCompareExchange(&g_syntheticRelativePercentColumnTypeForProbe, 0, 0));
+            *state = SHCOLSTATE_ONBYDEFAULT | (column == 1 ? SHCOLSTATE_TYPE_INT :
+                column == 3 ? relativePercentType : SHCOLSTATE_TYPE_STR);
             if (column == 1 && InterlockedCompareExchange(&g_syntheticCustomSizeColumnForProbe, 0, 0) &&
                 InterlockedCompareExchange(&g_syntheticSlowCustomSizeColumnForProbe, 0, 0))
                 *state |= SHCOLSTATE_SLOW;
@@ -4820,6 +4824,15 @@ extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticCustomSizeColumnForP
 extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticSlowCustomSizeColumnForProbe(BOOL enabled)
 {
     InterlockedExchange(&g_syntheticSlowCustomSizeColumnForProbe, enabled ? 1 : 0);
+    return S_OK;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticRelativePercentColumnTypeForProbe(BOOL enabled, SHCOLSTATEF type)
+{
+    if (type != SHCOLSTATE_DEFAULT && type != SHCOLSTATE_TYPE_INT && type != SHCOLSTATE_TYPE_STR)
+        return E_INVALIDARG;
+    InterlockedExchange(&g_syntheticRelativePercentColumnTypeForProbe, static_cast<LONG>(type));
+    InterlockedExchange(&g_syntheticExtendedMetadataColumnsForProbe, enabled ? 1 : 0);
     return S_OK;
 }
 
