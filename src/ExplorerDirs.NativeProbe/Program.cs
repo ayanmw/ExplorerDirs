@@ -133,6 +133,12 @@ internal static class Program
             return PrivateDesktopShellProbe.RunSyntheticShellFactorySnapshotCache();
         if (args.Length == 1 && args[0] == "--synthetic-direct-ishellview-no-registration-private-desktop")
             return PrivateDesktopShellProbe.RunDirectIshellViewNoRegistrationPrototype();
+        if (args.Length == 1 && args[0] == "--synthetic-direct-ishellview-class-only-private-desktop")
+            return PrivateDesktopShellProbe.RunDirectIshellViewClassOnlyPrototype();
+        if (args.Length == 1 && args[0] == "--synthetic-direct-ishellview-running-factory-private-desktop")
+            return PrivateDesktopShellProbe.RunDirectIshellViewRunningFactoryPrototype();
+        if (args.Length == 1 && args[0] == "--synthetic-direct-ishellview-volatile-class-private-desktop")
+            return PrivateDesktopShellProbe.RunDirectIshellViewVolatileClassPrototype();
         if (args.Length == 1 && args[0] == "--synthetic-shell-folder-tree-smoke")
             return SyntheticShellSortProbe.RunFolderTreeContractSmoke();
         if (args.Length == 1 && args[0] == "--synthetic-on-demand-recursive-size-column-smoke")

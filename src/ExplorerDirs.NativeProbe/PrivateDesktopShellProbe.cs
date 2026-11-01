@@ -260,6 +260,21 @@ internal static class PrivateDesktopShellProbe
         Run("synthetic-direct-ishellview", () => SyntheticShellSortProbe.RunDirectIshellViewNoRegistrationPrototype(),
             TimeSpan.FromSeconds(45), initializeOle: true);
 
+    internal static int RunDirectIshellViewClassOnlyPrototype() =>
+        Run("synthetic-direct-ishellview-class-only",
+            () => SyntheticShellSortProbe.RunDirectIshellViewNoRegistrationPrototype(retainClassRegistration: true),
+            TimeSpan.FromSeconds(45), initializeOle: true);
+
+    internal static int RunDirectIshellViewRunningFactoryPrototype() =>
+        Run("synthetic-direct-ishellview-running-factory",
+            () => SyntheticShellSortProbe.RunDirectIshellViewNoRegistrationPrototype(registerRunningClassFactory: true),
+            TimeSpan.FromSeconds(45), initializeOle: true);
+
+    internal static int RunDirectIshellViewVolatileClassPrototype() =>
+        Run("synthetic-direct-ishellview-volatile-class",
+            () => SyntheticShellSortProbe.RunDirectIshellViewNoRegistrationPrototype(volatileClassRegistration: true),
+            TimeSpan.FromSeconds(45), initializeOle: true);
+
     internal static int RunSyntheticShellTwoViewTargetSync() =>
         Run("synthetic-shell-two-view-target-sync", () => SyntheticShellSortProbe.Run(twoViewDistinctLocations: true), TimeSpan.FromSeconds(45), initializeOle: true);
 

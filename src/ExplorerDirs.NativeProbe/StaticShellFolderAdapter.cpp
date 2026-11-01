@@ -4811,6 +4811,25 @@ extern "C" __declspec(dllexport) HRESULT WINAPI ConfigureSyntheticNamespaceRootF
     return S_OK;
 }
 
+extern "C" __declspec(dllexport) HRESULT WINAPI RegisterSyntheticClassFactoryInProcForProbe(
+    const CLSID* classId, DWORD* cookie)
+{
+    if (!classId || !cookie) return E_POINTER;
+    *cookie = 0;
+    SyntheticFolderClassFactory* factory = nullptr;
+    try { factory = new (std::nothrow) SyntheticFolderClassFactory(nullptr, *classId, g_syntheticSortBackingPath); }
+    catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+    if (!factory) return E_OUTOFMEMORY;
+    const auto result = CoRegisterClassObject(*classId, factory, CLSCTX_INPROC_SERVER, REGCLS_MULTIPLEUSE, cookie);
+    factory->Release();
+    return result;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI RevokeSyntheticClassFactoryForProbe(DWORD cookie)
+{
+    return cookie ? CoRevokeClassObject(cookie) : E_INVALIDARG;
+}
+
 namespace
 {
     HRESULT CreateConfiguredRootForProbe(REFCLSID classId, IShellFolder2** value)

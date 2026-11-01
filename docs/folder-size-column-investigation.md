@@ -2346,6 +2346,12 @@ HostProbe Release 构建通过，四种隐藏合成视图场景（正常/忽略�
 
 该结果排除了“把普通文件系统 `IShellFolder` 包一层后直接交给现有 ExplorerBrowser，即可在无注册情况下保留逐行派生列”的简单接法；不排除可解析的虚拟 CLSID namespace 对象导航，也不等同于完整测试自定义 provider。结合上节无 Desktop NameSpace 时应用 parsing name 恢复失败，若要在绿色部署中继续保留 ExplorerBrowser，仍需有 Shell 可解析的注册 namespace；免注册方案更适合转向应用直接承载 `IShellView`、由应用恢复自有位置身份的隔离迁移原型。产品 Host 尚未改变。
 
+### 2026-11-02：volatile CLSID 注册的直接 IShellView 对照
+
+扩展同一 Private Desktop 原型，将随机 CLSID 及 `InprocServer32`、`ShellFolder` 子键创建为 `HKCU\Software\Classes\CLSID` 下的 volatile registry keys；Desktop `NameSpace` 只在 `SHParseDisplayName` 阶段临时存在，解析后即删除。随后由原生 `SHCreateShellFolderView` 创建真实 DefView，`IFolderView2.GetFolder` identity 与直接 provider 一致，列表正确枚举 `file-middle.bin|folder-large|folder-small` 三行。退出清理会验证临时 CLSID 树已删除。Private Desktop 前台、输入及隔离清理守卫通过。
+
+这证明上一节“必须有持久 CLSID 注册”的结论过宽：当前用户会话内的 volatile CLSID 注册即可支持直接 IShellView 创建；COM `CoRegisterClassObject` 单独不能替代该 Shell 类键。volatile key 仍是运行时 HKCU 注册，只是不会写成跨系统重启保留的持久项；本探针没有验证崩溃残留、同会话重启恢复、ExplorerBrowser parsing-name 恢复或产品生命周期。应用若要采用它，需要明确稳定 CLSID、启动前注册与可靠退出清理，并设计异常退出后重建；本结果不等同于无注册表运行。逐行递归扫描仍只允许按用户显式动作触发，产品 ExplorerBrowser 未改。
+
 ### 2026-11-02：免注册直接 IShellView 原型门槛
 
 新增隔离 NativeProbe：先在随机 HKCU CLSID/Desktop NameSpace 下解析应用路径 PIDL，随后立即删除这两项注册，再由进程内 NativeAdapter 直接构造 `SyntheticSortFolder`，并将已取得的 PIDL 传给 folder 初始化。Shell folder 对象本身创建成功，但其 `CreateViewObject(IID_IShellView)` 调用 `SHCreateShellFolderView` 返回 `REGDB_E_CLASSNOTREG (0x80040154)`；探针验证两项注册均已删除后才调用，并将此 HRESULT 作为可重复的预期门槛通过。Private Desktop 前台/输入守卫及退出隔离清理通过。

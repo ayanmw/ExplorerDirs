@@ -29,7 +29,8 @@ public static class SyntheticShellSortProbe
     private const int LvmGetTopIndex = LvmFirst + 39;
     private const int LvmGetItemTextW = LvmFirst + 115;
 
-    internal static int RunDirectIshellViewNoRegistrationPrototype()
+    internal static int RunDirectIshellViewNoRegistrationPrototype(bool retainClassRegistration = false,
+        bool registerRunningClassFactory = false, bool volatileClassRegistration = false)
     {
         var fixture = Path.Combine(Path.GetTempPath(), $"ExplorerDirs-DirectShellView-{Guid.NewGuid():N}");
         var smallFolder = Path.Combine(fixture, "folder-small");
@@ -39,6 +40,7 @@ public static class SyntheticShellSortProbe
         var namespaceKeyPath = $@"Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{{{classId:D}}}";
         nint module = 0, folder = 0, view = 0, parent = 0, browserPointer = 0, folderView = 0, viewFolder = 0, rootPidl = 0;
         nint directIdentity = 0, activeIdentity = 0;
+        uint runningFactoryCookie = 0;
         var classRegistered = false;
         var namespaceRegistered = false;
         var viewWindowCreated = false;
@@ -60,29 +62,50 @@ public static class SyntheticShellSortProbe
                 "SetSyntheticCustomSizeColumnForProbe"))(1));
             Check(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
                 "SetSyntheticRecursiveSizeScanOnDemandForProbe"))(1));
-            RegisterSyntheticFolder(classKeyPath, classId);
+            RegisterSyntheticFolder(classKeyPath, classId, volatileRegistration: volatileClassRegistration);
             classRegistered = true;
             RegisterSyntheticNamespace(namespaceKeyPath);
             namespaceRegistered = true;
             Check(SHParseDisplayName(CreatePathIdentityParsingName(classId, fixture), 0, out rootPidl, 0, out _));
+            if (registerRunningClassFactory)
+            {
+                var registerFactory = Marshal.GetDelegateForFunctionPointer<RegisterClassFactoryForProbe>(
+                    NativeLibrary.GetExport(module, "RegisterSyntheticClassFactoryInProcForProbe"));
+                var registerResult = registerFactory(ref classId, out runningFactoryCookie);
+                if (registerResult < 0)
+                {
+                    Console.WriteLine($"synthetic-direct-ishellview-running-factory: CoRegisterClassObject-hr=0x{registerResult:X8}");
+                    return 0;
+                }
+            }
             Registry.CurrentUser.DeleteSubKeyTree(namespaceKeyPath, throwOnMissingSubKey: false);
             namespaceRegistered = false;
-            Registry.CurrentUser.DeleteSubKeyTree(classKeyPath, throwOnMissingSubKey: false);
-            classRegistered = false;
+            if ((!retainClassRegistration && !volatileClassRegistration) || registerRunningClassFactory)
+            {
+                Registry.CurrentUser.DeleteSubKeyTree(classKeyPath, throwOnMissingSubKey: false);
+                classRegistered = false;
+            }
 
             var createDirect = Marshal.GetDelegateForFunctionPointer<CreateDirectShellViewForProbe>(
                 NativeLibrary.GetExport(module, "CreateSyntheticSortShellViewDirectForProbe"));
             var createViewResult = createDirect(rootPidl, ref classId, out folder, out view);
-            if (createViewResult == unchecked((int)0x80040154) && folder == 0 && view == 0)
+            if (!retainClassRegistration && createViewResult == unchecked((int)0x80040154) && folder == 0 && view == 0)
             {
-                Console.WriteLine("synthetic-direct-ishellview: clsid-registered=False; desktop-namespace-registered=False; direct-folder-created=True; shell-view-create-hr=0x80040154; expected-shell-activation-block=True");
+                Console.WriteLine($"synthetic-direct-ishellview: clsid-registered=False; desktop-namespace-registered=False; running-factory={registerRunningClassFactory}; direct-folder-created=True; shell-view-create-hr=0x80040154; expected-shell-activation-block=True");
+                return 0;
+            }
+            if ((retainClassRegistration || registerRunningClassFactory) && createViewResult < 0 && folder == 0 && view == 0)
+            {
+                Console.WriteLine($"synthetic-direct-ishellview-activation: clsid-registered={retainClassRegistration}; desktop-namespace-registered=False; running-factory={registerRunningClassFactory}; direct-folder-created=True; shell-view-create-hr=0x{createViewResult:X8}");
                 return 0;
             }
             Check(createViewResult);
 
-            if (Registry.CurrentUser.OpenSubKey(classKeyPath) is not null ||
-                Registry.CurrentUser.OpenSubKey(namespaceKeyPath) is not null)
-                throw new InvalidOperationException("The direct Shell view prototype unexpectedly registered its CLSID or Desktop NameSpace.");
+            var classKeyPresent = Registry.CurrentUser.OpenSubKey(classKeyPath) is not null;
+            var namespaceKeyPresent = Registry.CurrentUser.OpenSubKey(namespaceKeyPath) is not null;
+            var expectedClassKeyPresent = retainClassRegistration || volatileClassRegistration;
+            if (classKeyPresent != expectedClassKeyPresent || namespaceKeyPresent)
+                throw new InvalidOperationException($"The direct Shell view prototype registration state differed from the requested gate: CLSID={classKeyPresent}; Desktop NameSpace={namespaceKeyPresent}.");
 
             parent = CreateWindowExW(0, "STATIC", "ExplorerDirs direct IShellView no-registration probe",
                 0x80000000, 20, 20, 900, 600, 0, 0, 0, 0);
@@ -108,8 +131,20 @@ public static class SyntheticShellSortProbe
             if (!names.Contains("folder-small", StringComparer.OrdinalIgnoreCase) ||
                 !names.Contains("folder-large", StringComparer.OrdinalIgnoreCase) ||
                 !names.Contains("file-middle.bin", StringComparer.OrdinalIgnoreCase))
+            {
+                if (retainClassRegistration)
+                {
+                    Console.WriteLine($"synthetic-direct-ishellview-class-only: clsid-registered=True; desktop-namespace-registered=False; provider-retained={providerRetained}; row-count={rowCount}; names=[{string.Join('|', names)}]; enum-calls={ReadCounter(module, "GetSyntheticEnumObjectsCount")}; enumerated={ReadCounter(module, "GetSyntheticEnumeratedItemCount")}; view-window-created=True");
+                    return 0;
+                }
+                if (registerRunningClassFactory)
+                {
+                    Console.WriteLine($"synthetic-direct-ishellview-running-factory: clsid-registered=False; desktop-namespace-registered=False; provider-retained={providerRetained}; row-count={rowCount}; names=[{string.Join('|', names)}]; enum-calls={ReadCounter(module, "GetSyntheticEnumObjectsCount")}; enumerated={ReadCounter(module, "GetSyntheticEnumeratedItemCount")}; view-window-created=True");
+                    return 0;
+                }
                 throw new InvalidOperationException($"The directly hosted Shell view returned unexpected rows: provider-retained={providerRetained}; count={rowCount}; names=[{string.Join('|', names)}]; enum-calls={ReadCounter(module, "GetSyntheticEnumObjectsCount")}; enumerated={ReadCounter(module, "GetSyntheticEnumeratedItemCount")}.");
-            Console.WriteLine($"synthetic-direct-ishellview: clsid-registered=False; desktop-namespace-registered=False; view-window-created=True; provider-retained={providerRetained}; row-count={rowCount}; rows=[{string.Join('|', names)}]; parent-visible={IsWindowVisible(parent)}");
+            }
+            Console.WriteLine($"synthetic-direct-ishellview: clsid-registered={retainClassRegistration || volatileClassRegistration}; clsid-volatile={volatileClassRegistration}; desktop-namespace-registered=False; running-factory={registerRunningClassFactory}; view-window-created=True; provider-retained={providerRetained}; row-count={rowCount}; rows=[{string.Join('|', names)}]; parent-visible={IsWindowVisible(parent)}");
             return 0;
         }
         finally
@@ -125,10 +160,16 @@ public static class SyntheticShellSortProbe
             if (view != 0) Marshal.Release(view);
             if (folder != 0) Marshal.Release(folder);
             if (rootPidl != 0) Marshal.FreeCoTaskMem(rootPidl);
+            if (runningFactoryCookie != 0)
+                _ = Marshal.GetDelegateForFunctionPointer<RevokeClassFactoryForProbe>(
+                    NativeLibrary.GetExport(module, "RevokeSyntheticClassFactoryForProbe"))(runningFactoryCookie);
             if (namespaceRegistered) Registry.CurrentUser.DeleteSubKeyTree(namespaceKeyPath, throwOnMissingSubKey: false);
             if (classRegistered) Registry.CurrentUser.DeleteSubKeyTree(classKeyPath, throwOnMissingSubKey: false);
             if (module != 0) NativeLibrary.Free(module);
             if (Directory.Exists(fixture)) Directory.Delete(fixture, recursive: true);
+            using var remainingClassKey = Registry.CurrentUser.OpenSubKey(classKeyPath);
+            if (remainingClassKey is not null)
+                throw new InvalidOperationException("The isolated synthetic folder CLSID registration remained after probe cleanup.");
         }
     }
     private const int WmSetRedraw = 0x000B;
@@ -4627,7 +4668,7 @@ public static class SyntheticShellSortProbe
         throw new FileNotFoundException("Run build-static-shell-folder-adapter.ps1 before the synthetic Shell sort probe.");
     }
 
-    private static void RegisterSyntheticFolder(string classKeyPath, Guid classId)
+    private static void RegisterSyntheticFolder(string classKeyPath, Guid classId, bool volatileRegistration = false)
     {
         using var classes = Registry.CurrentUser.OpenSubKey("Software\\Classes", writable: true)
             ?? throw new InvalidOperationException("HKCU\\Software\\Classes is unavailable.");
@@ -4637,14 +4678,20 @@ public static class SyntheticShellSortProbe
 
         try
         {
-            using var classKey = Registry.CurrentUser.CreateSubKey(classKeyPath, writable: true)
+            using var classKey = volatileRegistration
+                ? Registry.CurrentUser.CreateSubKey(classKeyPath, RegistryKeyPermissionCheck.ReadWriteSubTree, RegistryOptions.Volatile)
+                : Registry.CurrentUser.CreateSubKey(classKeyPath, writable: true)
                 ?? throw new InvalidOperationException("Could not create the temporary synthetic folder CLSID key.");
             classKey.SetValue(null, "ExplorerDirs isolated synthetic sort probe", RegistryValueKind.String);
-            using var inproc = classKey.CreateSubKey("InprocServer32", writable: true)
+            using var inproc = volatileRegistration
+                ? classKey.CreateSubKey("InprocServer32", RegistryKeyPermissionCheck.ReadWriteSubTree, RegistryOptions.Volatile)
+                : classKey.CreateSubKey("InprocServer32", writable: true)
                 ?? throw new InvalidOperationException("Could not create the temporary InprocServer32 key.");
             inproc.SetValue(null, FindAdapterLibrary(), RegistryValueKind.String);
             inproc.SetValue("ThreadingModel", "Apartment", RegistryValueKind.String);
-            using var shellFolder = classKey.CreateSubKey("ShellFolder", writable: true)
+            using var shellFolder = volatileRegistration
+                ? classKey.CreateSubKey("ShellFolder", RegistryKeyPermissionCheck.ReadWriteSubTree, RegistryOptions.Volatile)
+                : classKey.CreateSubKey("ShellFolder", writable: true)
                 ?? throw new InvalidOperationException("Could not create the temporary ShellFolder key.");
             shellFolder.SetValue("Attributes", unchecked((int)0xA0000000), RegistryValueKind.DWord);
         }
@@ -4971,6 +5018,8 @@ public static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSyntheticFolderClassId(ref Guid classId);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int CreateDirectShellViewForProbe(
         nint rootPidl, ref Guid classId, out nint folder, out nint view);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int RegisterClassFactoryForProbe(ref Guid classId, out uint cookie);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int RevokeClassFactoryForProbe(uint cookie);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSyntheticSizeOverrideDelegate(long size);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateSyntheticView(nint rootPidl, out nint folder, out nint view);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int VerifySyntheticShellActivatedRecursiveSizeSnapshotCache(nint rootPidl, ulong sentinelBytes);
