@@ -134,7 +134,11 @@ internal static class ExplorerBrowserWrapperProbe
         var fixture = Path.Combine(Path.GetTempPath(), "ExplorerDirs-BrowserNamespace-" + classId.ToString("N"));
         nint browser = 0, parent = 0, rootPidl = 0, shellView = 0, folderView = 0, viewFolder = 0, persist = 0, currentPidl = 0;
         nint nativeLibrary = 0;
+        uint eventCookie = 0;
         uint initialized = 0;
+        var events = new global::NavigationProbeEvents();
+        var browserSite = new ShellBrowserSite();
+        object? browserObject = null;
         var classRegistrationCreated = false;
         var namespaceRegistrationCreated = false;
         try
@@ -167,6 +171,8 @@ internal static class ExplorerBrowserWrapperProbe
             var browserClass = BrowserClassId;
             var browserId = BrowserInterfaceId;
             Marshal.ThrowExceptionForHR(CoCreateInstance(ref browserClass, 0, 1, ref browserId, out browser));
+            browserObject = Marshal.GetObjectForIUnknown(browser);
+            ShellBrowserSite.SetSite(browserObject, browserSite);
             parent = CreateWindowExW(0, "STATIC", "ExplorerDirs isolated registered namespace browser probe",
                 0x90000000, 20, 20, 820, 620, 0, 0, 0, 0); // Visible only on the isolated probe Desktop.
             if (parent == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
@@ -175,6 +181,15 @@ internal static class ExplorerBrowserWrapperProbe
             PrivateDesktopShellProbe.ReportStage("namespace-probe: browse-to-root-pidl");
             Marshal.ThrowExceptionForHR(At<Initialize>(browser, 3)(browser, parent, ref bounds, ref settings));
             initialized = 1;
+            events.InspectLocation = (phase, pidl) => Console.WriteLine(
+                $"explorerbrowser-registered-namespace: browser-event={phase}; location={ReadAbsoluteParsingName(pidl)}");
+            events.InspectView = view =>
+            {
+                var (viewClassId, viewLocation) = ReadShellViewFolderIdentity(view);
+                Console.WriteLine($"explorerbrowser-registered-namespace: view-created-class={viewClassId}; view-created-location={viewLocation}");
+                return true;
+            };
+            Marshal.ThrowExceptionForHR(At<Advise>(browser, 9)(browser, events, out eventCookie));
             var browseHr = At<BrowseToIdList>(browser, 13)(browser, rootPidl, 0);
             Marshal.ThrowExceptionForHR(browseHr);
             Application.DoEvents();
@@ -432,6 +447,9 @@ internal static class ExplorerBrowserWrapperProbe
                 var nestedNavigationPidl = absoluteNestedNameHr >= 0 ? absoluteNestedNamePidl : expectedNestedRoot;
                 try
                 {
+                    var pendingBeforeNested = events.Started;
+                    var completedBeforeNested = events.Completed;
+                    var failedBeforeNested = events.Failed;
                     try
                     {
                         NavigateAndWaitForFolder(browser, nestedNavigationPidl, 0, classId,
@@ -439,9 +457,17 @@ internal static class ExplorerBrowserWrapperProbe
                     }
                     catch (TimeoutException)
                     {
+                        Console.WriteLine($"explorerbrowser-registered-namespace: nested-idlist-events=pending:{events.Started - pendingBeforeNested},complete:{events.Completed - completedBeforeNested},failed:{events.Failed - failedBeforeNested}");
+                        pendingBeforeNested = events.Started;
+                        completedBeforeNested = events.Completed;
+                        failedBeforeNested = events.Failed;
                         var objectNavigation = ProbeBrowseToObject(browser, directlyBoundNestedFolder, classId,
                             nestedNavigationPidl, ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+                        Console.WriteLine($"explorerbrowser-registered-namespace: nested-object-events=pending:{events.Started - pendingBeforeNested},complete:{events.Completed - completedBeforeNested},failed:{events.Failed - failedBeforeNested}");
                         Console.WriteLine($"explorerbrowser-registered-namespace: browse-to-object-hr=0x{objectNavigation.HResult:X8}; object-class-matches={objectNavigation.ClassMatches}; object-pidl-matches={objectNavigation.PidlMatches}; object-location={objectNavigation.Location}; filesystem-path={objectNavigation.FileSystemPath}");
+                        var physicalNavigation = ProbeBrowseToPhysicalPath(browser, Path.Combine(fixture, "child", "nested"), events,
+                            ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+                        Console.WriteLine($"explorerbrowser-registered-namespace: physical-nested-navigation-hr=0x{physicalNavigation.HResult:X8}; path-matches={physicalNavigation.PathMatches}; actual-path={physicalNavigation.ActualPath}; class={physicalNavigation.ClassId}; events=pending:{physicalNavigation.Pending},complete:{physicalNavigation.Completed},failed:{physicalNavigation.Failed}; view-created={physicalNavigation.ViewCreated}");
                         if (!objectNavigation.ClassMatches || !objectNavigation.PidlMatches)
                             throw new InvalidOperationException("BrowseToIDList did not reach nested and BrowseToObject did not preserve the wrapped nested folder.");
                     }
@@ -530,10 +556,14 @@ internal static class ExplorerBrowserWrapperProbe
             PrivateDesktopShellProbe.ReportStage("namespace-probe: destroy-browser");
             if (currentPidl != 0) Marshal.FreeCoTaskMem(currentPidl);
             if (persist != 0) Marshal.Release(persist);
+            if (eventCookie != 0 && browser != 0) _ = At<Unadvise>(browser, 10)(browser, eventCookie);
             if (viewFolder != 0) Marshal.Release(viewFolder);
             if (folderView != 0) Marshal.Release(folderView);
             if (shellView != 0) Marshal.Release(shellView);
             if (initialized != 0 && browser != 0) _ = At<Destroy>(browser, 4)(browser);
+            if (browserObject is not null && browser != 0) ShellBrowserSite.SetSite(browserObject, null);
+            GC.KeepAlive(browserSite);
+            GC.KeepAlive(browserObject);
             if (browser != 0) Marshal.Release(browser);
             // ExplorerBrowser parent destruction can block; this HWND belongs to the private Desktop.
             if (parent != 0 && IsWindow(parent))
@@ -1183,6 +1213,32 @@ internal static class ExplorerBrowserWrapperProbe
         finally { Marshal.FreeCoTaskMem(pointer); }
     }
 
+    private static (Guid ClassId, string Location) ReadShellViewFolderIdentity(nint shellView)
+    {
+        var folderViewId = FolderView2Id;
+        Marshal.ThrowExceptionForHR(Marshal.QueryInterface(shellView, in folderViewId, out var folderView));
+        try
+        {
+            var folderId = ShellFolder2Id;
+            Marshal.ThrowExceptionForHR(At<GetFolder>(folderView, 5)(folderView, ref folderId, out var folder));
+            try
+            {
+                var persistId = PersistFolder2Id;
+                Marshal.ThrowExceptionForHR(Marshal.QueryInterface(folder, in persistId, out var persist));
+                try
+                {
+                    Marshal.ThrowExceptionForHR(At<GetClassId>(persist, 3)(persist, out var classId));
+                    Marshal.ThrowExceptionForHR(At<GetCurFolder>(persist, 5)(persist, out var pidl));
+                    try { return (classId, ReadAbsoluteParsingName(pidl)); }
+                    finally { Marshal.FreeCoTaskMem(pidl); }
+                }
+                finally { Marshal.Release(persist); }
+            }
+            finally { Marshal.Release(folder); }
+        }
+        finally { Marshal.Release(folderView); }
+    }
+
     private static (int HResult, bool ClassMatches, bool PidlMatches, string Location, string FileSystemPath)
         ProbeBrowseToObject(nint browser, nint targetFolder, Guid expectedClassId, nint expectedPidl,
             ref nint shellView, ref nint folderView, ref nint viewFolder, ref nint persist, ref nint currentPidl)
@@ -1213,6 +1269,48 @@ internal static class ExplorerBrowserWrapperProbe
 
         ReleaseActiveFolder(ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
         return (browseHr, classMatches, pidlMatches, location, fileSystemPath);
+    }
+
+    private static (int HResult, bool PathMatches, Guid ClassId, string ActualPath, int Pending, int Completed,
+        int Failed, int ViewCreated) ProbeBrowseToPhysicalPath(nint browser, string path,
+        global::NavigationProbeEvents events, ref nint shellView, ref nint folderView, ref nint viewFolder,
+        ref nint persist, ref nint currentPidl)
+    {
+        Marshal.ThrowExceptionForHR(SHParseDisplayName(path, 0, out var targetPidl, 0, out _));
+        try
+        {
+            ReleaseActiveFolder(ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+            var pendingBefore = events.Started;
+            var completedBefore = events.Completed;
+            var failedBefore = events.Failed;
+            var viewCreatedBefore = events.ViewFlagCalls;
+            var browseHr = At<BrowseToIdList>(browser, 13)(browser, targetPidl, 0);
+            if (browseHr < 0) return (browseHr, false, Guid.Empty, "<browse-failed>", 0, 0, 0, 0);
+
+            var expectedPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var actualPath = "<unavailable>";
+            var actualClassId = Guid.Empty;
+            var pathMatches = false;
+            var stopwatch = Stopwatch.StartNew();
+            do
+            {
+                Application.DoEvents();
+                ReadActiveFolder(browser, ref shellView, ref folderView, ref viewFolder, ref persist);
+                Marshal.ThrowExceptionForHR(At<GetClassId>(persist, 3)(persist, out actualClassId));
+                Marshal.ThrowExceptionForHR(At<GetCurFolder>(persist, 5)(persist, out currentPidl));
+                actualPath = ReadShellName(currentPidl, SigdnFileSystemPath);
+                pathMatches = string.Equals(actualPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                    expectedPath, StringComparison.OrdinalIgnoreCase);
+                if (pathMatches) break;
+                ReleaseActiveFolder(ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+                Thread.Sleep(20);
+            } while (stopwatch.Elapsed < TimeSpan.FromSeconds(5));
+
+            ReleaseActiveFolder(ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+            return (browseHr, pathMatches, actualClassId, actualPath, events.Started - pendingBefore,
+                events.Completed - completedBefore, events.Failed - failedBefore, events.ViewFlagCalls - viewCreatedBefore);
+        }
+        finally { Marshal.FreeCoTaskMem(targetPidl); }
     }
 
     private static int WaitForViewItemCount(nint folderView, int expectedCount)
@@ -1372,6 +1470,8 @@ internal static class ExplorerBrowserWrapperProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int MapColumnToScid(nint self, uint column, out ShellColumnManager.NativeKey key);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int Rearrange(nint self, nint sortColumn);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int BrowseToIdList(nint self, nint pidl, uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int Advise(nint self, [MarshalAs(UnmanagedType.Interface)] global::IProbeBrowserEvents events, out uint cookie);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int Unadvise(nint self, uint cookie);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetDetailsOf(nint self, nint item, uint column, nint details);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetWindow(nint self, out nint window);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemObject(nint self, uint scope, ref Guid iid, out nint value);
