@@ -1453,4 +1453,10 @@ NativeProbe Release build 成功，0 警告/错误；原生 adapter `/W4 /WX` �
 
 关闭竞争有两种场景。闸门关闭期间排入四个 view 批次后退休全部 view，再放行 worker；四批均结束，扫描数 0、Shell 通知数 0，日志：`src/.state/native-probe-watchdog/20261101-async-same-root-cancel-after-dedupe.stdout.log`。再单独关闭扫描任务所属 view，保持另外三个同根 view 存活并等待；四批均结束，只扫描 81 个唯一目录、发出一次合并通知，存活 view 均读到正确列值并各自重新枚举（`EnumObjects` 增量 3），日志：`src/.state/native-probe-watchdog/20261101-async-single-view-retire-same-root.stdout.log`。首次单 view 探针只等待固定 350ms 就采样，曾在通知已经发出但 Shell 尚未完成重枚举时误判；改为按列值和枚举增量等待后复测通过。
 
-Native adapter `/W4 /WX` 与 NativeProbe Release 均构建成功，0 警告/错误。以上仍是隐藏 synthetic `IShellView` 原型，不是 ExplorerBrowser 产品接线或可见 UI 验收；慢磁盘/网络延迟、队列背压及可见排序体验仍待验证。产品决策前还需用更贴近单窗格的 Shell 请求负载测延迟与交互影响。
+Native adapter `/W4 /WX` 与 NativeProbe Release 均构建成功，0 警告/错误。以上仍是隐藏 synthetic `IShellView` 原型，不是 ExplorerBrowser 产品接线或可见 UI 验收；慢磁盘/网络延迟、队列背压及可见交互体验仍待验证。
+
+### 2026-11-01：单视图批次与列头排序
+
+将 NativeProbe 的批次收集模式开放给单个 Shell view，使用 500 个同级目录（加一个嵌套目录和普通文件）、缓存 512，与同参数逐项异步队列对照。逐项模式完成 501 次扫描、队列拒绝 0、峰值 worker 2、合并通知 6 次，列值全部就绪；扫描器累计用时 253.688 ms。单视图批次也完成 501 次扫描、拒绝 0，峰值 worker 1，通知 1 次，列值全部就绪；扫描器累计用时 166.628 ms。两者首次 Shell 自然请求均为 22 行，后续探针读取整列后达到 501 个目录快照。日志分别为 `src/.state/native-probe-watchdog/20261101-async-single-view-500-per-row.stdout.log` 和 `src/.state/native-probe-watchdog/20261101-async-single-view-500-batch.stdout.log`。该合成场景中批次减少通知并缩短扫描时间；它不是磁盘 I/O 上的用户等待时间，也不能外推到慢盘或网络目录。
+
+再用 `large-view-sort-refresh` 场景检查 500 项列头排序：扫描仍为 501 次、队列拒绝 0，批次完成后离屏的 folder-401 排在 folder-400 前，folder-400 排在大小为 30 的 child 前，选中/焦点状态保留；比较阶段没有触发目录指标扫描。日志：`src/.state/native-probe-watchdog/20261101-async-single-view-500-sort.stdout.log`。NativeProbe Release build 通过，0 警告/错误。此结果仍来自隐藏 synthetic Shell view；ExplorerBrowser 产品没有递归大小列接线，也未做可见列表体验验收。

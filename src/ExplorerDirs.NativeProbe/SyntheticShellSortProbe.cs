@@ -316,6 +316,7 @@ public static class SyntheticShellSortProbe
         var asyncSharedViewDistinctRoots = asyncSharedViewProbe && asyncSharedViewRootMode == "distinct";
         var asyncQueueSaturationRequested = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_FORCE_QUEUE_SATURATION") == "1";
         var asyncParentBatchProbe = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_BATCH_BY_VIEW") == "1";
+        var asyncBatchViewCount = asyncSharedViewProbe ? asyncSharedViewCount : 1;
         var asyncCancelAfterQueueProbe = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_CANCEL_AFTER_QUEUE") == "1";
         var asyncCancelSingleViewProbe = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_CANCEL_SINGLE_VIEW") == "1";
         var asyncPartialRequestProbe = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_PARTIAL_REQUEST") == "1";
@@ -330,8 +331,8 @@ public static class SyntheticShellSortProbe
             throw new ArgumentException("Distinct recursive-size roots require the four-view shared-store probe.", nameof(asyncSharedViewRootMode));
         if (asyncQueueSaturationRequested && !asyncQueueSaturationProbe)
             throw new ArgumentException("Forced queue saturation requires four active views on distinct roots.", nameof(asyncQueueSaturationRequested));
-        if (asyncParentBatchProbe && (!asyncSharedViewProbe || asyncSharedViewCount != 4))
-            throw new ArgumentException("View-batched recursive-size scanning requires four active views.", nameof(asyncParentBatchProbe));
+        if (asyncParentBatchProbe && (!recursiveDirectorySizeSortOnly || !asyncOnDemandRecursiveSize))
+            throw new ArgumentException("View-batched recursive-size scanning requires the on-demand Shell view probe.", nameof(asyncParentBatchProbe));
         if (asyncCancelAfterQueueProbe && (!asyncParentBatchProbe || !asyncSharedViewProbe || asyncSharedViewCount != 4))
             throw new ArgumentException("Batch cancellation requires four active view batches.", nameof(asyncCancelAfterQueueProbe));
         if (asyncCancelSingleViewProbe && (!asyncParentBatchProbe || !asyncSharedViewProbe || asyncSharedViewCount != 4 || asyncSharedViewDistinctRoots))
@@ -876,7 +877,7 @@ public static class SyntheticShellSortProbe
                         Marshal.GetDelegateForFunctionPointer<NativeVoidCall>(
                             NativeLibrary.GetExport(module, "ReleaseSyntheticAsyncRecursiveSizeQueueGateForProbe"))();
                         var acceptedScanTarget = expectedAsyncScanCount - rejectedBeforeRelease;
-                        var finishedTaskTarget = asyncParentBatchProbe ? asyncSharedViewCount : acceptedScanTarget;
+                        var finishedTaskTarget = asyncParentBatchProbe ? asyncBatchViewCount : acceptedScanTarget;
                         var acceptedDrainDeadline = Math.Min(deadline, Environment.TickCount64 + 15_000);
                         var getFinishedScans = Marshal.GetDelegateForFunctionPointer<NativeLibraryUnloadContractSmoke>(
                             NativeLibrary.GetExport(module, "GetSyntheticAsyncRecursiveSizeScanFinishedCountForProbe"));
@@ -921,12 +922,12 @@ public static class SyntheticShellSortProbe
                         var requiredUpdateNotifications = asyncSharedViewDistinctRoots ? asyncSharedViewCount : 1;
                         var notificationDeadline = Math.Min(deadline, Environment.TickCount64 + 10_000);
                         while ((ReadCounter(module, "GetSyntheticAsyncRecursiveSizeNotificationCountForProbe") < requiredUpdateNotifications ||
-                            ReadCounter(module, "GetSyntheticEnumObjectsCount") - initialEnumerationCount < asyncSharedViewCount) &&
+                            ReadCounter(module, "GetSyntheticEnumObjectsCount") - initialEnumerationCount < asyncBatchViewCount) &&
                             Environment.TickCount64 < notificationDeadline)
                             Pump(25);
                         if (ReadCounter(module, "GetSyntheticAsyncRecursiveSizeNotificationCountForProbe") < requiredUpdateNotifications ||
-                            ReadCounter(module, "GetSyntheticEnumObjectsCount") - initialEnumerationCount < asyncSharedViewCount)
-                            throw new TimeoutException("The batched recursive-size probe did not observe one completed Shell update per distinct view.");
+                            ReadCounter(module, "GetSyntheticEnumObjectsCount") - initialEnumerationCount < asyncBatchViewCount)
+                            throw new TimeoutException("The batched recursive-size probe did not observe a completed Shell update for every active view.");
                         Pump(300);
                         initialNames = ReadNames(sizeListView, module, expectedCount: expectedInitialCount);
                         initialSizes = ReadColumnTexts(sizeListView, module, 1, expectedCount: expectedInitialCount);
