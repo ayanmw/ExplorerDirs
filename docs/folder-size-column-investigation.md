@@ -1758,3 +1758,9 @@ NativeProbe Release 构建（0 警告/错误）、`--common-listview-navigation-
 并行受控 SysListView32 的行现在使用 Shell ILIsEqual PIDL 身份映射稳定行 ID；刷新、升降序及分组命令后，3 个 fixture 项仍映射到原有 ID。通过 ShellListViewEnumerator 绑定共享系统小图标列表及每行图标索引。执行 Shell 按类型分组后，将当前 view 顺序投影到启用 Common Controls 6 的原生 ListView group rows，读回分组视图开启且组数为 2。此验证须运行 NativeProbe apphost EXE，因为 dotnet <dll> 使用 dotnet 宿主的 activation manifest，仍加载不支持该 ListView 分组 API 的控件版本。
 
 本夹具上 SHGetFileInfo 没提供可用类型标题，因此探针标题采用扩展名/文件夹回退（TXT file、File folder）；没有证明 Explorer 本地化 System.ItemTypeText 标题映射、视觉布局、折叠/展开、跨分组排序或用户交互。所有 view 都隐藏；未接产品 ExplorerBrowser 或 release。下一步应取得 Shell 的正式类型文本并扩充多列映射，再对行增删/重命名通知做稳定 PIDL reconciliation。
+
+### 2026-11-01：原生列表增加第二列并保持 PIDL 行映射
+
+隔离 peer `SysListView32` 从仅有 Name 扩展为 Name + Type 两列。Type 子项取自同一 Shell 行的类型元数据；在 Details、刷新、升降序、按类型分组投影之后，逐行读回 Type 值，并与稳定 PIDL 行身份对应的元数据逐项比较。`--ishellview-menu-command-private-desktop` 通过，输出 `peer-type-column=True`；NativeProbe Release 构建 0 警告/错误，Private Desktop 前台、last-input 与清理守卫通过。
+
+该切片只证明原生 ListView 的附加文本列能与当前 Shell 行顺序、PIDL 身份、图标和分组共同工作。Type 仍使用当前 `SHGetFileInfo` 值和已有扩展名/文件夹回退；不是 Shell 正式本地化类型文本，也没有直接复制 Explorer 的日期、大小等全部 Details 列。未创建可见窗口、未测用户交互或重绘，也未接产品/release。下一步应从 Shell 的列接口投影真实标准 Details 列，再验证行增删/重命名通知下的子项和 ID 对齐。

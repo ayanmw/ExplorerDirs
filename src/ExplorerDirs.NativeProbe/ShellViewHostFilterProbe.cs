@@ -24,6 +24,7 @@ internal static class ShellViewHostFilterProbe
     private const long LvsReport = 0x1;
     private const uint LvmDeleteAllItems = 0x1009;
     private const uint LvmInsertColumnW = 0x101B;
+    private const uint LvmSetItemTextW = 0x1074;
     private const uint LvmInsertItemW = 0x104D;
     private const uint LvmGetItemCount = 0x1004;
     private const uint LvmGetItemTextW = 0x1073;
@@ -1367,7 +1368,10 @@ internal static class ShellViewHostFilterProbe
 
         FreePeerShellRows(peerRows);
         Marshal.Release(shellFolder);
-        Console.WriteLine($"ishellview-menu-command: viewlogicaldetails=True; peer-view-mode=details; peer-stable-pidl-identity=True; peer-shell-icon-projection=True; peer-rows-stable-during-refresh=True; peer-refresh-projection=True; peer-sort-projection=True; peer-listview-groups=True; peer-group-headings=[{string.Join('|', peerRows.Select(row => row.TypeName).Distinct(StringComparer.OrdinalIgnoreCase))}]; mode={modeAfterMenu}/{iconSizeAfterMenu}; refresh=True; sortdescending=True; sortascending=True; native-sort-order=[{string.Join(';', nativeSortOrders)}]; groupdescending=True; groupascending=True; focus-recovery=[{string.Join(',', menuCommandFocusRecovery)}]; visible-items={visibleCount}; parent-visible=False; foreground-unchanged=True");
+        var peerTypes = ReadPeerListTypeNames(peerList);
+        var peerTypeProjection = peerTypes.SequenceEqual(peerRows.Select(row => row.TypeName), StringComparer.OrdinalIgnoreCase);
+        if (!peerTypeProjection) throw new Exception("The peer ListView type subitems did not retain the Shell row metadata after sorting and grouping.");
+        Console.WriteLine($"ishellview-menu-command: viewlogicaldetails=True; peer-view-mode=details; peer-stable-pidl-identity=True; peer-shell-icon-projection=True; peer-type-column=True; peer-rows-stable-during-refresh=True; peer-refresh-projection=True; peer-sort-projection=True; peer-listview-groups=True; peer-group-headings=[{string.Join('|', peerRows.Select(row => row.TypeName).Distinct(StringComparer.OrdinalIgnoreCase))}]; mode={modeAfterMenu}/{iconSizeAfterMenu}; refresh=True; sortdescending=True; sortascending=True; native-sort-order=[{string.Join(';', nativeSortOrders)}]; groupdescending=True; groupascending=True; focus-recovery=[{string.Join(',', menuCommandFocusRecovery)}]; visible-items={visibleCount}; parent-visible=False; foreground-unchanged=True");
     }
 
     private static nint CreatePeerListView(nint parent, nint systemImageList)
@@ -1401,6 +1405,7 @@ internal static class ShellViewHostFilterProbe
         _ = SendMessageW(listView, LvmDeleteAllItems, 0, 0);
         _ = SendMessageW(listView, LvmEnableGroupView, 0, 0);
         _ = SendMessageW(listView, LvmRemoveAllGroups, 0, 0);
+        EnsurePeerTypeColumn(listView);
         var groupIds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var groupInsertResults = new List<int>();
         if (groupByType)
@@ -1447,7 +1452,57 @@ internal static class ShellViewHostFilterProbe
                     throw new InvalidOperationException($"Could not populate peer ListView row {index}.");
             }
             finally { Marshal.FreeHGlobal(itemPointer); Marshal.FreeHGlobal(text); }
+            SetPeerListCell(listView, index, 1, row.TypeName);
         }
+    }
+
+    private static void EnsurePeerTypeColumn(nint listView)
+    {
+        var header = SendMessageW(listView, 0x101F, 0, 0); // LVM_GETHEADER
+        if (header == 0 || SendMessageW(header, 0x1200, 0, 0).ToInt32() >= 2) return; // HDM_GETITEMCOUNT
+        var title = Marshal.StringToHGlobalUni("Type");
+        var columnPointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeListViewColumn>());
+        try
+        {
+            var column = new NativeListViewColumn { Mask = 0x0001 | 0x0002 | 0x0004, Width = 160, Text = title, TextCapacity = 8, SubItem = 1 };
+            Marshal.StructureToPtr(column, columnPointer, false);
+            if (SendMessageW(listView, LvmInsertColumnW, 1, columnPointer).ToInt32() < 0)
+                throw new InvalidOperationException("Could not add the peer ListView type column.");
+        }
+        finally { Marshal.FreeHGlobal(columnPointer); Marshal.FreeHGlobal(title); }
+    }
+
+    private static void SetPeerListCell(nint listView, int row, int column, string value)
+    {
+        var text = Marshal.StringToHGlobalUni(value);
+        var itemPointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeListViewItem>());
+        try
+        {
+            Marshal.StructureToPtr(new NativeListViewItem { Item = row, SubItem = column, Text = text, TextCapacity = value.Length + 1 }, itemPointer, false);
+            if (SendMessageW(listView, LvmSetItemTextW, row, itemPointer) == 0)
+                throw new InvalidOperationException($"Could not populate peer ListView cell ({row}, {column}).");
+        }
+        finally { Marshal.FreeHGlobal(itemPointer); Marshal.FreeHGlobal(text); }
+    }
+
+    private static string[] ReadPeerListTypeNames(nint listView)
+    {
+        var count = SendMessageW(listView, LvmGetItemCount, 0, 0).ToInt32();
+        var values = new string[count];
+        var buffer = Marshal.AllocHGlobal(512 * sizeof(char));
+        var itemPointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeListViewItem>());
+        try
+        {
+            for (var index = 0; index < count; index++)
+            {
+                Marshal.WriteInt16(buffer, 0);
+                Marshal.StructureToPtr(new NativeListViewItem { Item = index, SubItem = 1, Text = buffer, TextCapacity = 512 }, itemPointer, false);
+                _ = SendMessageW(listView, LvmGetItemTextW, index, itemPointer);
+                values[index] = Marshal.PtrToStringUni(buffer) ?? string.Empty;
+            }
+            return values;
+        }
+        finally { Marshal.FreeHGlobal(itemPointer); Marshal.FreeHGlobal(buffer); }
     }
 
     private static string[] ReadPeerListNames(nint listView)
@@ -1559,7 +1614,8 @@ internal static class ShellViewHostFilterProbe
             projection.Rows.Select(row => row.Id).ToHashSet().SetEquals(previous.Select(row => row.Id));
         PopulatePeerList(listView, projection.Rows, groupByType);
         if (!ReadPeerListNames(listView).SequenceEqual(projection.Rows.Select(row => row.Name), StringComparer.OrdinalIgnoreCase) ||
-            !ReadPeerListRowIds(listView).SequenceEqual(projection.Rows.Select(row => row.Id)))
+            !ReadPeerListRowIds(listView).SequenceEqual(projection.Rows.Select(row => row.Id)) ||
+            !ReadPeerListTypeNames(listView).SequenceEqual(projection.Rows.Select(row => row.TypeName), StringComparer.OrdinalIgnoreCase))
             throw new Exception("The independent ListView did not match Shell row order and stable PIDL identities after projection.");
         return (projection.Rows, idsPreserved);
     }

@@ -5766,3 +5766,7 @@ NativeProbe 已完成受控精确失效合同：四个不同根的异步 Shell �
 Private Desktop 隔离探针现用 PIDL 相等判断维持刷新/排序/分组前后的行 ID，并把系统图标索引和共享 image list 映射到 peer SysListView32。Shell 详情模式、刷新稳定旧行、升降序及原生 ListView group API 均通过；3 行样本分为 2 组，前台、last-input 和清理守卫通过。NativeProbe Release 0 警告/错误；导航、数据/文件操作、相对大小和菜单桥接合同均使用 apphost EXE 通过。
 
 此 NativeProbe apphost 使用 Common Controls 6 activation manifest；经 dotnet <dll> 启动会使用 dotnet.exe 的清单，group API 不可用，因此要用该 NativeProbe EXE 运行此探针。样本的类型标题回退到扩展名/文件夹，非 Explorer 正式本地化类型文本；没有可见 UI、折叠展开、交互、增删通知或多列投影证据。继续在 NativeProbe 验证 Shell 类型文本、多列和 PIDL reconcile 边界；不接入产品或 release。详见[调查记录](folder-size-column-investigation.md#2026-11-01shell-pidl-稳定身份系统图标与原生分组桥接)。
+
+### 2026-11-01：原生列表增加第二列并保持 PIDL 行映射
+
+隔离 peer SysListView32 增加 Type 子项列，并在刷新、升降序与分组后的行投影中逐项读回核对；稳定 PIDL 行 ID、图标及原生分组仍通过。NativeProbe Release 和 Private Desktop 菜单/视图命令探针通过，前台/输入与清理守卫通过。该切片不是完整 Explorer Details 列投影：类型标题仍有回退值，且没有可见 UI、增删通知重排或产品接线。下一步从 Shell 列接口取得标准详情列，再覆盖行变更通知的稳定 ID/子项 reconciliation；产品继续使用 ExplorerBrowser。
