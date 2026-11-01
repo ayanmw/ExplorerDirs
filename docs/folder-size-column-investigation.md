@@ -2596,3 +2596,8 @@ App 现复用 `FolderOpenRouter` profile 锁作为注册互斥边界：确认拿
 App Release build 现在在构建阶段编译产品 native adapter，并将 DLL 复制到 build 与 publish 输出；`publish.ps1` 必须带出该 DLL 并把它纳入 SHA256 manifest。`publish-smoke.ps1` 的 fixture payload 检查已覆盖 DLL 及哈希。验证：App Release build、NativeProbe Release build、临时 `dotnet publish` 检查、publish isolation smoke、产品 DLL 无 Shell view 激活 smoke 和 profile owner registration smoke 均通过；owner smoke 覆盖 volatile 注册字段、同身份残留重建、清理和外部注册保留。
 
 此处属于 App 源码接线，尚未在真实 App 进程启动/退出；未做可见 ExplorerBrowser、递归列逐行绘制/排序、会话重启或 GUI 验收，未修改 `releases`。现阶段 owner 只建立 provider 激活基础，未把所有普通文件夹标签自动重定向到 namespace，也没有给用户提供“递归大小”列选择入口。后续仍须先集中验收菜单/文件操作/导航和关闭顺序，再决定该 adapter 进入预览 release。
+## 2026-11-02：App 中的逐行递归大小原型入口
+
+增加一个明确 opt-in 的菜单入口：在“开发者”菜单选择“在新标签打开逐行递归大小实验视图”，将当前确认的文件系统目录编码为 profile-owned Shell parsing name，再以 `Name → Recursive Size → Type` 的详细视图状态创建独立标签。原始标签与其列、排序和浏览状态不变；关闭实验标签即可回到原目录。会话保存的是 provider parsing name，启动时由既有 profile owner 重建 volatile 注册；Q-Dir 导出使用现有 codec 将该身份转回物理目录路径。
+
+本轮 Release App build 0 警告/错误，Q-Dir provider path encode/decode/export round-trip smoke 通过。既有隐藏 HostProbe 已验证生产 ExplorerBrowserHost 可导航该类 provider 身份、显示递归列值并导出自定义列文本，但尚未用实际 App 菜单创建标签，也未做桌面可见列标题/异步绘制、重启恢复、排序、焦点/选区或完整文件操作验收。故入口保留为实验功能，不宣称普通物理目录的 ExplorerBrowser 原生视图已经支持递归大小列。

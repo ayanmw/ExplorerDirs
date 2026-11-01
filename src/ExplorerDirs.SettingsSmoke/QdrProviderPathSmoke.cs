@@ -8,7 +8,11 @@ internal static class QdrProviderPathSmoke
     {
         var classId = Guid.Parse("b0f47a2f-1690-4888-a0d6-cfe4a4abf92f");
         var physicalPath = @"C:\profile-test\nested folder";
-        var identity = $"::{{{classId:D}}}\\edpath:{EncodePath(physicalPath)}";
+        var identity = QdrShellPathCodec.ToProviderIdentity(physicalPath, classId);
+        Check(identity == $"::{{{classId:D}}}\\edpath:{EncodePath(physicalPath)}",
+            "a filesystem path receives the profile provider's stable Shell identity");
+        Check(QdrShellPathCodec.TryGetProviderPath(identity, classId, out var decodedPath) && decodedPath == physicalPath,
+            "the profile provider identity can be decoded to its filesystem path");
         Check(QdrShellPathCodec.ToQdrTextPath(identity, classId) == physicalPath,
             "the profile's provider path exports as a physical Q-Dir directory");
         Check(QdrShellPathCodec.ToQdrTextPath(identity, Guid.NewGuid()) == "shell:" + identity,

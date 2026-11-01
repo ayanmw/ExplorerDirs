@@ -21,6 +21,7 @@ public partial class PaneControl : UserControl
     private readonly Stack<(TabSettings Settings, AddressPathHistory AddressHistory)> _closedTabs = new();
     private readonly List<TabItem> _tabOrder = [];
     private readonly Func<ViewState> _newTabView;
+    private readonly Guid? _shellNamespaceProfileClassId;
     private readonly QuickFilterFavoritesStore _quickFilterFavoritesStore;
     private readonly QuickFilterHistoryStore _quickFilterHistoryStore;
     private readonly DispatcherTimer _tabHoverActivationTimer = new();
@@ -202,7 +203,7 @@ public partial class PaneControl : UserControl
         QuickFilterHistoryStore quickFilterHistoryStore,
         HiddenItemsPreference hiddenItemsPreference = HiddenItemsPreference.FollowWindows,
         bool selectionCheckBoxes = false, bool? fullRowSelection = null, bool disableGrouping = false,
-        bool softRefresh = false)
+        bool softRefresh = false, Guid? shellNamespaceProfileClassId = null)
     {
         InitializeComponent();
         BackButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Back), 14);
@@ -258,6 +259,7 @@ public partial class PaneControl : UserControl
         _fullRowSelection = fullRowSelection;
         _disableGrouping = disableGrouping;
         _softRefresh = softRefresh;
+        _shellNamespaceProfileClassId = shellNamespaceProfileClassId;
         QuickFilterPresetCombo.DropDownOpened += (_, _) => RefreshQuickFilterPresets(QuickFilterPresetCombo.Text);
         var tabIndex = 0;
         foreach (var tab in tabs)
@@ -654,6 +656,34 @@ public partial class PaneControl : UserControl
     public void OpenPathInNewTab(string path)
     {
         if (CanAddTabs(1)) AddTab(path, _newTabView());
+    }
+
+    internal void OpenCurrentFolderRecursiveSizePrototype()
+    {
+        var state = Current;
+        if (state is null || !state.Browser.IsFileSystemLocation)
+        {
+            Status.Text = "逐行递归大小实验仅支持当前可访问的文件系统目录。";
+            return;
+        }
+        if (_shellNamespaceProfileClassId is not { } classId)
+        {
+            Status.Text = "当前 profile 的 Shell 递归列 provider 未初始化。";
+            return;
+        }
+
+        var path = state.Browser.CurrentPath;
+        var identity = QdrShellPathCodec.ToProviderIdentity(path, classId);
+        var basic = new Guid("B725F130-47EF-101A-A5F1-02608C9EEBAC");
+        var recursiveSort = new Guid("9E5E05AC-1936-4A75-94F7-4704B8B01923");
+        var view = new ViewState(4, 16, [], null, true,
+        [
+            new(new PropertyKeyState(basic, 10), 240),
+            new(new PropertyKeyState(recursiveSort, 1), 176),
+            new(new PropertyKeyState(basic, 4), 160)
+        ]);
+        if (!CanAddTabs(1)) return;
+        AddTab(identity, view);
     }
     internal bool OpenPathAndSelectInNewTab(string directory, string selectedPath)
     {

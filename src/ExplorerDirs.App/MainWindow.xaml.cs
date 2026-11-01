@@ -397,7 +397,8 @@ public partial class MainWindow : Window
                 PinnedTabsStore.MatchPane(initialTabs, pinnedTabs, index),
                 state?.ActiveTabIndices?.ElementAtOrDefault(index) ?? 0,
                 _quickFilterFavoritesStore, _quickFilterHistoryStore, _hiddenItemsPreference,
-                _selectionCheckBoxes, _fullRowSelection, _disableGrouping, _softRefresh);
+                _selectionCheckBoxes, _fullRowSelection, _disableGrouping, _softRefresh,
+                _shellNamespaceProfileClassId);
             _panes[index] = pane;
             pane.SetClassicAddressBar(_classicAddressBar);
             pane.SetStatusBarVisible(_showStatusBar);
@@ -2530,6 +2531,8 @@ public partial class MainWindow : Window
     private void RefreshCurrent_Click(object sender, RoutedEventArgs e) => ActivePane.RefreshCurrent();
     private void SearchCurrent_Click(object sender, RoutedEventArgs e) => ActivePane.FocusSearch();
     private void CalculateDirectorySize_Click(object sender, RoutedEventArgs e) => ActivePane.ToggleRecursiveDirectorySize();
+    private void OpenRecursiveSizePrototype_Click(object sender, RoutedEventArgs e) =>
+        ActivePane.OpenCurrentFolderRecursiveSizePrototype();
     private void CalculateSelectedItemsRecursiveSize_Click(object sender, RoutedEventArgs e)
         => ActivePane.CalculateSelectedItemsRecursiveSize();
     private void RestartApplication_Click(object sender, RoutedEventArgs e)

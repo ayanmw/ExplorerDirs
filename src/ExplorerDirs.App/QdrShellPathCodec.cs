@@ -6,14 +6,28 @@ namespace ExplorerDirs.App;
 
 internal static class QdrShellPathCodec
 {
+    internal static string ToProviderIdentity(string physicalPath, Guid profileProviderClassId)
+    {
+        if (profileProviderClassId == Guid.Empty) throw new ArgumentException("A profile provider CLSID is required.", nameof(profileProviderClassId));
+        if (!Path.IsPathFullyQualified(physicalPath)) throw new ArgumentException("A fully qualified filesystem path is required.", nameof(physicalPath));
+        var token = string.Concat(physicalPath.Select(character =>
+            ((int)character).ToString("X4", CultureInfo.InvariantCulture)));
+        return $"::{{{profileProviderClassId:D}}}\\edpath:{token}";
+    }
+
+    internal static bool TryGetProviderPath(string identity, Guid? profileProviderClassId, out string physicalPath)
+    {
+        physicalPath = string.Empty;
+        if (profileProviderClassId is not { } classId) return false;
+        var providerPrefix = $"::{{{classId:D}}}\\edpath:";
+        if (!identity.StartsWith(providerPrefix, StringComparison.OrdinalIgnoreCase)) return false;
+        physicalPath = DecodeProviderPath(identity[providerPrefix.Length..]);
+        return true;
+    }
+
     internal static string ToQdrTextPath(string identity, Guid? profileProviderClassId = null)
     {
-        if (profileProviderClassId is { } classId)
-        {
-            var providerPrefix = $"::{{{classId:D}}}\\edpath:";
-            if (identity.StartsWith(providerPrefix, StringComparison.OrdinalIgnoreCase))
-                return DecodeProviderPath(identity[providerPrefix.Length..]);
-        }
+        if (TryGetProviderPath(identity, profileProviderClassId, out var physicalPath)) return physicalPath;
 
         return identity.StartsWith("::", StringComparison.Ordinal) ? "shell:" + identity : identity;
     }

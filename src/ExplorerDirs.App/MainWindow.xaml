@@ -193,6 +193,10 @@
                     <MenuItem Header="映射网络驱动器…" Click="ConnectNetworkDrive_Click"/>
                     <MenuItem Header="断开网络驱动器…" Click="DisconnectNetworkDrive_Click"/>
                 </MenuItem>
+                <MenuItem Header="开发者">
+                    <MenuItem Header="在新标签打开逐行递归大小实验视图" Click="OpenRecursiveSizePrototype_Click"
+                              ToolTip="隔离原型：保留当前标签，在新 Shell provider 标签测试逐行异步递归大小。关闭实验标签可回到原视图。"/>
+                </MenuItem>
                 <MenuItem Header="计算当前目录递归大小" InputGestureText="F9" Click="CalculateDirectorySize_Click"/>
                 <MenuItem Header="计算所选项目递归大小" Click="CalculateSelectedItemsRecursiveSize_Click"/>
                 <MenuItem Header="刷新环境变量" Click="RefreshEnvironment_Click"/>
