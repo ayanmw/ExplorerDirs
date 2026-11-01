@@ -2472,6 +2472,12 @@ NativeProbe Release 构建 0 警告/错误；Private Desktop watchdog exit 0，�
 
 同时按 x64 `size_t` 与 map iterator 的实际编译尺寸估算 indexed-heap 所需的每项堆索引和快照反向索引：4,096 容量约增加 65,536 B（64 KiB），约为该组 1,352,250 B 缓存载荷的 4.8%；8,192 容量估计 131,072 B。该估计不包含 allocator 取整，但两项是按结构尺寸推导的额外载荷，不是进程 Private Bytes 差值。该压力样本中线性淘汰查找累计约 0.39 秒，低于反复递归扫描的成本；因此不为 NativeProbe LRU 增加额外索引，以免常驻载荷换取有限收益。新增计时只在隔离 NativeProbe，应用和发布版不变；下一步继续测不同目录数/窗格数及慢速目录扫描时的内存、重扫和延迟，产品接线仍需独立架构/可见验收。
 
+### 2026-11-02：四个不同根目录的在途扫描退役
+
+通过 Private Desktop watchdog 运行异步 batch-view 取消场景：四个 Shell view 使用四个不同根目录，各含四个同级目标文件夹；每个目标前 200 个小文件并在逐项遍历时注入 10 ms 延时。放行队列闸门后等待两个 worker 已开始、共访问至少 32 个条目，再同时销毁四个 view。观测为 `initial-scans=2`、`scan-attempts=2`、`entries-before=32`、`entries-after=34`、完成发布 `0→0`、通知 `0→0`、四个 batch 全部结束；扫描器只额外完成两个当时在途的条目，未继续启动其它任务。Private Desktop watchdog exit 0，前台 HWND 与 last-input 未变，隔离清理通过；日志 `src/.state/native-probe-watchdog/20261102-041932-fcd5be4a.stdout.log`，stderr 0 B。
+
+这证明当前隔离扫描器在四个不同根视图全部退役后，会在在途目录遍历的下一个取消检查点停止，且不发布陈旧大小结果或 Shell 更新通知。它没有测量跨重启缓存、真实磁盘/网络 provider、产品 ExplorerBrowser 接线或 Private Bytes 的细粒度变化；不能据此声称产品视图关闭时的内存曲线已验证。
+
 ### 2026-11-02：profile Shell namespace 注册 owner 并行与重启原型
 
 此前的 owner-only 探针验证了 B 在 A 注销后重新解析仍读到专属文件/29 B；本次把 profile B 的首个真实 ExplorerBrowser 留在 B owner 子进程中。A 注销后，B 通过已打开 view 的 `IFolderView2` 重新读取行数和 provider 内容；A 使用原 INI 中的 CLSID 重建注册并打开自己的 view 后，B 再复验一次；最后 B owner 退出，A 的 view 仍读到 13 B。A、B 各自的两棵 volatile key 在协调进程中清理并验证。
