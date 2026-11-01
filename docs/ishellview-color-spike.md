@@ -1631,3 +1631,9 @@ Release 构建通过（0 警告、0 错误）。Private Desktop 运行期间 sin
 将 `--shell-watcher-recovery-contract` 扩展为真实替换失败分支：注入 overflow 后，在首轮退避结束前删除唯一临时目录，使 replacement 无法启动；探针确认 `recovery-failed` 记录后恢复该目录，等待退避重试成功，再创建文件并断言 generation 1→2 且新 watcher 收到变更。此序列连续三轮通过，NativeProbe Release build 0 警告/错误。失败期间的诊断还记录了 watcher 在目标路径被移除时报告的 `Win32Exception`。
 
 这是共享恢复状态机与 NativeProbe watcher 的退避/重试合同，不是产品 WPF Dispatcher timer 的全路径，也不是操作系统自然 overflow；未使用 ExplorerBrowser/IShellView UI。它增强了 watcher 暂时不可用后的稳定性证据，但不证明网络位置或第三方 Shell provider 的重试表现。
+
+### 2026-11-01：当前主线逐项颜色综合探针复验
+
+NativeProbe Release 构建 0 警告/错误；`color-private-desktop` watchdog exit 0，Private Desktop 前台/输入守卫未变化且隔离清理通过。复验覆盖 View 菜单八种模式：每项 Shell mode/icon size/ListView style 读回匹配，逐项绘制回调 2/2、两个规则颜色像素均命中。真实背景菜单分组命令选择 Size、Type、Date modified 后，升降序命令读回的分组/排序键和方向均符合预期，颜色回调及身份像素检查通过；Content 模式文件/目录两行也分别命中 `0xF0E0D0` 与 `0xD0F0E0`。日志：`src/.state/native-probe-watchdog/20261101-081736-30926fba.stdout.log`。
+
+这里的八种模式通过真实合并 View 菜单命令后验证；探针中直接设置 `IFolderView2` 模式的独立采样仍没有逐项回调，不能据此说所有模式变更路径均已着色。结果只适用于当前 Windows 默认 filesystem `IShellView` 原型，不代表 ExplorerBrowser 产品接入、其它 provider、可见应用验收或迁移门槛通过。
