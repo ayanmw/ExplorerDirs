@@ -31,6 +31,9 @@ internal static class ShellViewHostFilterProbe
     private const uint LvmSetItemTextW = 0x1074;
     private const uint LvmInsertItemW = 0x104D;
     private const uint LvmGetItemCount = 0x1004;
+    private const uint LvmGetTopIndex = 0x1027;
+    private const uint LvmGetCountPerPage = 0x1028;
+    private const uint LvmEnsureVisible = 0x1013;
     private const uint LvmGetItemTextW = 0x1073;
     private const uint LvmGetItemW = 0x104B;
     private const uint LvmGetItemState = 0x102C;
@@ -1491,6 +1494,9 @@ internal static class ShellViewHostFilterProbe
                 throw new InvalidOperationException($"Recursive-size peer row count mismatch: expected={expectedCount}, actual={projection.Rows.Count}.");
             var listView = CreatePeerListView(parent, projection.SystemImageList);
             PopulatePeerList(listView, projection.Rows);
+            SetPeerListMode(listView, LvsReport);
+            if (!MoveWindow(listView, 0, 0, 320, 58, true))
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not size the hidden peer ListView for viewport-trigger validation.");
             InsertPeerColumn(listView, projection.Rows[0].DetailTitles.Length, "Recursive size (on demand)");
             for (var index = 0; index < projection.Rows.Count; index++)
                 SetPeerListCell(listView, index, projection.Rows[index].DetailTitles.Length, "");
@@ -1504,6 +1510,10 @@ internal static class ShellViewHostFilterProbe
             var selectedRow = projection.Rows.Single(row => row.Name == "size-10");
             var secondarySelectedRow = projection.Rows.Single(row => row.Name == "size-2");
             var selectedIndex = projection.Rows.IndexOf(selectedRow);
+            _ = SendMessageW(listView, LvmEnsureVisible, selectedIndex, 0);
+            var visibleFolderRows = GetVisibleRecursiveFolderRows(listView, projection.Rows);
+            if (!visibleFolderRows.Any(row => row.Id == selectedRow.Id))
+                throw new InvalidOperationException("The selected recursive-size fixture was not within the peer ListView viewport.");
             SetPeerListItemState(listView, selectedIndex, 0x0003, 0x0003);
             VerifyPeerShellCommandMenu(shellView, shellFolder, parent, [selectedRow.RelativePidl], ["cut", "copy", "delete", "rename", "properties"]);
             SetPeerListItemState(listView, projection.Rows.IndexOf(secondarySelectedRow), 0x0002, 0x0002);
@@ -1518,12 +1528,12 @@ internal static class ShellViewHostFilterProbe
             var initialIds = ReadPeerListRowIds(listView);
             var ownerThread = Environment.CurrentManagedThreadId;
             using var cancellation = new CancellationTokenSource();
-            var requestedPath = Path.GetFullPath(selectedRow.FileSystemPath!);
+            var requestedPaths = visibleFolderRows.Select(row => Path.GetFullPath(row.FileSystemPath!)).ToArray();
             var scan = Task.Run(() =>
             {
                 var workerThread = Environment.CurrentManagedThreadId;
-                Thread.Sleep(100); // Keep the one-row on-demand request pending while the old rows remain visible.
-                return (Rows: HandleBoundRecursiveDirectoryScanner.Scan([requestedPath], cancellation.Token), WorkerThread: workerThread);
+                Thread.Sleep(100); // Keep the visible-row request pending while the old rows remain visible.
+                return (Rows: HandleBoundRecursiveDirectoryScanner.Scan(requestedPaths, cancellation.Token), WorkerThread: workerThread);
             }, cancellation.Token);
             while (!scan.IsCompleted)
             {
@@ -1539,8 +1549,8 @@ internal static class ShellViewHostFilterProbe
 
             var sizes = completed.Rows.ToDictionary(pair => Path.GetFullPath(pair.Key), pair => pair.Value.Summary.Bytes,
                 StringComparer.OrdinalIgnoreCase);
-            if (sizes.Count != 1 || !sizes.ContainsKey(requestedPath))
-                throw new InvalidOperationException("The on-demand request scanned folders that were not requested.");
+            if (!sizes.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(requestedPaths))
+                throw new InvalidOperationException("The viewport on-demand request scanned folders outside the visible rows.");
             var recursiveSizeCache = new Dictionary<string, ulong>(sizes, StringComparer.OrdinalIgnoreCase);
             var bytesById = new Dictionary<int, ulong>();
             for (var index = 0; index < projection.Rows.Count; index++)
@@ -1554,13 +1564,14 @@ internal static class ShellViewHostFilterProbe
                 }
             }
             var initialIndexById = initialIds.Select((id, index) => (id, index)).ToDictionary(item => item.id, item => item.index);
-            var otherFolderRowsRemainPending = projection.Rows.Where(row => row.Id != selectedRow.Id &&
+            var requestedIds = visibleFolderRows.Select(row => row.Id).ToHashSet();
+            var otherFolderRowsRemainPending = projection.Rows.Where(row => !requestedIds.Contains(row.Id) &&
                     row.FileSystemPath is not null && Directory.Exists(row.FileSystemPath))
                 .All(row => string.IsNullOrEmpty(GetPeerListCell(listView, initialIndexById[row.Id], row.DetailTitles.Length)));
             if (bytesById[selectedRow.Id] != 10 || !otherFolderRowsRemainPending)
-                throw new InvalidOperationException("The on-demand scan populated an unrequested recursive-size row.");
+                throw new InvalidOperationException("The viewport on-demand scan populated a non-visible recursive-size row.");
 
-            var remainingPaths = scanPaths.Where(path => !string.Equals(path, requestedPath, StringComparison.OrdinalIgnoreCase)).ToArray();
+            var remainingPaths = scanPaths.Where(path => !requestedPaths.Contains(path, StringComparer.OrdinalIgnoreCase)).ToArray();
             var rowIndexByPath = projection.Rows.Select((row, index) => (row, index))
                 .Where(item => item.row.FileSystemPath is not null)
                 .ToDictionary(item => Path.GetFullPath(item.row.FileSystemPath!), item => item.index,
@@ -1601,7 +1612,7 @@ internal static class ShellViewHostFilterProbe
             var selectedState = selectedAfterSort < 0 ? 0 : GetPeerListItemState(listView, selectedAfterSort, 0x0003);
             if (!sortedIds.SequenceEqual(expectedOrder.Select(row => row.Id)) || selectedState != 0x0003)
                 throw new InvalidOperationException($"Recursive-size sort order or selected row identity was lost: ids=[{string.Join(',', sortedIds)}], expected=[{string.Join(',', expectedOrder.Select(row => row.Id))}], selected-state=0x{selectedState:X}.");
-            Console.WriteLine($"ishellview-peer-recursive-size: shell-rows={projection.Rows.Count}; requested-only-first=True; other-rows-pending={otherFolderRowsRemainPending}; worker-thread={completed.WorkerThread}; owner-thread={ownerThread}; rows-retained-during-scan=True; bytes=[size-2:2,size-10:10,size-100:100]; numeric-order=[{string.Join(',', sortedRows)}]; selected-focused-id={selectedRow.Id}; selection-focus-preserved=True; foreground-unchanged={GetForegroundWindow() == foreground}; product-view-changed=False");
+            Console.WriteLine($"ishellview-peer-recursive-size: shell-rows={projection.Rows.Count}; visible-folder-rows-requested={visibleFolderRows.Length}; viewport-top-index={GetPeerListTopIndex(listView)}; viewport-count-per-page={GetPeerListCountPerPage(listView)}; only-visible-rows-first=True; other-rows-pending={otherFolderRowsRemainPending}; worker-thread={completed.WorkerThread}; owner-thread={ownerThread}; rows-retained-during-scan=True; bytes=[size-2:2,size-10:10,size-100:100]; numeric-order=[{string.Join(',', sortedRows)}]; selected-focused-id={selectedRow.Id}; selection-focus-preserved=True; foreground-unchanged={GetForegroundWindow() == foreground}; product-view-changed=False");
 
             var changedDirectory = Path.GetFullPath(projection.Rows.Single(row => row.Name == "size-10").FileSystemPath!);
             var changedPayload = Path.Combine(changedDirectory, "payload.bin");
@@ -1851,6 +1862,22 @@ internal static class ShellViewHostFilterProbe
     {
         var style = GetWindowLongPtrW(listView, GwlStyle).ToInt64();
         _ = SetWindowLongPtrW(listView, GwlStyle, (nint)((style & ~LvsTypeMask) | mode));
+    }
+
+    private static int GetPeerListTopIndex(nint listView) => SendMessageW(listView, LvmGetTopIndex, 0, 0).ToInt32();
+
+    private static int GetPeerListCountPerPage(nint listView) => SendMessageW(listView, LvmGetCountPerPage, 0, 0).ToInt32();
+
+    private static PeerShellRow[] GetVisibleRecursiveFolderRows(nint listView, IReadOnlyList<PeerShellRow> rows)
+    {
+        var topIndex = GetPeerListTopIndex(listView);
+        var countPerPage = GetPeerListCountPerPage(listView);
+        if (topIndex < 0 || countPerPage <= 0 || topIndex >= rows.Count)
+            throw new InvalidOperationException($"The peer ListView returned an invalid viewport: top={topIndex}; count-per-page={countPerPage}; rows={rows.Count}.");
+        var end = Math.Min(rows.Count, topIndex + countPerPage);
+        return rows.Skip(topIndex).Take(end - topIndex)
+            .Where(row => row.FileSystemPath is not null && Directory.Exists(row.FileSystemPath))
+            .ToArray();
     }
 
     private static void PopulatePeerList(nint listView, IReadOnlyList<PeerShellRow> rows, bool groupByType = false)
@@ -3315,6 +3342,7 @@ internal static class ShellViewHostFilterProbe
     [DllImport("user32.dll")] private static extern nint GetParent(nint window);
     [DllImport("user32.dll")] private static extern nint GetFocus();
     [DllImport("user32.dll")] private static extern nint SetFocus(nint window);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool MoveWindow(nint window, int x, int y, int width, int height, bool repaint);
     [DllImport("user32.dll")] private static extern nint SendMessageW(nint window, uint message, nint wParam, nint lParam);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtrW(nint window, int index);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] private static extern nint SetWindowLongPtrW(nint window, int index, nint value);

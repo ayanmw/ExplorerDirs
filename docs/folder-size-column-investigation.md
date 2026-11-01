@@ -1837,6 +1837,12 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 
 这验证的是自控 peer ListView 的逐项按需扫描路径，不是 viewport 可见性检测、自动后台触发策略或 ExplorerBrowser 产品列；探针通过显式行请求模拟“需要该值”，并在同一轮内请求其余目录。Shell 通知突发/失效、取消和过期结果合同仍由前述独立探针覆盖。未接产品、未使用用户目录、未做可见 UI/性能基准或慢盘网络验证；产品和 release 未改变。
 
+### 2026-11-01：递归列请求按当前视口筛选
+
+扩展 `--ishellview-recursive-size-projection-private-desktop`：peer ListView 限为每页一行，将 `size-10` 行滚入视口后，使用原生 `LVM_GETTOPINDEX`/`LVM_GETCOUNTPERPAGE` 得到当前行区间，并只扫描区间内的目录。三次 Release apphost Private Desktop 运行均只请求当前可见的一个目录，其它目录的递归值仍为空；扫描期间原行、稳定 ID、选区与焦点保持，随后既有 Shell 通知失效、后台重扫和数值排序合同继续通过。前台、last-input 与临时夹具清理守卫通过。
+
+这只验证“视口范围可读，并可作为按需请求过滤条件”；探针显式将选中目录滚入视口并调用该策略，没有把滚动/重排消息自动接成调度，也未验证真实可见绘制、用户快速滚动时的取消/节流、慢盘/网络并发或产品 ExplorerBrowser。产品及 release 未改变。
+
 ### 2026-11-01：自控 Shell 行复用产品所选项命令适配器
 
 在同一隐藏真实 `IShellView` 行投影中保留每行相对 PIDL；从选中 `size-10` 行的相对 PIDL 调用真实父 `IShellFolder.GetUIObjectOf(IContextMenu)`，再将 COM 菜单交给产品 `NativeShellCommandMenu`。产品适配器识别并确认 `cut/copy/delete/rename/properties` 均启用；未显示 popup、未调用动词，也未接触系统剪贴板。此前已通过的按需递归扫描、排序、通知失效和焦点合同继续通过。NativeProbe Release build 0 警告/错误，Private Desktop 探针 exit 0，前台/last-input 与隔离清理守卫通过。

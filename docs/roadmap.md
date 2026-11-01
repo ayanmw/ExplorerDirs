@@ -5804,3 +5804,5 @@ peer SysListView32 现读取 Shell 文件夹的名称、大小、项目类型、
 
 2026-11-01 Shell 多选拖放目标补充枚举：`IDropTarget.Drop` 复制后，目标 `IShellFolder.EnumObjects` 返回与源选择一致的两个目录 PIDL/路径；Private Desktop watchdog 与 NativeProbe Release 通过，前台/输入/清理守卫保持。没有创建目标 Shell view/peer row model，不证明目标窗格行身份/焦点恢复、延迟通知、移动或真实 UI 拖动。详见[调查记录](folder-size-column-investigation.md#2026-11-01-shell-拖放后的目标目录原生枚举)。
 2026-11-01 Shell Drop 后目标 `IShellView` 行同步：加入哨兵握手，确保目标 view 完成首次枚举后再拖放；普通路径及先销毁/重建 HWND 路径重复通过。重建后初始行集合为空，但 Copy 后 800 ms 内自然出现磁盘上的全部目标行，未用显式 Refresh/目录通知兜底；PIDL 行身份唯一且刷新后稳定，源多选/焦点保留。Private Desktop 前台、输入及清理守卫通过，NativeProbe build 0 警告/错误。仍未运行 OLE `DoDragDrop`、未做可见交互或产品接线。详见[调查记录](folder-size-column-investigation.md#2026-11-01-shell-drop-后目标-ishellview-行同步)。
+
+2026-11-01 递归大小视口请求切片：NativeProbe peer ListView 通过 `LVM_GETTOPINDEX`/`LVM_GETCOUNTPERPAGE` 取得每页一行的视口范围，仅请求当前可见目录；三次 Release apphost Private Desktop 运行均确认其它目录仍未计算，行身份、选区、焦点及后续通知重扫合同通过。此为显式滚入视口后对请求集合做过滤，未验证滚动消息自动调度、快速滚动取消/节流、可见 UI 或产品接线。详见[调查记录](folder-size-column-investigation.md#2026-11-01-递归列请求按当前视口筛选)。
