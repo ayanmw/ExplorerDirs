@@ -1543,6 +1543,8 @@ namespace
     };
     volatile LONG g_syntheticCompareCount = 0;
     volatile LONG g_syntheticSizeCompareCount = 0;
+    volatile LONG g_syntheticDirectoryMetricsDuringCompareCount = 0;
+    volatile LONG g_syntheticRecursiveSizeCacheMissesDuringCompareCount = 0;
     volatile LONG g_syntheticItemDetailsOfCount = 0;
     volatile LONG g_syntheticSizeDetailsExCount = 0;
     volatile LONG g_syntheticSizeDetailsExFolderCount = 0;
@@ -1630,6 +1632,16 @@ namespace
     // Exclude synchronous property callbacks caused by the probe's own
     // ListView text reads from notification-strategy counters.
     thread_local BOOL g_syntheticSizeMetricsObservation = FALSE;
+    thread_local BOOL g_syntheticCompareCallbackActive = FALSE;
+    struct SyntheticCompareCallbackScope
+    {
+        BOOL previous;
+        SyntheticCompareCallbackScope() : previous(g_syntheticCompareCallbackActive)
+        {
+            g_syntheticCompareCallbackActive = TRUE;
+        }
+        ~SyntheticCompareCallbackScope() { g_syntheticCompareCallbackActive = previous; }
+    };
     constexpr PROPERTYKEY kSyntheticRecursiveSizeKey =
     { { 0x7E1F84B7, 0xC052, 0x4E51, { 0x8A, 0x3C, 0x86, 0x92, 0x54, 0xA6, 0xB9, 0x10 } }, 1 };
     constexpr PROPERTYKEY kSyntheticRelativeSizeKey =
@@ -1710,6 +1722,8 @@ namespace
 
     HRESULT GetSyntheticDirectoryMetrics(const std::wstring& directory, SyntheticDirectoryMetrics* metrics)
     {
+        if (g_syntheticCompareCallbackActive)
+            InterlockedIncrement(&g_syntheticDirectoryMetricsDuringCompareCount);
         if (!metrics) return E_POINTER;
         *metrics = {};
         std::wstring pattern;
@@ -2592,6 +2606,8 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE CompareIDs(LPARAM column, PCUIDLIST_RELATIVE left, PCUIDLIST_RELATIVE right) override
         {
+            SyntheticCompareCallbackScope compareScope;
+            (void)compareScope;
             const auto* leftChild = SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(left));
             const auto* rightChild = SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(right));
             if (!leftChild || !rightChild) return E_INVALIDARG;
@@ -3007,6 +3023,8 @@ namespace
             {
                 ULONGLONG bytes = 0;
                 if (_recursiveSizeStore->TryGet(parsingName, child->identity, &bytes)) return bytes;
+                if (g_syntheticCompareCallbackActive && (child->attributes & FILE_ATTRIBUTE_DIRECTORY))
+                    InterlockedIncrement(&g_syntheticRecursiveSizeCacheMissesDuringCompareCount);
             }
             return SyntheticSize(child);
         }
@@ -4689,6 +4707,8 @@ extern "C" __declspec(dllexport) void WINAPI ResetSyntheticSortCounters()
 {
     InterlockedExchange(&g_syntheticCompareCount, 0);
     InterlockedExchange(&g_syntheticSizeCompareCount, 0);
+    InterlockedExchange(&g_syntheticDirectoryMetricsDuringCompareCount, 0);
+    InterlockedExchange(&g_syntheticRecursiveSizeCacheMissesDuringCompareCount, 0);
     InterlockedExchange(&g_syntheticItemDetailsOfCount, 0);
     InterlockedExchange(&g_syntheticSizeDetailsExCount, 0);
     InterlockedExchange(&g_syntheticSizeDetailsExFolderCount, 0);
@@ -4928,6 +4948,12 @@ extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSortCompareCount()
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSizeCompareCount()
 { return InterlockedCompareExchange(&g_syntheticSizeCompareCount, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticDirectoryMetricsDuringCompareCount()
+{ return InterlockedCompareExchange(&g_syntheticDirectoryMetricsDuringCompareCount, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticRecursiveSizeCacheMissesDuringCompareCount()
+{ return InterlockedCompareExchange(&g_syntheticRecursiveSizeCacheMissesDuringCompareCount, 0, 0); }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSizeDetailsExCount()
 { return InterlockedCompareExchange(&g_syntheticSizeDetailsExCount, 0, 0); }

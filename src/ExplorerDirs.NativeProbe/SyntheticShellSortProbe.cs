@@ -442,6 +442,8 @@ public static class SyntheticShellSortProbe
                     ? SortByHeader(module, sizeListView, columnIndex: 1, expectedCount: expectedInitialCount, stage: "header-sort-descending")
                     : SortAndRead(module, folderView, view, sizeListView, direction: -1, expectedCount: expectedInitialCount);
                 var descendingComparisons = ReadCounter(module, "GetSyntheticSizeCompareCount");
+                var directoryMetricScansDuringCompare = ReadCounter(module, "GetSyntheticDirectoryMetricsDuringCompareCount");
+                var recursiveSizeCacheMissesDuringCompare = ReadCounter(module, "GetSyntheticRecursiveSizeCacheMissesDuringCompareCount");
                 var menuSortAscending = Array.Empty<string>();
                 var menuSortDescending = Array.Empty<string>();
                 var menuAscendingSortState = Array.Empty<NativeSortColumn>();
@@ -459,7 +461,7 @@ public static class SyntheticShellSortProbe
                     menuSortDescending = ReadNames(sizeListView, module, expectedCount: expectedInitialCount);
                     menuDescendingSortState = CaptureNativeSortColumns(folderView);
                 }
-                Console.WriteLine($"synthetic-recursive-directory-size-view: filesystem-attributes-masked={maskFilesystemAttributes}; self-owned-attributes={selfOwnedAttributes}; custom-size-column={customSizeColumn}; custom-size-column-slow={slowCustomSizeColumn}; initial=[{FormatProbeRows(initialNames)}]; size-text=[{FormatProbeRows(initialSizes)}]; standard-details-ex={detailsExRequests}(folder={detailsExFolderRequests},file={detailsExFileRequests}); custom-details-ex={customDetailsExRequests}(folder={customDetailsExFolderRequests},file={customDetailsExFileRequests}); details-of-items={detailsOfItemRequests}; details-of-size={detailsOfSizeRequests}; property-store-factory-requests={propertyStoreFactoryRequests}; property-store-requests={propertyStoreRequests}; get-attributes-of={attributeRequests}(filesystem-flags={filesystemAttributeRequests}); ascending=[{FormatProbeRows(ascendingNames)}]; descending=[{FormatProbeRows(descendingNames)}]; compare-counts={ascendingComparisons}/{descendingComparisons}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                Console.WriteLine($"synthetic-recursive-directory-size-view: filesystem-attributes-masked={maskFilesystemAttributes}; self-owned-attributes={selfOwnedAttributes}; custom-size-column={customSizeColumn}; custom-size-column-slow={slowCustomSizeColumn}; initial=[{FormatProbeRows(initialNames)}]; size-text=[{FormatProbeRows(initialSizes)}]; standard-details-ex={detailsExRequests}(folder={detailsExFolderRequests},file={detailsExFileRequests}); custom-details-ex={customDetailsExRequests}(folder={customDetailsExFolderRequests},file={customDetailsExFileRequests}); details-of-items={detailsOfItemRequests}; details-of-size={detailsOfSizeRequests}; property-store-factory-requests={propertyStoreFactoryRequests}; property-store-requests={propertyStoreRequests}; get-attributes-of={attributeRequests}(filesystem-flags={filesystemAttributeRequests}); ascending=[{FormatProbeRows(ascendingNames)}]; descending=[{FormatProbeRows(descendingNames)}]; compare-counts={ascendingComparisons}/{descendingComparisons}; recursive-size-cache-misses-during-compare={recursiveSizeCacheMissesDuringCompare}; recursive-metric-scans-during-compare={directoryMetricScansDuringCompare}; foreground-unchanged={GetForegroundWindow() == foreground}");
                 var childIndex = Array.FindIndex(initialNames, name => string.Equals(name, "child", StringComparison.OrdinalIgnoreCase));
                 // Require the full value; substring matching would accept unrelated values such as "1200".
                 var expectedDirectoryText = expectedDirectorySizeText ?? (humanSizeText ? "10 B" : "10");
@@ -479,6 +481,10 @@ public static class SyntheticShellSortProbe
                     (shellWindowScrollProbe && (!ascendingNames.Contains("child", StringComparer.OrdinalIgnoreCase) || !descendingNames.Contains("small.bin", StringComparer.OrdinalIgnoreCase))) ||
                     (!shellWindowScrollProbe && (ascendingComparisons == 0 || descendingComparisons == 0)) || GetForegroundWindow() != foreground)
                     return 1;
+                if (directoryMetricScansDuringCompare != 0)
+                    throw new IOException($"Recursive directory metrics were scanned inside Shell CompareIDs ({directoryMetricScansDuringCompare} calls).");
+                if (customSizeColumn && recursiveSizeCacheMissesDuringCompare == 0)
+                    throw new IOException("The isolated sort did not exercise the recursive-size cache-miss fallback.");
                 if (customSizeColumn)
                     Console.WriteLine($"synthetic-recursive-size-background-menu-sort: ascending-hr=0x{menuAscendingHr:X8}; ascending=[{FormatProbeRows(menuSortAscending)}]; ascending-state=[{FormatSortColumns(menuAscendingSortState)}]; descending-hr=0x{menuDescendingHr:X8}; descending=[{FormatProbeRows(menuSortDescending)}]; descending-state=[{FormatSortColumns(menuDescendingSortState)}]; passed=True");
                 if (exerciseUpdateNotifications)
