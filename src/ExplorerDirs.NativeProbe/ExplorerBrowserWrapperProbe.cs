@@ -395,10 +395,12 @@ internal static class ExplorerBrowserWrapperProbe
             }
             finally { Marshal.FreeCoTaskMem(dragBackingRootPidl); }
 
-            var dropResults = ExerciseWrappedFolderDropTarget(viewFolder, "child", "copy-source.txt", fixture);
-            Console.WriteLine($"explorerbrowser-registered-namespace: child-drop-target={dropResults.TargetAvailable}; drag-enter={dropResults.DragEnter}; drop={dropResults.Drop}; copy-verified={dropResults.CopyVerified}");
-            if (!dropResults.TargetAvailable || !dropResults.DragEnter || !dropResults.Drop || !dropResults.CopyVerified)
-                throw new InvalidOperationException("The wrapped child folder could not accept a native Shell drop operation.");
+            var dropCopyResults = ExerciseWrappedFolderDropTarget(viewFolder, "child", "copy-source.txt", fixture, move: false);
+            var dropMoveResults = ExerciseWrappedFolderDropTarget(viewFolder, "child", "drag-move-source.txt", fixture, move: true);
+            Console.WriteLine($"explorerbrowser-registered-namespace: child-drop-target={dropCopyResults.TargetAvailable && dropMoveResults.TargetAvailable}; copy-enter={dropCopyResults.DragEnter}; copy-drop={dropCopyResults.Drop}; copy-verified={dropCopyResults.TransferVerified && dropCopyResults.SourcePreserved}; move-enter={dropMoveResults.DragEnter}; move-drop={dropMoveResults.Drop}; move-verified={dropMoveResults.TransferVerified && !dropMoveResults.SourcePreserved}");
+            if (!dropCopyResults.TargetAvailable || !dropCopyResults.DragEnter || !dropCopyResults.Drop ||
+                !dropCopyResults.TransferVerified || !dropCopyResults.SourcePreserved)
+                throw new InvalidOperationException("The wrapped child folder could not accept a native Shell copy drop operation.");
             return 0;
         }
         finally
@@ -622,11 +624,13 @@ internal static class ExplorerBrowserWrapperProbe
         var destinationPath = Path.Combine(fixture, "file-operation-destination");
         Directory.CreateDirectory(destinationPath);
         var copySourcePath = Path.Combine(fixture, "copy-source.txt");
-        var moveSourcePath = Path.Combine(fixture, "move-source.txt");
+        var moveSourcePath = Path.Combine(fixture, "file-operation-move-source.txt");
+        var dragMoveSourcePath = Path.Combine(fixture, "drag-move-source.txt");
         const string copyContents = "copied through namespace IDataObject";
         const string moveContents = "moved through namespace IDataObject";
         File.WriteAllText(copySourcePath, copyContents);
         File.WriteAllText(moveSourcePath, moveContents);
+        File.WriteAllText(dragMoveSourcePath, "moved through namespace IDropTarget");
         Marshal.ThrowExceptionForHR(SHCreateItemFromParsingName(destinationPath, 0, in ShellItemId, out var destination));
         try
         {
@@ -635,7 +639,7 @@ internal static class ExplorerBrowserWrapperProbe
             try { copy = RunFileOperation(copyData, destination, move: false); }
             finally { Marshal.Release(copyData); }
 
-            var moveData = GetDataObjectForItem(folder, "move-source.txt");
+            var moveData = GetDataObjectForItem(folder, "file-operation-move-source.txt");
             bool move;
             try { move = RunFileOperation(moveData, destination, move: true); }
             finally { Marshal.Release(moveData); }
@@ -643,7 +647,7 @@ internal static class ExplorerBrowserWrapperProbe
             var copySourcePreserved = File.Exists(copySourcePath);
             var moveSourceRemoved = !File.Exists(moveSourcePath);
             var copyDestinationPath = Path.Combine(destinationPath, "copy-source.txt");
-            var moveDestinationPath = Path.Combine(destinationPath, "move-source.txt");
+            var moveDestinationPath = Path.Combine(destinationPath, "file-operation-move-source.txt");
             var destinationsVerified = File.Exists(copyDestinationPath) && File.ReadAllText(copyDestinationPath) == copyContents &&
                 File.Exists(moveDestinationPath) && File.ReadAllText(moveDestinationPath) == moveContents;
             return (copy, move, copySourcePreserved, moveSourceRemoved, destinationsVerified);
@@ -663,8 +667,8 @@ internal static class ExplorerBrowserWrapperProbe
         finally { Marshal.FreeCoTaskMem(item); }
     }
 
-    private static (bool TargetAvailable, bool DragEnter, bool Drop, bool CopyVerified) ExerciseWrappedFolderDropTarget(
-        nint parentFolder, string destinationName, string sourceName, string fixture)
+    private static (bool TargetAvailable, bool DragEnter, bool Drop, bool TransferVerified, bool SourcePreserved) ExerciseWrappedFolderDropTarget(
+        nint parentFolder, string destinationName, string sourceName, string fixture, bool move)
     {
         Marshal.ThrowExceptionForHR(ParseDisplayName(parentFolder, destinationName, out var childPidl));
         try
@@ -674,30 +678,38 @@ internal static class ExplorerBrowserWrapperProbe
             try
             {
                 var targetHr = CreateViewObject(childFolder, DropTargetId, out var dropTarget);
-                if (targetHr < 0 || dropTarget == 0) return (false, false, false, false);
+                if (targetHr < 0 || dropTarget == 0) return (false, false, false, false, false);
                 try
                 {
                     var dataObject = GetDataObjectForItem(parentFolder, sourceName);
                     try
                     {
-                        const uint copyEffect = 1;
-                        var effect = copyEffect;
-                        var point = new ProbePoint();
-                        var dragEnterHr = At<DropDragEnter>(dropTarget, 3)(dropTarget, dataObject, 1, point, ref effect);
-                        var dragEnter = dragEnterHr >= 0 && (effect & copyEffect) != 0;
-                        var drop = false;
-                        if (dragEnter)
-                        {
-                            effect = copyEffect;
-                            drop = At<DropTargetDrop>(dropTarget, 6)(dropTarget, dataObject, 1, point, ref effect) >= 0 &&
-                                (effect & copyEffect) != 0;
-                        }
-                        else _ = At<DropTargetDragLeave>(dropTarget, 5)(dropTarget);
+                        var requestedEffect = move ? 2u : 1u;
+                        var keyState = move ? 5u : 1u; // MK_LBUTTON | MK_SHIFT requests a move.
                         var sourcePath = Path.Combine(fixture, sourceName);
                         var destinationPath = Path.Combine(fixture, destinationName, sourceName);
-                        var copyVerified = drop && File.Exists(sourcePath) && File.Exists(destinationPath) &&
-                            File.ReadAllBytes(sourcePath).AsSpan().SequenceEqual(File.ReadAllBytes(destinationPath));
-                        return (true, dragEnter, drop, copyVerified);
+                        var expectedContents = File.ReadAllBytes(sourcePath);
+                        var effect = requestedEffect;
+                        var point = new ProbePoint();
+                        var dragEnterHr = At<DropDragEnter>(dropTarget, 3)(dropTarget, dataObject, keyState, point, ref effect);
+                        var dragEnter = dragEnterHr >= 0 && (effect & requestedEffect) != 0;
+                        var enterEffect = effect;
+                        var drop = false;
+                        var dropHr = unchecked((int)0x80004005);
+                        if (dragEnter)
+                        {
+                            effect = requestedEffect;
+                            dropHr = At<DropTargetDrop>(dropTarget, 6)(dropTarget, dataObject, keyState, point, ref effect);
+                            drop = dropHr >= 0 &&
+                                (effect & requestedEffect) != 0;
+                        }
+                        else _ = At<DropTargetDragLeave>(dropTarget, 5)(dropTarget);
+                        // Direct Drop calls omit DoDragDrop's source-side completion; MOVE remains diagnostic-only.
+                        Console.WriteLine($"explorerbrowser-registered-namespace: drop-kind={(move ? "move" : "copy")}; drag-enter-hr=0x{dragEnterHr:X8}; enter-effect={enterEffect}; drop-hr=0x{dropHr:X8}; drop-effect={effect}");
+                        var sourcePreserved = File.Exists(sourcePath);
+                        var transferVerified = drop && sourcePreserved == !move && File.Exists(destinationPath) &&
+                            expectedContents.AsSpan().SequenceEqual(File.ReadAllBytes(destinationPath));
+                        return (true, dragEnter, drop, transferVerified, sourcePreserved);
                     }
                     finally { Marshal.Release(dataObject); }
                 }

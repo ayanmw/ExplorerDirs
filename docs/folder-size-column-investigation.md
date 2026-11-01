@@ -1609,6 +1609,6 @@ Private Desktop 探针在已注册 namespace 的 `child` 目录下新增 7 B 文
 
 基线探针确认合成 namespace 的 `CreateViewObject(IID_IDropTarget)` 返回 `E_NOINTERFACE`，同一 backing filesystem folder 则返回 `S_OK`。因此文件项可提供 `IDataObject` 并不意味着目录已具备拖放目标。`SyntheticSortFolder::CreateViewObject` 现将 `IID_IDropTarget` 与背景 `IContextMenu` 一样转发给 backing folder，`IShellView` 仍由包装层自己创建。
 
-更新后的 Private Desktop 探针通过包装根文件夹绑定子目录，取得其原生 `IDropTarget`；将包装根中的 `copy-source.txt` 数据对象依次交给 `DragEnter`、`Drop`，复制到子目录后逐字节比较源/目标，确认源保留、目标创建。Release NativeProbe 构建和原生 adapter `/W4 /WX` 构建通过；探针退出码 0，临时注册/文件夹清理、前台与输入守卫通过。
+更新后的 Private Desktop 探针通过包装根文件夹绑定子目录，取得其原生 `IDropTarget`；将包装根中的 `copy-source.txt` 数据对象依次交给 `DragEnter`、`Drop`，复制到子目录后逐字节比较源/目标，确认源保留、目标创建。另以 MOVE effect 直接调用相同回调时，`DragEnter` 接受 MOVE，但 `Drop` 返回无 effect；这个直接回调省略了 `DoDragDrop` 的 source-side 完成过程，因此仅记录现象，不据此判断用户实际拖放时的移动行为。Release NativeProbe 构建和原生 adapter `/W4 /WX` 构建通过；探针退出码 0，临时注册/文件夹清理、前台与输入守卫通过。
 
-边界：这是隔离临时 namespace 中对 Shell COM 拖放接口的直接调用，不是 `DoDragDrop` 鼠标交互；没有验证跨窗格/跨进程 OLE 拖放、移动效果、拖动反馈、取消/拒绝效果、Shell 通知及产品接线。ExplorerBrowser 产品及 release 未修改。后续应在隔离架构评审中验证真实 OLE 循环与通知，再评估接入递归列原型。
+边界：这是隔离临时 namespace 中对 Shell COM 拖放接口的直接调用，不是 `DoDragDrop` 鼠标交互；没有验证跨窗格/跨进程 OLE 拖放、完整移动效果、拖动反馈、取消/拒绝效果、Shell 通知及产品接线。ExplorerBrowser 产品及 release 未修改。后续应在隔离架构评审中验证真实 OLE 循环与通知，再评估接入递归列原型。
