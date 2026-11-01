@@ -133,7 +133,8 @@ namespace
             eventType == SHCNE_MKDIR || eventType == SHCNE_RMDIR ||
             eventType == SHCNE_RENAMEFOLDER || eventType == SHCNE_ATTRIBUTES;
     }
-    constexpr size_t kSyntheticSortViewHoldCount = 8;
+    // The navigation prototype creates one held folder/view pair per visited Shell view; keep enough slots for multi-step history probes and peer browsers.
+    constexpr size_t kSyntheticSortViewHoldCount = 32;
     PVOID volatile g_syntheticSortViewHolds[kSyntheticSortViewHoldCount]{};
     CLSID g_syntheticFolderClassId =
     { 0xA17D2A61, 0x4C0B, 0x4B22, { 0x8E, 0x36, 0x35, 0xD9, 0x2C, 0xBC, 0x11, 0x70 } };
@@ -3096,6 +3097,7 @@ namespace
                 _backingPath, result);
             if (SUCCEEDED(result) && *value && !_shellView)
             {
+                bool held = false;
                 for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
                 {
                     auto* existing = InterlockedCompareExchangePointer(&g_syntheticSortViewHolds[index], this, nullptr);
@@ -3106,9 +3108,11 @@ namespace
                         _shellView->AddRef();
                         InterlockedExchange(&_asyncScansCancelled, 0);
                         InterlockedExchange(&_asyncNotificationsEnabled, 1);
+                        held = true;
                         break;
                     }
                 }
+                if (!held) TraceSyntheticSortStage("synthetic-sort: view-hold-capacity-exhausted");
             }
             return result;
         }
@@ -6401,6 +6405,14 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RetireSyntheticSortViewHoldForPr
         return S_OK;
     }
     return E_INVALIDARG;
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSortViewHoldCountForProbe()
+{
+    LONG count = 0;
+    for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
+        if (InterlockedCompareExchangePointer(&g_syntheticSortViewHolds[index], nullptr, nullptr)) ++count;
+    return count;
 }
 
 extern "C" __declspec(dllexport) HRESULT WINAPI CancelSyntheticSortRefreshForProbe(IShellView* view)

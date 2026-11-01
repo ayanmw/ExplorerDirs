@@ -674,6 +674,8 @@ internal static class ExplorerBrowserWrapperProbe
             NativeLibrary.GetExport(nativeLibrary, "GetSyntheticRecursiveSizeCacheSnapshotCountForProbe"));
         var hasSnapshot = Marshal.GetDelegateForFunctionPointer<HasChildScanReservation>(
             NativeLibrary.GetExport(nativeLibrary, "HasSyntheticRecursiveSizeSnapshotForViewProbe"));
+        var getViewHoldCount = Marshal.GetDelegateForFunctionPointer<GetProbeCount>(
+            NativeLibrary.GetExport(nativeLibrary, "GetSyntheticSortViewHoldCountForProbe"));
         var finishedBefore = getFinished();
         var completedBefore = getCompleted();
         var scansBefore = getScanCount();
@@ -722,7 +724,9 @@ internal static class ExplorerBrowserWrapperProbe
                 throw new TimeoutException("The registered Shell provider did not queue the requested recursive-size scan.");
             scheduledScans++;
 
+            Console.WriteLine($"explorerbrowser-registered-namespace-scan-lifecycle: first-view=0x{shellView:X}; peer-view=0x{peerShellView:X}; view-distinct={shellView != peerShellView}; folder=0x{viewFolder:X}; peer-folder=0x{peerViewFolder:X}; folder-distinct={!ComIdentityEquals(viewFolder, peerViewFolder)}; first-location={ReadShellViewFolderIdentity(shellView).Location}; peer-location={ReadShellViewFolderIdentity(peerShellView).Location}; view-hold-count={getViewHoldCount()}; first-pending={hasReservation(shellView, scanChildName) != 0}; peer-pending-before-read={hasReservation(peerShellView, scanChildName) != 0}");
             var peerPendingValue = ReadParsedItemDetailsByName(peerViewFolder, scanChildName, 1);
+            Console.WriteLine($"explorerbrowser-registered-namespace-scan-lifecycle: peer-value-length={peerPendingValue.Length}; view-hold-count-after-read={getViewHoldCount()}; first-pending-after-read={hasReservation(shellView, scanChildName) != 0}; peer-pending-after-read={hasReservation(peerShellView, scanChildName) != 0}");
             if (peerPendingValue.Length != 0)
                 throw new InvalidOperationException($"The second view should also be waiting for the uncached recursive-size value, got '{peerPendingValue}'.");
             deadline = Environment.TickCount64 + 5000;
@@ -1262,6 +1266,19 @@ internal static class ExplorerBrowserWrapperProbe
 
     private static string ReadAbsoluteParsingName(nint pidl)
         => ReadShellName(pidl, SigdnDesktopAbsoluteParsing);
+
+    private static bool ComIdentityEquals(nint left, nint right)
+    {
+        var unknownId = new Guid("00000000-0000-0000-C000-000000000046");
+        Marshal.ThrowExceptionForHR(Marshal.QueryInterface(left, in unknownId, out var leftUnknown));
+        try
+        {
+            Marshal.ThrowExceptionForHR(Marshal.QueryInterface(right, in unknownId, out var rightUnknown));
+            try { return leftUnknown == rightUnknown; }
+            finally { Marshal.Release(rightUnknown); }
+        }
+        finally { Marshal.Release(leftUnknown); }
+    }
 
     private static string ReadShellName(nint pidl, uint nameType)
     {
