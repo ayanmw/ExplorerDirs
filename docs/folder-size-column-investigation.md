@@ -2500,3 +2500,10 @@ NativeProbe Release 构建 0 警告/错误；Private Desktop watchdog exit 0，�
 - 应用启动时已从便携 profile 的 `ShellNamespace.ini` 读取稳定 CLSID，但当前用途是识别和序列化 provider 路径；应用尚未注册原生 adapter。隔离 owner 测试证明不同 profile 可独立注册、重开时复用 CLSID；也证明进程崩溃后 volatile HKCU 注册仍会留到登录会话结束，不能把注册所有权简单绑定到一次进程退出清理。
 
 因此下阶段若继续推进产品接线，应先在独立 NativeProbe/HostProbe 完成可复用的 profile namespace owner 生命周期：启动检查、并发窗口/进程的所有权、异常退出后 stale volatile key 恢复、正常关机的 COM/view 释放顺序和 profile 克隆身份重映射；然后才将 adapter 纳入 App build/package。仍需通过可见验收确认列绘制、滚动/排序、复制标签、外部文件变更和菜单行为。当前保持产品与 release 不变，也不把这个架构结论当作功能已完成。
+### 2026-11-02：复用现有 profile 单实例锁作为 namespace owner 边界
+
+进一步检查 `App.OnStartup`、`FolderOpenRouter` 与 `App.OnExit`：应用在创建窗口前通过 profile 目录内 `FileShare.None` 文件句柄取得单实例所有权；同 profile 的第二次启动向首个进程转发，首进程异常退出时 Windows 会释放句柄，锁文件本身可保留。该锁可以作为以后重建/清理 volatile Shell 注册的互斥边界，不必增加第二套 profile mutex。`MainWindow` 在每个窗口构造时从 profile 的 `ShellNamespace.ini` 读取相同稳定 CLSID；注册 owner 应放在 App 级而非 Pane/Tab 级。
+
+生命周期顺序约束：在 `FolderOpenRouter.TryStart` 成功之后、恢复任一 ExplorerBrowser 窗口之前检查并重建当前 profile 的 CLSID/NameSpace volatile 注册；正常退出时先销毁所有 view 并释放 namespace owner/注册，再释放 FolderOpenRouter 的 profile 锁，避免新进程抢锁后与旧注册清理交错。进程崩溃时锁会自动释放而 volatile 键仍存活，所以下次单实例启动可安全识别本 profile 的旧注册并重新建立。该结论是从已有生命周期代码与 probe 结果推导的接线顺序，尚未实现或运行。
+
+隔离预览发布脚本目前会复制 `ShellNamespace.ini`、会话注册表和各窗口会话；一旦这些状态含有 provider CLSID 的 parsing name，直接复制会让两个 profile 共用身份。产品接线前必须为副本分配新 CLSID，并在复制时重写所有窗口会话及其它已确认的 profile 内 provider parsing name；不能只改 INI 后保留旧路径。后续优先在纯配置/SessionStore smoke 中验证这种重映射，再实现 App 级 volatile owner 生命周期；仍不启用产品递归列或更新 release。
