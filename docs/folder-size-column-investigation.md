@@ -2301,3 +2301,5 @@ HostProbe Release build 0 警告/错误；`--shell-provider-location` exit 0，�
 继续验证 Shell 自己的 canonical 排序命令：在 Shell 已返回初始行后，执行一次相反方向命令，再隔一个 Dispatcher tick 执行会话保存的方向。真实产品 `ExplorerBrowserHost` 在 synthetic 注册 provider 上因此触发递归列比较器，并在完整 `IShellView.Refresh` 前收敛到目标顺序。宿主仅在非文件系统虚拟位置、无分组、恰有一个已保存排序键且该键对应可见未解析列时安排这两次命令；物理目录、标准已解析列和分组视图不进入此路径。排序命令通过现有 `IContextMenu` canonical verb 路径发送，不弹出右键菜单。
 
 HostProbe 为保存升序及降序分别构造初始会话，均验证首次完整刷新前行序与目标方向一致；完整探针仍通过导出、Shell 列值、菜单排序、Header 交互及普通文件系统 `PKEY_Size` 控制。Release build 0 警告/错误，两种方向的隐藏 `--shell-provider-location` 运行均 exit 0，父 HWND 不可见。没有可见 UI 证据；两条 Shell 命令分两个 100 ms Dispatcher tick 执行，是否出现短暂中间行序尚待 UI 检查。此为产品 Host 的注册 synthetic provider 原型，不表示递归列已部署到普通物理目录或 release。
+
+将第二次命令间隔试降至 16 ms 时，HostProbe 在 Shell 重新排列期间从 `IShellFolder2.GetDetailsEx` 读取项目返回 `E_FAIL`；这说明仅缩短延迟会与 Shell 行枚举竞争。恢复为已通过的 100 ms。当前没有可靠的“Shell 已完成此次重排”通知，因此不再缩短间隔；该失败发生于隔离隐藏 HostProbe，不是可见 UI 或产品文件操作的验收结果。
