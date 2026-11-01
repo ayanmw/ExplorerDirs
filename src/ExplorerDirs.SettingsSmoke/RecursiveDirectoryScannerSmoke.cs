@@ -31,6 +31,14 @@ internal static class RecursiveDirectoryScannerSmoke
             var requestedFolders = folderPaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
             var ownerThread = Environment.CurrentManagedThreadId;
             var published = new ConcurrentQueue<(string Path, ShellListViewRowScanResult Result, int WorkerThread)>();
+            var pendingOwnerUpdates = new ConcurrentQueue<(string Path, ShellListViewRowScanResult Result)>();
+            IReadOnlyList<ShellListViewRow> ownerRows = folderPaths.Select((path, index) =>
+            {
+                var identity = ShellListViewRowIdentity.GetFileSystemIdentity(path) ??
+                    throw new InvalidOperationException("The incremental row fixture did not produce a filesystem identity.");
+                return new ShellListViewRow(index + 1, 0, 0, Path.GetFileName(path), path, path,
+                    0x20000000, null, true, index) { FileSystemIdentity = identity };
+            }).ToArray();
             using var firstFolderReady = new ManualResetEventSlim();
             using var releaseFirstFolder = new ManualResetEventSlim();
             var firstCallbackEntered = 0;
@@ -38,6 +46,7 @@ internal static class RecursiveDirectoryScannerSmoke
                 rootPath, requestedPaths, CancellationToken.None, completedDirectory: (path, result) =>
                 {
                     published.Enqueue((path, result, Environment.CurrentManagedThreadId));
+                    pendingOwnerUpdates.Enqueue((path, result));
                     if (requestedFolders.Contains(path) && Interlocked.Exchange(ref firstCallbackEntered, 1) == 0)
                     {
                         firstFolderReady.Set();
@@ -67,17 +76,28 @@ internal static class RecursiveDirectoryScannerSmoke
                 throw new InvalidOperationException("A completed folder value was not available on the worker before the full tree scan completed.");
             }
 
-            // The owner reads the queued update while the worker is still paused in this callback.
-            var ownerApplied = new Dictionary<string, ShellListViewRowScanResult>(StringComparer.OrdinalIgnoreCase)
+            // The owner applies a queued result while the worker is still paused in this callback.
+            if (!pendingOwnerUpdates.TryDequeue(out var firstOwnerUpdate) || firstOwnerUpdate.Path != firstPublished.Path)
             {
-                [firstPublished.Path] = firstResult
-            };
+                releaseFirstFolder.Set();
+                throw new InvalidOperationException("The owner queue did not contain the completed directory row update.");
+            }
+            ownerRows = ShellListViewRowModel.ApplyRecursiveScanResult(ownerRows, firstOwnerUpdate.Path, firstOwnerUpdate.Result);
+            var firstAppliedRow = ownerRows.Single(row => string.Equals(row.FileSystemPath, firstPublished.Path, StringComparison.OrdinalIgnoreCase));
+            if (firstAppliedRow.RecursiveBytes != expectedBytes || ownerRows.Count(row => row.RecursiveSummary is not null) != 1)
+            {
+                releaseFirstFolder.Set();
+                throw new InvalidOperationException("Applying one queued directory result changed the wrong Shell rows or failed to update its target row.");
+            }
             releaseFirstFolder.Set();
             var finalResults = completedTask.GetAwaiter().GetResult();
             var completions = published.ToArray();
+            while (pendingOwnerUpdates.TryDequeue(out var update))
+                ownerRows = ShellListViewRowModel.ApplyRecursiveScanResult(ownerRows, update.Path, update.Result);
             if (completions.Length != requestedPaths.Length || completions[^1].Path != rootPath ||
                 completions.Any(item => item.Result != finalResults[item.Path]) ||
-                ownerApplied[firstPublished.Path] != finalResults[firstPublished.Path])
+                ownerRows.Any(row => row.RecursiveSummary is not { } summary ||
+                    !finalResults.TryGetValue(row.FileSystemPath!, out var result) || summary != result.Summary))
                 throw new InvalidOperationException("Incremental directory callbacks did not reconcile with the final handle-bound scan results.");
 
             using var cancellation = new CancellationTokenSource();
@@ -132,6 +152,7 @@ internal static class RecursiveDirectoryScannerSmoke
             Console.WriteLine($"incremental-directory-tree-publish: requested-folders={folderCount}; " +
                 $"first-folder-published-before-root-completion=True; owner-thread={ownerThread}; " +
                 $"worker-thread={firstPublished.WorkerThread}; completed-callbacks={completions.Length}; " +
+                "owner-row-model-applied-incrementally=True; " +
                 $"root-published-last={completions[^1].Path == rootPath}; cancellation-after-one-folder=True; " +
                 "missing-child-publishes-unreadable-row=True; " +
                 $"root-published-after-cancel=False; handles-released-after-cancel=True");
