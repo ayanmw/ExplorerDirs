@@ -2514,3 +2514,9 @@ NativeProbe Release 构建 0 警告/错误；Private Desktop watchdog exit 0，�
 此 smoke 当前没有用生产 `SessionStore.Parse` 读回重映射后的合法窗口会话：其 `ExplorerDirs.ini` 和第二窗口 fixture 只有简化 `Path=...` 文本，所以它证明发布脚本替换文本，不单独证明 SessionStore 的实际完整格式能恢复新路径。另从生产 `QuickLinkStore.AddFolderLocation` 确认，普通/虚拟 Shell 文件夹使用 `IShellLink.SetIDList` 写 PIDL；隔离发布会原样复制 `QuickLinks/*.lnk`，不读取或重写二进制 PIDL。若链接指向本程序 provider，旧 CLSID 可能仍存在于副本中。当前产品尚未注册该 provider，因此实际用户链接路径尚未产生；这属于 provider 集成前仍需关闭的克隆兼容缺口。
 
 下一步为有效 `SessionStore` profile 做新旧 CLSID 的解析往返验证，并确定是否能安全识别/重建 `.lnk` 的 provider PIDL；不能识别的链接需明确保留原始目标或在隔离副本中跳过，不能静默导向另一 profile。此轮无窗口、无产品代码或 release 变更。
+
+### 2026-11-02：profile 克隆会话的生产解析往返 smoke
+
+新增 `--shell-namespace-profile-clone-smoke`，用生产 `SessionStore.Render` 生成带 provider parsing name 的完整会话，将其中 CLSID 改为隔离副本身份后再经 `SessionStore.ParseComplete` 读回，并核对新路径、视图模式和排序方向。定向 smoke 通过；`scripts/publish-smoke.ps1` 也再次通过。首次构建发现新用例漏传 `ViewState.GroupKey` 且 CLI 分支使用了未限定命名空间，修正后 Release `dotnet run` exit 0。
+
+这补上了此前发布 smoke 的会话格式缺口，仍只验证有效会话文本重映射；未验证 QuickLinks `.lnk` 内 PIDL 的 provider CLSID、实际克隆 profile 启动或注册 owner 生命周期。没有启动 GUI、修改产品运行配置或触碰 release。下一步先用 Shell Link COM 接口读取/识别隔离测试链接是否指向旧 provider，再决定可安全重写的边界；逐行递归大小列仍未接入产品。

@@ -15,6 +15,12 @@ if (args is ["--shell-provider-profile-store-smoke"])
     return;
 }
 
+if (args is ["--shell-namespace-profile-clone-smoke"])
+{
+    ExplorerDirs.SettingsSmoke.ShellNamespaceProfileCloneSmoke.Run();
+    return;
+}
+
 if (args is ["--column-layout-process-roundtrip"])
 {
     ExplorerDirs.SettingsSmoke.ColumnLayoutProcessSmoke.Run();
