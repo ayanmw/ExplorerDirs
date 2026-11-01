@@ -12,6 +12,9 @@ internal static class ShellRefreshPresentationSmoke
         var modeStart = host.IndexOf("public bool SetViewStyle(ViewStyle style)", StringComparison.Ordinal);
         var modeEnd = host.IndexOf("private void QueueViewStyleCapture", modeStart, StringComparison.Ordinal);
         var modePath = modeStart >= 0 && modeEnd > modeStart ? host[modeStart..modeEnd] : string.Empty;
+        var sortStart = host.IndexOf("private void ScheduleInitialVirtualSort", StringComparison.Ordinal);
+        var sortEnd = host.IndexOf("private bool HasPendingUnresolvedColumnValues", sortStart, StringComparison.Ordinal);
+        var sortPath = sortStart >= 0 && sortEnd > sortStart ? host[sortStart..sortEnd] : string.Empty;
         var refreshStart = host.IndexOf("private void Refresh(Action? afterRefresh, bool traceAsUserRefresh", StringComparison.Ordinal);
         var refreshEnd = host.IndexOf("private (bool SelectionRestored", refreshStart, StringComparison.Ordinal);
         var refreshPath = refreshStart >= 0 && refreshEnd > refreshStart ? host[refreshStart..refreshEnd] : string.Empty;
@@ -25,6 +28,19 @@ internal static class ShellRefreshPresentationSmoke
                 modePath.IndexOf("ShellViewRedrawLease.TrySuppress(view)", StringComparison.Ordinal) &&
             !modePath.Contains("Refresh(", StringComparison.Ordinal) && !modePath.Contains("Navigate(", StringComparison.Ordinal),
             "view-style changes invalidate the existing native view after restoring redraw from the scoped mode setter");
+        var sortLeaseCall = sortPath.IndexOf("ShellViewRedrawLease.TrySuppress(sortView)", StringComparison.Ordinal);
+        var oppositeSortCall = sortPath.IndexOf("InvokeVirtualSortVerb(oppositeVerb, IsCurrent)", StringComparison.Ordinal);
+        Check(sortLeaseCall >= 0 && oppositeSortCall > sortLeaseCall &&
+            sortPath.Contains("ReadDirectoryMonitorItemCount() != readinessItemCount", StringComparison.Ordinal) &&
+            sortPath.Contains("savedApplied", StringComparison.Ordinal) &&
+            sortPath.Contains("ReleaseInitialVirtualSortRedrawLease", StringComparison.Ordinal) &&
+            host.Contains("private void ReleaseInitialVirtualSortRedrawLease", StringComparison.Ordinal),
+            "initial virtual sorting freezes native redraw across both Shell sort directions and releases after rows return");
+        var disposeStart = host.IndexOf("private void DisposeBrowser()", StringComparison.Ordinal);
+        var detachStart = host.IndexOf("private void DetachViewWindow()", StringComparison.Ordinal);
+        Check(disposeStart >= 0 && host.IndexOf("ReleaseInitialVirtualSortRedrawLease(requestRedraw: false)", disposeStart, StringComparison.Ordinal) >= 0 &&
+            detachStart >= 0 && host.IndexOf("ReleaseInitialVirtualSortRedrawLease(requestRedraw: false)", detachStart, StringComparison.Ordinal) >= 0,
+            "closing or navigating away releases a pending initial-sort redraw lease");
         Check(refreshPath.Contains("shellView.Refresh()", StringComparison.Ordinal) &&
             !refreshPath.Contains("ShellViewRedrawLease.TrySuppress(folderView)", StringComparison.Ordinal) &&
             !refreshPath.Contains("refreshRedrawLease", StringComparison.Ordinal) &&

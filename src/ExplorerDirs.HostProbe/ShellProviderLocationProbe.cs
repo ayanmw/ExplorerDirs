@@ -54,6 +54,7 @@ internal static class ShellProviderLocationProbe
         ShellItemUpdateObserver? filesystemUpdateObserver = null;
         ShellItemUpdateObserver? desktopUpdateObserver = null;
         HwndHost? host = null;
+        NativePaintMessageProbe? initialVirtualSortPaintProbe = null;
         var foregroundBefore = GetForegroundWindow();
         try
         {
@@ -164,6 +165,8 @@ internal static class ShellProviderLocationProbe
             {
                 throw new TimeoutException($"{exception.Message}; native-listview-item-counts=[{string.Join('|', initialListViewCounts.Order())}]", exception);
             }
+            if (largeSortReadiness)
+                initialVirtualSortPaintProbe = new NativePaintMessageProbe(FindNativeListView((nint)viewWindowField.GetValue(host)!));
 
             string[] selectedBeforeNotification = [];
             string? focusedRowBeforeNotification = null;
@@ -537,6 +540,7 @@ internal static class ShellProviderLocationProbe
             else if (sortStrategy is "scheduled" or "large-readiness")
             {
                 stage = "production-initial-sort-after-async-fill";
+                if (largeSortReadiness) initialVirtualSortPaintProbe?.Clear();
                 ResetProductCompareDiagnostics(adapter);
                 var largeReadinessCountTrace = largeSortReadiness ? new List<string>() : null;
                 var observation = largeSortReadiness
@@ -549,7 +553,7 @@ internal static class ShellProviderLocationProbe
                     throw new TimeoutException("The production navigation restore did not sort by recursive size after asynchronous values completed.");
                 if (largeSortReadiness)
                 {
-                    Console.WriteLine($"shell-provider-product-async-large-readiness: rows={expectedFolderCount}; complete-readiness-scan-ms={readinessClock.Elapsed.TotalMilliseconds:F2}; batched-scan-ms={batchReadinessClock.Elapsed.TotalMilliseconds:F2}; batches={readinessBatchCount}; max-batch-ms={maximumBatchMilliseconds:F2}; auto-resorted-before-observation={autoResorted}; final-order-valid=True; first={observation.Names[0]}; last={observation.Names[^1]}; shell-counts=[{string.Join('|', observation.ShellItemCounts)}]; listview-counts=[{string.Join('|', observation.NativeListViewCounts)}]; export-counts=[{string.Join('|', observation.ExportRowCounts)}]; count-transitions=[{string.Join('|', largeReadinessCountTrace ?? [])}]; foreground-unchanged=True");
+                    Console.WriteLine($"shell-provider-product-async-large-readiness: rows={expectedFolderCount}; complete-readiness-scan-ms={readinessClock.Elapsed.TotalMilliseconds:F2}; batched-scan-ms={batchReadinessClock.Elapsed.TotalMilliseconds:F2}; batches={readinessBatchCount}; max-batch-ms={maximumBatchMilliseconds:F2}; auto-resorted-before-observation={autoResorted}; final-order-valid=True; first={observation.Names[0]}; last={observation.Names[^1]}; shell-counts=[{string.Join('|', observation.ShellItemCounts)}]; listview-counts=[{string.Join('|', observation.NativeListViewCounts)}]; export-counts=[{string.Join('|', observation.ExportRowCounts)}]; count-transitions=[{string.Join('|', largeReadinessCountTrace ?? [])}]; paint-messages=[{string.Join('|', initialVirtualSortPaintProbe?.Messages ?? [])}]; foreground-unchanged=True");
                 }
                 else ReportSortExperiment("automatic-after-fill", orderAfterAsyncFill, autoResorted, 0, observation, classId);
                 Console.WriteLine($"shell-provider-product-async-scheduled-sort-state: sort-columns=[{string.Join('|', CaptureSortColumns(hostType, host))}]; compare-trace=[{string.Join(" || ", compareDiagnosticsAfterScheduledSort)}]");
@@ -597,6 +601,7 @@ internal static class ShellProviderLocationProbe
         }
         finally
         {
+            initialVirtualSortPaintProbe?.Dispose();
             itemUpdateObserver?.Dispose();
             filesystemUpdateObserver?.Dispose();
             desktopUpdateObserver?.Dispose();
@@ -2300,6 +2305,8 @@ internal static class ShellProviderLocationProbe
         }
 
         public IReadOnlyList<string> Messages => _messages;
+
+        public void Clear() => _messages.Clear();
 
         private nint OnMessage(nint window, uint message, nint wParam, nint lParam, nuint subclassId, nint referenceData)
         {

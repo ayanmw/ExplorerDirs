@@ -58,6 +58,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private IntPtr _viewWindow;
     private readonly List<IntPtr> _subclassedWindows = new();
     private bool _nativeThemeRefreshQueued;
+    private ShellViewRedrawLease? _initialVirtualSortRedrawLease;
+    private IntPtr _initialVirtualSortRedrawWindow;
     private readonly ViewStyleWheelAccumulator _ctrlWheelAccumulator = new();
     private readonly Dictionary<uint, int> _nativeUserMessages = new();
     private readonly Dictionary<IntPtr, string> _nativeViewWindowClasses = new();
@@ -2713,7 +2715,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private void ScheduleInitialVirtualSort(SortColumnState sort, Func<bool> isCurrent)
     {
+        ReleaseInitialVirtualSortRedrawLease();
         var oppositeApplied = false;
+        var savedApplied = false;
         var readinessWait = Stopwatch.StartNew();
         var expectedInputVersion = Interlocked.Read(ref _nativeUserInputVersion);
         var readinessRow = 0;
@@ -2730,8 +2734,40 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             timer.Stop();
             if (!IsCurrent() || readinessWait.Elapsed >= TimeSpan.FromSeconds(12))
             {
+                ReleaseInitialVirtualSortRedrawLease();
                 return;
             }
+
+            if (_initialVirtualSortRedrawLease is not null && oppositeApplied)
+            {
+                if (ReadDirectoryMonitorItemCount() != readinessItemCount)
+                {
+                    timer.Start();
+                    return;
+                }
+
+                if (!savedApplied)
+                {
+                    var savedSortVerb = sort.Direction > 0 ? "sortascending" : "sortdescending";
+                    try { savedApplied = InvokeVirtualSortVerb(savedSortVerb, IsCurrent); }
+                    catch
+                    {
+                        ReleaseInitialVirtualSortRedrawLease();
+                        throw;
+                    }
+                    if (!savedApplied)
+                    {
+                        ReleaseInitialVirtualSortRedrawLease();
+                        return;
+                    }
+                    timer.Start();
+                    return;
+                }
+
+                ReleaseInitialVirtualSortRedrawLease();
+                return;
+            }
+
             var itemCount = ReadDirectoryMonitorItemCount();
             if (_viewReadiness.Pending || itemCount is not > 0)
             {
@@ -2820,8 +2856,33 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             var savedVerb = sort.Direction > 0 ? "sortascending" : "sortdescending";
             if (!oppositeApplied)
             {
-                oppositeApplied = InvokeVirtualSortVerb(oppositeVerb, IsCurrent);
-                if (!oppositeApplied) timer.Stop();
+                var sortView = GetFolderView2Pointer();
+                if (sortView != IntPtr.Zero)
+                {
+                    try
+                    {
+                        _initialVirtualSortRedrawLease = ShellViewRedrawLease.TrySuppress(sortView);
+                        if (_initialVirtualSortRedrawLease is not null)
+                            _initialVirtualSortRedrawWindow = _viewWindow;
+                    }
+                    catch (COMException)
+                    {
+                        ReleaseInitialVirtualSortRedrawLease(requestRedraw: false);
+                    }
+                    finally { Marshal.Release(sortView); }
+                }
+
+                try { oppositeApplied = InvokeVirtualSortVerb(oppositeVerb, IsCurrent); }
+                catch
+                {
+                    ReleaseInitialVirtualSortRedrawLease();
+                    throw;
+                }
+                if (!oppositeApplied)
+                {
+                    timer.Stop();
+                    ReleaseInitialVirtualSortRedrawLease();
+                }
                 else expectedInputVersion = Interlocked.Read(ref _nativeUserInputVersion);
                 if (oppositeApplied) timer.Start();
                 return;
@@ -2830,6 +2891,15 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             _ = InvokeVirtualSortVerb(savedVerb, IsCurrent);
         };
         timer.Start();
+    }
+
+    private void ReleaseInitialVirtualSortRedrawLease(bool requestRedraw = true)
+    {
+        var lease = Interlocked.Exchange(ref _initialVirtualSortRedrawLease, null);
+        var viewWindow = Interlocked.Exchange(ref _initialVirtualSortRedrawWindow, IntPtr.Zero);
+        lease?.Dispose();
+        if (requestRedraw && viewWindow != IntPtr.Zero && viewWindow == _viewWindow && IsWindow(viewWindow))
+            _ = RedrawWindow(viewWindow, IntPtr.Zero, IntPtr.Zero, RedrawInvalidateNoEraseChildrenAndFrame);
     }
 
     private bool HasPendingUnresolvedColumnValues(SortColumnState sort, Func<bool> isCurrent)
@@ -5049,6 +5119,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private void DisposeBrowser()
     {
+        ReleaseInitialVirtualSortRedrawLease(requestRedraw: false);
         _viewStyleCaptureOperation?.Abort();
         _viewStyleCaptureOperation = null;
         _quickFilterRequestVersion++;
@@ -5433,6 +5504,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private void DetachViewWindow()
     {
+        ReleaseInitialVirtualSortRedrawLease(requestRedraw: false);
         foreach (var hwnd in _subclassedWindows)
         {
             RemoveWindowSubclass(hwnd, _subclassProc, 1);
