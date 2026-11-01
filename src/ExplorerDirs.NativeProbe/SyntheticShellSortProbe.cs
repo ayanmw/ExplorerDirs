@@ -344,6 +344,7 @@ public static class SyntheticShellSortProbe
         var asyncScanDelayText = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_SCAN_DELAY_MS");
         var asyncScanDelayMs = string.IsNullOrWhiteSpace(asyncScanDelayText) ? 0 :
             int.TryParse(asyncScanDelayText, out var parsedAsyncScanDelayMs) ? parsedAsyncScanDelayMs : -1;
+        var asyncMinimalFixture = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_MINIMAL_FIXTURE") == "1";
         if (asyncScanDelayMs is < 0 or > 1000)
             throw new ArgumentOutOfRangeException(nameof(asyncScanDelayText), "Async scan latency injection must be between 0 and 1000 milliseconds.");
         var asyncBatchViewCount = asyncSharedViewProbe ? asyncSharedViewCount : 1;
@@ -421,7 +422,7 @@ public static class SyntheticShellSortProbe
                     {
                         var loadProbeFolder = Path.Combine(backingFolder, $"folder-{folderIndex:D3}");
                         Directory.CreateDirectory(loadProbeFolder);
-                        for (var fileIndex = 0; fileIndex < 10; fileIndex++)
+                        for (var fileIndex = 0; fileIndex < (asyncMinimalFixture ? 1 : 10); fileIndex++)
                             File.WriteAllBytes(Path.Combine(loadProbeFolder, $"item-{fileIndex:D2}.bin"),
                                 largeViewSortProbe && (folderIndex == 0 || folderIndex == 400) && fileIndex == 0 ? new byte[11] : [0x01]);
                     }
@@ -439,7 +440,7 @@ public static class SyntheticShellSortProbe
                         {
                             var loadProbeFolder = Path.Combine(panePath, $"folder-{folderIndex:D3}");
                             Directory.CreateDirectory(loadProbeFolder);
-                            for (var fileIndex = 0; fileIndex < 10; fileIndex++)
+                            for (var fileIndex = 0; fileIndex < (asyncMinimalFixture ? 1 : 10); fileIndex++)
                                 File.WriteAllBytes(Path.Combine(loadProbeFolder, $"item-{fileIndex:D2}.bin"), [0x01]);
                         }
                     }
@@ -718,6 +719,26 @@ public static class SyntheticShellSortProbe
                     : Array.Empty<string>();
                 var additionalInitialNames = additionalListViews
                     .Select(listView => WaitForNames(listView, module, "child", expectedCount: expectedInitialCount)).ToArray();
+                if (asyncSharedViewProbe)
+                {
+                    // Wait for DefView's deferred initial enumeration to finish before assigning focus anchors.
+                    var settleDeadline = Environment.TickCount64 + 10_000;
+                    var stableSince = Environment.TickCount64;
+                    var lastEnumerationCount = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+                    while (Environment.TickCount64 < settleDeadline && Environment.TickCount64 - stableSince < 1_000)
+                    {
+                        Pump(25);
+                        var enumerationCount = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+                        if (enumerationCount != lastEnumerationCount)
+                        {
+                            lastEnumerationCount = enumerationCount;
+                            stableSince = Environment.TickCount64;
+                        }
+                    }
+                    if (Environment.TickCount64 >= settleDeadline)
+                        throw new TimeoutException("The four Shell views did not finish their initial enumeration before selection/focus setup.");
+                    Console.WriteLine($"synthetic-async-recursive-size-initial-view-settled: quiet-ms={Environment.TickCount64 - stableSince}; enumerations={lastEnumerationCount}");
+                }
                 var onDemandScanCount = onDemandRecursiveSize ? ReadCounter(module, "GetSyntheticOnDemandSizeScanCount") : 0;
                 var onDemandMetricCalls = onDemandRecursiveSize ? ReadCounter(module, "GetSyntheticDirectoryMetricsCallCount") : 0;
                 var onDemandMetricEntries = onDemandRecursiveSize ? ReadCounter(module, "GetSyntheticDirectoryMetricsEntryCount") : 0;
@@ -766,8 +787,10 @@ public static class SyntheticShellSortProbe
                     {
                         "small.bin" => "4",
                         "child" when largeViewSortProbe => "30",
+                        "child" => "10",
                         "folder-000" when largeViewSortProbe => "20",
                         "folder-400" when largeViewSortProbe => "20",
+                        _ when asyncMinimalFixture && name.StartsWith("folder-", StringComparison.OrdinalIgnoreCase) => "1",
                         _ => "10"
                     };
                     bool AllAsyncColumnValuesReady(string[] names, string[] sizes)
@@ -807,6 +830,34 @@ public static class SyntheticShellSortProbe
                         {
                             additionalInitialNames[index] = WaitForNames(additionalListViews[index], module, "child", expectedCount: expectedInitialCount);
                             additionalInitialSizes[index] = ReadColumnTexts(additionalListViews[index], module, 1, expectedCount: expectedInitialCount);
+                        }
+                    }
+                    var sharedSelectionNames = asyncSharedViewProbe
+                        ? new[] { "folder-000" }.Concat(Enumerable.Range(1, asyncSharedViewCount - 1)
+                            .Select(index => $"folder-{index:D3}")).ToArray()
+                        : Array.Empty<string>();
+                    var sharedListViewsForDiagnostics = asyncSharedViewProbe
+                        ? new[] { sizeListView, sharedSizeListView }.Concat(additionalListViews).ToArray()
+                        : Array.Empty<nint>();
+                    var sharedNamesForDiagnostics = asyncSharedViewProbe
+                        ? new[] { initialNames, sharedInitialNames }.Concat(additionalInitialNames).ToArray()
+                        : Array.Empty<string[]>();
+                    var selectionStateForDiagnostics = asyncSharedViewProbe
+                        ? sharedListViewsForDiagnostics.Select((listView, index) =>
+                            HasSelectionAndFocus(listView, sharedNamesForDiagnostics[index], sharedSelectionNames[index])).ToArray()
+                        : Array.Empty<bool>();
+                    void TrackSharedSelectionTransitions(string stage)
+                    {
+                        if (!asyncQueueSaturationProbe) return;
+                        for (var index = 0; index < sharedListViewsForDiagnostics.Length; index++)
+                        {
+                            var selected = HasSelectionAndFocus(sharedListViewsForDiagnostics[index],
+                                sharedNamesForDiagnostics[index], sharedSelectionNames[index]);
+                            if (selected != selectionStateForDiagnostics[index])
+                            {
+                                Console.WriteLine($"synthetic-async-recursive-size-selection-transition: stage={stage}; view={index + 1}; selected-focused={selectionStateForDiagnostics[index]}->{selected}; completed-scans={ReadCounter(module, "GetSyntheticAsyncRecursiveSizeScanFinishedCountForProbe")}; notifications={ReadCounter(module, "GetSyntheticAsyncRecursiveSizeNotificationCountForProbe")}; enum-delta={ReadCounter(module, "GetSyntheticEnumObjectsCount") - initialEnumerationCount}");
+                                selectionStateForDiagnostics[index] = selected;
+                            }
                         }
                     }
                     var expectedAsyncScanCount = (onDemandFolderCount + 1) * (asyncSharedViewDistinctRoots ? asyncSharedViewCount : 1);
@@ -914,7 +965,10 @@ public static class SyntheticShellSortProbe
                         var getFinishedScans = Marshal.GetDelegateForFunctionPointer<NativeLibraryUnloadContractSmoke>(
                             NativeLibrary.GetExport(module, "GetSyntheticAsyncRecursiveSizeScanFinishedCountForProbe"));
                         while (getFinishedScans() < finishedTaskTarget && Environment.TickCount64 < acceptedDrainDeadline)
+                        {
                             Pump(25);
+                            TrackSharedSelectionTransitions("scan-drain");
+                        }
                     }
                     var allAsyncColumnValuesReady = AllAsyncColumnValuesReady(initialNames, initialSizes);
                     var allSharedAsyncColumnValuesReady = AllSharedAsyncColumnValuesReady();
@@ -922,6 +976,7 @@ public static class SyntheticShellSortProbe
                     while ((!allAsyncColumnValuesReady || !allSharedAsyncColumnValuesReady) && Environment.TickCount64 < convergenceDeadline)
                     {
                         Pump(25);
+                        TrackSharedSelectionTransitions("view-convergence");
                         initialNames = ReadNames(sizeListView, module, expectedCount: expectedInitialCount);
                         initialSizes = ReadColumnTexts(sizeListView, module, 1, expectedCount: expectedInitialCount);
                         allAsyncColumnValuesReady = AllAsyncColumnValuesReady(initialNames, initialSizes);

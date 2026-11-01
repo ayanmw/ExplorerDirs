@@ -1632,3 +1632,11 @@ NativeProbe Release 构建通过，子进程均退出码 0；Private Desktop 探
 新增无窗口原生合同，先在共享 `SyntheticRecursiveSizeSnapshotStore` 写入一条带 file identity 的快照，确认缓存计数为 1；随后调用 `DllCanUnloadNow`，验证模块空闲时释放 DLL 持有的共享 store；再次获取 store 后确认从空缓存开始，再次空闲检查成功。这个检查覆盖 store 的显式 DLL 卸载清理分支，不要求真正从进程地址空间卸载 DLL，因 NativeProbe 仍持有本地模块句柄。该命令先因导出缺失按预期失败，添加合同后连续三轮通过。
 
 原生 adapter `/W4 /WX`、NativeProbe Release（0 警告/错误）、`--static-shell-column-folder-smoke` 与 `--synthetic-async-on-demand-recursive-size-column-smoke` 均通过。它证明快照不会因 DLL 的共享引用跨过成功的 `DllCanUnloadNow` 空闲门槛；不证明仍被 Shell 持有的 provider/cache 会提前释放，也不取代注册 namespace Private Desktop 运行期间的 store 容量或多窗格压力测量。产品与 release 未改。
+
+### 2026-11-01：四视图初始枚举与焦点建立时序
+
+在原 500 目录/四个不同根压力场景中，偶发第四 view 选区/焦点丢失。新增 transition trace 后复现：丢失发生在扫描排空阶段，已完成 431 次扫描、Shell 更新通知数仍为 0，但 `EnumObjects` 总增量已多 1 次。由此定位到探针在 `WaitForNames` 首次读齐行后立即设置焦点；DefView 仍可能稍后完成一次初始枚举并清掉该状态，问题与递归大小更新通知无关（这是基于事件顺序的根因判断）。
+
+探针现在在所有 view 初始行数齐备后，等待 `EnumObjects` 计数连续安静 1 秒，再设置独立选区/焦点；同时保留仅诊断时输出状态转移的记录。调整后，200 目录/四视图、500 目录/四视图最小内容夹具，以及 500 目录/四视图原始夹具均通过。原始夹具结果：2,004 次唯一扫描、队列拒绝 0、重复扫描 0、通知 4、聚合枚举增量 4、四份 502/502 值正确，四份选区与焦点全保留；前台 HWND 与最后输入不变，watchdog exit 0。日志：`src/.state/native-probe-watchdog/20261101-160829-7a1f4dd3.stdout.log`（焦点丢失转移的定位样本）、`src/.state/native-probe-watchdog/20261101-160722-67ff309f.stdout.log`（200 目录回归）、`src/.state/native-probe-watchdog/20261101-161025-b53e63ed.stdout.log`（500 目录最小夹具）、`src/.state/native-probe-watchdog/20261101-161107-788ad7f9.stdout.log`（500 目录原始夹具通过）。
+
+这是 NativeProbe 隐藏 DefView 的初始化时序修正与压力合同，不是产品 ExplorerBrowser 接线，也不证明可见应用在切换窗格时的焦点行为。先前一次大夹具诊断运行在 view 建立/清理阶段超时，未进入焦点断言，视为无结论；之后原始夹具运行正常完成。
