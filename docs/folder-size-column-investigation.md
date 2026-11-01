@@ -2383,3 +2383,9 @@ HostProbe Release 构建通过，四种隐藏合成视图场景（正常/忽略�
 在同一隔离 Private Desktop 环境做 paired baseline：不设置特殊位时，Desktop 默认 `EnumObjects(SHCONTF_FOLDERS)` 与加 `SHCONTF_INCLUDEHIDDEN` 的枚举都找到随机 namespace 根；只设置根的 `ShellFolder\Attributes` `SFGAO_NONENUMERATED` 位后，两种枚举都不再返回它。后一轮仍成功通过完整 ExplorerBrowser Host 合同，包括 parsing-name 激活、递归列、文件操作和嵌套导航；临时 CLSID/NameSpace 清理、前台和输入守卫通过，exit 0。该行为符合 Microsoft 对 `SFGAO_NONENUMERATED` 的文档定义：该项不由 `IShellFolder::EnumObjects` 返回；`SFGAO_HIDDEN` 仅表示依据 Folder Settings 决定是否显示，不能替代此标志。[SFGAO 标志](https://learn.microsoft.com/en-us/windows/win32/shell/sfgao) · [GetAttributesOf 对 NONENUMERATED 的说明](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-getattributesof)
 
 这使“Namespace 注册必然进入 Desktop 默认项目枚举”的顾虑在原型中有了可行规避方式，但仍不等同于实际 Desktop DefView 像素验收，也不证明产品固定 CLSID 的并行进程所有权、崩溃清理或便携发布。`FolderOpenRouter` 仍显示同 profile 单实例、不同 profile 可并行；后续要么按 profile 生成隔离 CLSID 并验证跨会话恢复，要么为共享 CLSID 设计进程间 owner 生命周期。当前仅 NativeProbe 使用该标志，产品未接入。
+
+### 2026-11-02：volatile namespace 的进程间 owner 退出影响
+
+隔离 HostProbe 完成所有常规 namespace 操作后，另起 NativeProbe 子进程删除随机 CLSID 与 Desktop NameSpace 两棵 volatile 注册。删除后子进程立即尝试新路径解析，`SHParseDisplayName` 返回 `E_INVALIDARG (0x80070057)`，没有获得 PIDL，也未激活新 Shell folder。原父进程持有的 ExplorerBrowser view 仍可查询：Shell 行数保持 8，`root.txt` 的递归列值仍为 4。子进程、父 view 与注册清理断言均通过，前台/输入守卫未变化，Private Desktop probe exit 0。
+
+这证明“已创建的 view 在进程间注册被删除后仍暂时可读”不代表新窗格/新进程还能解析该位置；注册 owner 至少要覆盖所有仍需创建 namespace view 的 app 进程。当前 `FolderOpenRouter` 的单实例边界按 profile，而非全局，因此可并行 profile 不应共用一个会被任一进程删除的 CLSID。下一步优先评估把稳定 CLSID 放进每个 portable profile 的 INI（不同 profile 独立命名、同 profile 由现有单实例进程负责），并验证 profile 迁移、异常退出后同会话残留 volatile key 的恢复；尚未接入产品。该实验仅模拟 sibling owner 删除注册，不证明不同用户、提升权限或 Explorer 长期持有 view 的场景。

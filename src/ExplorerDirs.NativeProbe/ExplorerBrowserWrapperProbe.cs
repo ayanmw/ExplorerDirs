@@ -129,7 +129,7 @@ internal static class ExplorerBrowserWrapperProbe
     }
 
     internal static int RunNamespace(bool volatileRegistryRegistration = false, bool hideNamespaceRootFromDesktop = false,
-        bool nonEnumeratedNamespaceRoot = false)
+        bool nonEnumeratedNamespaceRoot = false, bool probeNamespaceOwnerExit = false)
     {
         var classId = Guid.NewGuid();
         var classKeyPath = $@"Software\Classes\CLSID\{{{classId:D}}}";
@@ -648,8 +648,11 @@ internal static class ExplorerBrowserWrapperProbe
                 ref viewFolder, ref persist, ref currentPidl);
             VerifyConcurrentExplorerBrowserRoots(browser, classId, rootPidl, peerFixture, nativeLibrary,
                 shellView, folderView, viewFolder, currentPidl);
-            VerifyExplorerBrowserDestroyDuringRecursiveScan(browser, shellView, viewFolder, nativeLibrary,
-                rootPidl, fixture, ref initialized);
+            if (probeNamespaceOwnerExit)
+                VerifyNamespaceOwnerExitFromChildProcess(classId, folderView, viewFolder);
+            else
+                VerifyExplorerBrowserDestroyDuringRecursiveScan(browser, shellView, viewFolder, nativeLibrary,
+                    rootPidl, fixture, ref initialized);
             return 0;
         }
         finally
@@ -1308,6 +1311,67 @@ internal static class ExplorerBrowserWrapperProbe
         finally { Marshal.FreeCoTaskMem(parentPidl); }
         Console.WriteLine($"external-shell-notification-child: created=True; item-and-parent-notified=True; pid={Environment.ProcessId}");
         return 0;
+    }
+
+    internal static int RunNamespaceOwnerExitChild(string classIdText)
+    {
+        var classId = Guid.Parse(classIdText);
+        var classKeyPath = $@"Software\Classes\CLSID\{{{classId:D}}}";
+        var namespaceKeyPath = $@"Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{{{classId:D}}}";
+        Registry.CurrentUser.DeleteSubKeyTree(namespaceKeyPath, throwOnMissingSubKey: false);
+        Registry.CurrentUser.DeleteSubKeyTree(classKeyPath, throwOnMissingSubKey: false);
+
+        var parseHr = SHParseDisplayName($"::{{{classId:D}}}", 0, out var pidl, 0, out _);
+        var bindHr = int.MinValue;
+        if (parseHr >= 0 && pidl != 0)
+        {
+            try
+            {
+                var shellFolderId = ShellFolder2Id;
+                bindHr = SHBindToObject(0, pidl, 0, ref shellFolderId, out var folder);
+                if (folder != 0) Marshal.Release(folder);
+            }
+            finally { Marshal.FreeCoTaskMem(pidl); }
+        }
+        var activated = parseHr >= 0 && bindHr >= 0;
+        Console.WriteLine($"namespace-owner-exit-child: pid={Environment.ProcessId}; registrations-removed=True; fresh-process-parse-hr=0x{parseHr:X8}; fresh-process-bind-hr=0x{bindHr:X8}; fresh-process-activated={activated}");
+        return activated ? 3 : 0;
+    }
+
+    private static void VerifyNamespaceOwnerExitFromChildProcess(Guid classId, nint folderView, nint viewFolder)
+    {
+        Marshal.ThrowExceptionForHR(At<GetItemCount>(folderView, 7)(folderView, 2, out var countBefore));
+        var start = new ProcessStartInfo("dotnet")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            WorkingDirectory = AppContext.BaseDirectory
+        };
+        start.ArgumentList.Add(typeof(ExplorerBrowserWrapperProbe).Assembly.Location);
+        start.ArgumentList.Add("--shell-namespace-owner-exit-child");
+        start.ArgumentList.Add(classId.ToString("D"));
+        using var child = Process.Start(start)
+            ?? throw new InvalidOperationException("Could not start the isolated namespace-owner child process.");
+        if (!child.WaitForExit(15_000))
+        {
+            child.Kill(entireProcessTree: true);
+            child.WaitForExit();
+            throw new TimeoutException("The isolated namespace-owner child did not exit within 15 seconds.");
+        }
+        var output = child.StandardOutput.ReadToEnd();
+        var error = child.StandardError.ReadToEnd();
+        if (child.ExitCode != 0)
+            throw new InvalidOperationException($"Namespace-owner child exited {child.ExitCode}: {output}{error}");
+
+        Marshal.ThrowExceptionForHR(At<GetItemCount>(folderView, 7)(folderView, 2, out var countAfter));
+        var stillReadable = countAfter == countBefore && ReadParsedItemDetailsByName(viewFolder, "root.txt", 1) == "4";
+        var registrationsRemoved = Registry.CurrentUser.OpenSubKey($@"Software\Classes\CLSID\{{{classId:D}}}") is null &&
+            Registry.CurrentUser.OpenSubKey($@"Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{{{classId:D}}}") is null;
+        Console.WriteLine($"explorerbrowser-registered-namespace-owner-lifecycle: child-exit={child.ExitCode}; registrations-removed={registrationsRemoved}; fresh-process-result={output.Trim()}; existing-view-rows={countBefore}->{countAfter}; existing-view-readable={stillReadable}");
+        if (!registrationsRemoved || !stillReadable)
+            throw new InvalidOperationException("Deleting temporary registration from a peer process invalidated registration cleanup or the already-open Shell view.");
     }
 
     private static int RunExternalShellNotificationChild(string path, byte[] contents)
