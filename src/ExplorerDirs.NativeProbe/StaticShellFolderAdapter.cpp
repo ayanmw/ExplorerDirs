@@ -1400,6 +1400,32 @@ namespace
             catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
             return S_OK;
         }
+        HRESULT Rename(PCWSTR oldParsingName, PCWSTR newParsingName, const SyntheticFileIdentity& identity)
+        {
+            if (!oldParsingName || !*oldParsingName || !newParsingName || !*newParsingName || !identity.available)
+                return E_INVALIDARG;
+            try
+            {
+                std::wstring newName(newParsingName);
+                std::lock_guard<std::mutex> lock(_mutex);
+                const auto old = _sizes.find(oldParsingName);
+                if (old == _sizes.end()) return S_FALSE;
+                const SyntheticFileIdentityLess less{};
+                if (less(old->second.identity, identity) || less(identity, old->second.identity))
+                {
+                    _sizes.erase(old);
+                    return S_FALSE;
+                }
+                if (!ShellParsingNameLess{}(old->first, newName) &&
+                    !ShellParsingNameLess{}(newName, old->first)) return S_OK;
+
+                const auto snapshot = old->second;
+                _sizes.insert_or_assign(std::move(newName), snapshot);
+                _sizes.erase(old);
+            }
+            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+            return S_OK;
+        }
         bool TryGet(const std::wstring& parsingName, const SyntheticFileIdentity& identity, ULONGLONG* bytes) const
         {
             if (!identity.available || !bytes) return false;
@@ -2040,6 +2066,12 @@ namespace
         {
             return _recursiveSizeStore ? _recursiveSizeStore->Count() : 0;
         }
+        bool TryGetRecursiveSizeSnapshotForProbe(PCWSTR parsingName,
+            const SyntheticFileIdentity& identity, ULONGLONG* bytes) const
+        {
+            return parsingName && _recursiveSizeStore &&
+                _recursiveSizeStore->TryGet(parsingName, identity, bytes);
+        }
         HRESULT PublishRecursiveSizeSnapshotForChildProbe(PCWSTR childName, ULONGLONG bytes)
         {
             if (!childName || !*childName || !_recursiveSizeStore) return E_INVALIDARG;
@@ -2525,6 +2557,10 @@ namespace
             if (!_inner) return E_UNEXPECTED;
             const auto* child = SyntheticData(item);
             if (!child) return E_INVALIDARG;
+            std::wstring oldParsingName;
+            const bool hasOldDirectorySnapshot = _recursiveSizeStore &&
+                (child->attributes & FILE_ATTRIBUTE_DIRECTORY) &&
+                SUCCEEDED(GetAbsoluteParsingName(child, &oldParsingName));
             PITEMID_CHILD original = nullptr;
             auto result = _inner->ParseDisplayName(owner, nullptr, const_cast<LPWSTR>(child->name), nullptr, &original, nullptr);
             if (FAILED(result)) return result;
@@ -2536,6 +2572,12 @@ namespace
             result = DescribeBackingChild(_inner, _backingPath, rawRenamed, &description);
             if (SUCCEEDED(result))
             {
+                if (hasOldDirectorySnapshot)
+                {
+                    std::wstring newParsingName;
+                    if (SUCCEEDED(GetAbsoluteParsingName(&description, &newParsingName)))
+                        (void)_recursiveSizeStore->Rename(oldParsingName.c_str(), newParsingName.c_str(), description.identity);
+                }
                 *renamed = CloneSyntheticChild(description);
                 if (!*renamed) result = E_OUTOFMEMORY;
             }
@@ -3825,18 +3867,41 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
     result = S_OK;
 
     {
+        const auto* originalChild = SyntheticData(childFolder);
+        if (!originalChild) { result = E_FAIL; goto cleanup; }
+        std::wstring oldParsingName = backingPath;
+        try { oldParsingName += L"\\child"; }
+        catch (const std::bad_alloc&) { result = E_OUTOFMEMORY; goto cleanup; }
+        result = root->SetRecursiveSizeSnapshotForProbe(childFolder, oldParsingName.c_str(),
+            originalChild->identity, 1234);
+        if (FAILED(result)) goto cleanup;
         PITEMID_CHILD renamedFolder = nullptr;
         result = root->SetNameOf(nullptr, childFolder, L"renamed-child", SHGDN_INFOLDER, &renamedFolder);
         const bool renamed = SUCCEEDED(result) && renamedFolder && SyntheticData(renamedFolder) &&
             _wcsicmp(SyntheticData(renamedFolder)->name, L"renamed-child") == 0;
-        if (renamedFolder) CoTaskMemFree(renamedFolder);
         if (!renamed || GetFileAttributesW((std::wstring(backingPath) + L"\\renamed-child\\nested.txt").c_str()) == INVALID_FILE_ATTRIBUTES)
         {
+            if (renamedFolder) CoTaskMemFree(renamedFolder);
             result = E_FAIL;
             goto cleanup;
         }
+        std::wstring newParsingName = backingPath;
+        try { newParsingName += L"\\renamed-child"; }
+        catch (const std::bad_alloc&) { CoTaskMemFree(renamedFolder); result = E_OUTOFMEMORY; goto cleanup; }
+        ULONGLONG renamedSnapshotBytes = 0;
+        if (root->RecursiveSizeSnapshotCountForProbe() != 1 ||
+            !root->TryGetRecursiveSizeSnapshotForProbe(newParsingName.c_str(), originalChild->identity, &renamedSnapshotBytes) ||
+            renamedSnapshotBytes != 1234 ||
+            root->TryGetRecursiveSizeSnapshotForProbe(oldParsingName.c_str(), originalChild->identity, &renamedSnapshotBytes))
+        {
+            CoTaskMemFree(renamedFolder);
+            TraceSyntheticSortStage("synthetic-folder-tree: folder-rename-cache-migration-failed");
+            result = E_FAIL;
+            goto cleanup;
+        }
+        CoTaskMemFree(renamedFolder);
     }
-    TraceSyntheticSortStage("synthetic-folder-tree: folder-rename-passed");
+    TraceSyntheticSortStage("synthetic-folder-tree: folder-rename-and-cache-migration-passed");
 
     {
         PCUITEMID_CHILD selected[] = { childFile, secondFile };

@@ -1182,3 +1182,9 @@ NativeProbe Release 构建 0 警告/错误；`--shell-change-reconciliation` 退
 同一 Shell parsing name 被新的目录对象复用时，原 provider 已通过卷序列号与文件 ID 拒绝旧扫描值，但仍把不再匹配的 map 项保留到 DLL store 释放。为避免反复替换同一路径留下失效条目，`TryGet` 在确认身份不匹配时于锁内删除该项，再按原有 Shell 大小回退。静态合同新增缓存项数断言：在原始目录快照和另一目录快照共 2 项的场景中，同路径替换后读取新目录值 17 B、拒绝旧值，并确认缓存降为 1 项。该合同在旧 adapter 上按预期失败（`stale-snapshot-retained`），修复后通过；原生 adapter `/W4 /WX` 构建通过，NativeProbe 的 `--static-shell-column-folder-smoke` exit 0、输出 `replacement-cache-invalidation-and-pruning-passed`，且 `window-created=False`。
 
 这只回收“同一个 parsing name 被新身份取代”的条目。纯目录重命名会产生新 parsing name，旧键在没有显式失效通知/所有者生命周期前仍可能保留；缓存没有全局容量上限。该实验属于 NativeProbe 隔离原型，未修改产品 Shell view、ExplorerBrowser 或发布包，也未测量进程级内存收益。
+
+### 2026-11-01：隔离 `SetNameOf` 迁移重命名目录的递归大小快照
+
+在合成 filesystem provider 的真实目录重命名路径上，`SetNameOf` 同时取得重命名前的 Shell parsing name、成功后的新子 PIDL 与文件身份。若旧快照身份仍匹配，store 在同一锁区内先写入新 parsing name，再删除旧键；值随同一目录身份迁移，不需要重新扫描。静态 NativeProbe fixture 先发布 `1,234 B`，真实调用 `SetNameOf(child → renamed-child)` 后读回新键仍为 `1,234 B`、旧键 miss、快照数仍为 1。该回归在旧 adapter 上按预期输出 `folder-rename-cache-migration-failed`，修复后输出 `folder-rename-and-cache-migration-passed`；原生 adapter `/W4 /WX` 与 `--static-shell-column-folder-smoke` 通过，探针明确 `window-created=False`。
+
+这仅覆盖该原型自身接收到的 `SetNameOf` 文件夹重命名。外部进程改名、Shell 通知触发的缓存失效、父目录删除/移动后的整棵子树清理，以及产品 ExplorerBrowser/可见派生列仍未接线或验证；缓存仍无整体容量上限，不能据此声称解决了长期内存增长。
