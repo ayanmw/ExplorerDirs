@@ -2679,3 +2679,11 @@ HostProbe Release build 0 警告/错误；2 项场景通过，16 项差异场景
 HostProbe 在发送 `SHCNE_UPDATEDIR` 前，先通过生产 ExplorerBrowser 的 `IFolderView.SelectItem` 设置唯一选中项；同时读取原生 ListView 的 `LVIS_FOCUSED` 与 Shell `IFolderView.GetFocusedItem`，确保更新前选中身份和两层焦点读回都指向目标行。更新后再次用相同接口检查。2 项夹具共 3 轮、102 项夹具共 2 轮：每轮通知前后 Shell ItemCount 与 ListView 行数均保持完整；选中项、ListView focused row、Shell focused row 均保持同一目录身份。102 项结果只代表这一固定规模夹具，不是大型真实目录的性能结论。
 
 该对照补上了先前 UPDATEDIR 样本未测焦点/选区的缺口，但仍是不可见 ExplorerBrowser 宿主状态，不证明屏幕绘制、键盘连续操作或真实用户目录行为。此次 2 项观测中，递归大小仍按 `folder-large (29 B)`、`folder-small (5 B)` 原顺序显示；因此行状态稳定不能推导自动排序已可靠。继续将异步值后的自动重排视作未解决，不接入产品完成回调；后续优先寻找一次性重排且不清空行列表的方案。
+
+### 2026-11-02：UPDATEDIR 排序键读回与异步重排复核
+
+上一条记录中 UPDATEDIR 3/3 次自动按大小升序的结果不能视为稳定合同。本轮在相同 2 项 HostProbe 中读回实际 `IFolderView2.GetSortColumns`：3/3 次更新前后均为 Recursive Size 升序，但三轮列表仍显示 `folder-large (29 B)` 在 `folder-small (5 B)` 前。选区及 Shell/ListView 焦点继续保持，行数保持 2。因此更新保留了视图状态，却没有稳定执行已配置的比较器；结果与此前 3/3 自动排序样本相冲突，应按不确定/时序敏感处理。
+
+新增 `--shell-provider-product-async-notification-updatedir-sort` 对照：在 UPDATEDIR 后直接调用 Shell `sortascending` 返回 `S_OK`，但本轮仍未改变 `29→5 B` 顺序，行数和焦点保持。生产延迟排序调度器在本 UPDATEDIR 状态下一次尝试也未改变顺序。普通逐项通知的两轮基线则一轮初始已为大小顺序，另一轮由生产延迟调度器恢复大小顺序，但后者观察到 Shell/ListView 行数 `0→2`。所以当前尚无同时具备可靠排序和无空列表状态的重排合同；也不能以通知/命令 HRESULT 成功代替顺序验证。产品刷新回调保持未接线。
+
+HostProbe Release 构建 0 警告/错误；测试均为隐藏 ExplorerBrowser，不采集可见像素。下一步应检查异步值填充时的实际 `CompareIDs` 调用与 comparer 读值，再决定是排序回调时序问题还是 Shell provider 属性比较实现问题；在获得证据前不再用 UPDATEDIR 自动排序通过作为路线依据。

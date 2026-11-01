@@ -23,7 +23,8 @@ internal static class ShellProviderLocationProbe
         var largeFolder = Path.Combine(viewRoot, "folder-large");
         var notificationBurst = sortStrategy.StartsWith("notification-burst", StringComparison.Ordinal);
         var notificationDirectoryLarge = sortStrategy == "notification-updatedir-large";
-        var notificationDirectory = sortStrategy is "notification-updatedir" or "notification-updatedir-large";
+        var notificationFollowupSort = sortStrategy == "notification-updatedir-sort";
+        var notificationDirectory = sortStrategy is "notification-updatedir" or "notification-updatedir-large" or "notification-updatedir-sort";
         var notificationItems = sortStrategy == "notification-items-flush";
         var flushNotifications = sortStrategy is "notification-burst-flush" or "notification-items-flush";
         var notificationDelayMilliseconds = sortStrategy == "notification-burst-spaced" ? 150 :
@@ -186,6 +187,7 @@ internal static class ShellProviderLocationProbe
             var nativeCellsBeforeNotification = notificationDirectory || notificationItems
                 ? ReadNativeListViewCells((nint)viewWindowField.GetValue(host)!, 3)
                 : [];
+            var sortColumnsBeforeNotification = notificationDirectory ? CaptureSortColumns(hostType, host) : [];
 
             if (sortStrategy == "scheduled" || notificationBurst || notificationDirectory || notificationItems)
             {
@@ -292,15 +294,37 @@ internal static class ShellProviderLocationProbe
                 {
                     var rowObservation = ObserveProductRowCounts(hostType, host, TimeSpan.FromSeconds(2));
                     var nativeCellsAfterDirectoryNotify = ReadNativeListViewCells((nint)viewWindowField.GetValue(host)!, 3);
+                    var sortColumnsAfterNotification = notificationDirectory ? CaptureSortColumns(hostType, host) : [];
                     var viewStateAfterNotification = notificationDirectory
                         ? ReadNativeListViewSelectionState((nint)viewWindowField.GetValue(host)!)
                         : (Selected: [], Focused: (string?)null);
                     var selectedAfterNotification = viewStateAfterNotification.Selected;
                     var focusedRowAfterNotification = viewStateAfterNotification.Focused;
                     var shellFocusedRowAfterNotification = notificationDirectory ? ReadShellFocusedRow(hostType, host) : null;
+                    string? postSortShellFocusedRow = null;
+                    string? postSortListViewFocusedRow = null;
+                    var explicitSortActionResult = 0;
+                    var explicitSortObservation = (Names: Array.Empty<string>(), ShellItemCounts: Array.Empty<int>(), NativeListViewCounts: Array.Empty<int>(), NativeListViewRowSnapshots: Array.Empty<string>(), ExportRowCounts: Array.Empty<int>(), TransientReadErrors: 0);
+                    if (notificationFollowupSort)
+                    {
+                        stage = "updatedir-followed-by-shell-sort-command";
+                        var exportSnapshot = hostType.GetMethod("CaptureFileViewExportSnapshot", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                        var readExport = typeof(ShellProviderLocationProbe).GetMethod("ReadExportRows", BindingFlags.Static | BindingFlags.NonPublic)!;
+                        var exported = readExport.Invoke(null, [exportSnapshot.Invoke(host, null)!])!;
+                        var exportColumns = (string[])exported.GetType().GetField("Item1")!.GetValue(exported)!;
+                        var exportNameColumnAfterNotify = Array.FindIndex(exportColumns, name => name.Equals("Name", StringComparison.OrdinalIgnoreCase) || name == "名称");
+                        if (exportNameColumnAfterNotify < 0) throw new InvalidOperationException("The product Shell view export did not expose the Name column after SHCNE_UPDATEDIR.");
+                        explicitSortActionResult = InvokeBackgroundShellVerb(hostType, host, "sortascending");
+                        Check(explicitSortActionResult);
+                        explicitSortObservation = ObserveProductSort(hostType, host, exportSnapshot, readExport,
+                            hostType.GetMethod("ReadItemCounts", BindingFlags.Instance | BindingFlags.NonPublic)!, exportNameColumnAfterNotify,
+                            TimeSpan.FromSeconds(2), ["folder-small", "folder-large"]);
+                        postSortShellFocusedRow = ReadShellFocusedRow(hostType, host);
+                        postSortListViewFocusedRow = ReadNativeListViewSelectionState((nint)viewWindowField.GetValue(host)!).Focused;
+                    }
                     var notificationTransitions = notificationStateSamples.OrderBy(pair => pair.Key)
                         .Select(pair => $"{pair.Key}:[{string.Join(',', pair.Value.Order(StringComparer.Ordinal))}]");
-                    Console.WriteLine($"shell-provider-product-async-view-after-{(notificationDirectory ? "updatedir" : "item-update")}: samples-by-send-attempts=[{string.Join('|', notificationTransitions)}]; during-shell-item-counts=[{string.Join('|', notificationShellItemCounts.Order())}]; during-native-listview-counts=[{string.Join('|', notificationNativeListViewCounts.Order())}]; shell-item-counts-after=[{string.Join('|', rowObservation.ShellItemCounts)}]; export-row-counts-after=[{string.Join('|', rowObservation.ExportRowCounts)}]; final-shell-items={rowObservation.FinalShellItems}; final-export-rows={rowObservation.FinalExportRows}; native-cells-before=[{string.Join(" || ", nativeCellsBeforeNotification.Select(row => string.Join('|', row)))}]; native-cells-after=[{string.Join(" || ", nativeCellsAfterDirectoryNotify.Select(row => string.Join('|', row)))}]; selected-before=[{string.Join('|', selectedBeforeNotification)}]; selected-after=[{string.Join('|', selectedAfterNotification)}]; listview-focused-row-before={focusedRowBeforeNotification}; listview-focused-row-after={focusedRowAfterNotification}; shell-focused-row-before={shellFocusedRowBeforeNotification}; shell-focused-row-after={shellFocusedRowAfterNotification}; view-callback-count={ReadProductDiagnosticCounter(adapter, "GetProductViewItemNotificationCallbackCount")}; desktop-events=[{desktopUpdateObserver.EventSummary}]");
+                    Console.WriteLine($"shell-provider-product-async-view-after-{(notificationDirectory ? "updatedir" : "item-update")}: samples-by-send-attempts=[{string.Join('|', notificationTransitions)}]; during-shell-item-counts=[{string.Join('|', notificationShellItemCounts.Order())}]; during-native-listview-counts=[{string.Join('|', notificationNativeListViewCounts.Order())}]; shell-item-counts-after=[{string.Join('|', rowObservation.ShellItemCounts)}]; export-row-counts-after=[{string.Join('|', rowObservation.ExportRowCounts)}]; final-shell-items={rowObservation.FinalShellItems}; final-export-rows={rowObservation.FinalExportRows}; sort-columns-before=[{string.Join('|', sortColumnsBeforeNotification)}]; sort-columns-after=[{string.Join('|', sortColumnsAfterNotification)}]; native-cells-before=[{string.Join(" || ", nativeCellsBeforeNotification.Select(row => string.Join('|', row)))}]; native-cells-after=[{string.Join(" || ", nativeCellsAfterDirectoryNotify.Select(row => string.Join('|', row)))}]; selected-before=[{string.Join('|', selectedBeforeNotification)}]; selected-after=[{string.Join('|', selectedAfterNotification)}]; listview-focused-row-before={focusedRowBeforeNotification}; listview-focused-row-after={focusedRowAfterNotification}; shell-focused-row-before={shellFocusedRowBeforeNotification}; shell-focused-row-after={shellFocusedRowAfterNotification}; explicit-sort-hr=0x{explicitSortActionResult:X8}; explicit-sort-order=[{string.Join('|', explicitSortObservation.Names)}]; explicit-sort-shell-counts=[{string.Join('|', explicitSortObservation.ShellItemCounts)}]; explicit-sort-listview-counts=[{string.Join('|', explicitSortObservation.NativeListViewCounts)}]; explicit-sort-row-snapshots=[{string.Join(" || ", explicitSortObservation.NativeListViewRowSnapshots)}]; explicit-sort-shell-focus={postSortShellFocusedRow}; explicit-sort-listview-focus={postSortListViewFocusedRow}; view-callback-count={ReadProductDiagnosticCounter(adapter, "GetProductViewItemNotificationCallbackCount")}; desktop-events=[{desktopUpdateObserver.EventSummary}]");
                     if (rowObservation.FinalShellItems != expectedFolderCount || rowObservation.FinalExportRows != expectedFolderCount)
                         throw new InvalidOperationException($"The Shell view did not retain its {expectedFolderCount} rows after SHCNE_UPDATEDIR.");
                     if (notificationDirectory && (!selectedBeforeNotification.SequenceEqual(selectedAfterNotification, StringComparer.OrdinalIgnoreCase) ||
