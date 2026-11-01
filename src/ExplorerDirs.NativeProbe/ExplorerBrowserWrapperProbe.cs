@@ -396,6 +396,10 @@ internal static class ExplorerBrowserWrapperProbe
                 Marshal.ThrowExceptionForHR(At<GetItemCount>(folderView, 7)(folderView, 2, out var childRowCount));
                 if (childRowCount != 2)
                     throw new InvalidOperationException("Child navigation did not preserve the namespace PIDL or enumerate its backing folder.");
+                var childColumnCaptureHr = ShellColumnManager.Capture(folderView, out var childColumns);
+                if (childColumnCaptureHr != 0 || childColumns is null)
+                    throw new InvalidOperationException($"Could not capture wrapped child-folder columns: {childColumnCaptureHr}.");
+                var recursiveColumnVisibleInChild = childColumns.Any(column => column.Key == sizeKey);
 
                 Marshal.ThrowExceptionForHR(ParseDisplayName(viewFolder, "nested", out var nestedItem));
                 var expectedNestedRoot = ILCombine(expectedChildRoot, nestedItem);
@@ -414,7 +418,16 @@ internal static class ExplorerBrowserWrapperProbe
                         expectedChildRoot, ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
                     if (nestedRowCount != 1)
                         throw new InvalidOperationException("Nested navigation did not enumerate its backing folder.");
-                    Console.WriteLine($"explorerbrowser-registered-namespace: nested-pidl-matches=True; nested-row-count={nestedRowCount}; parent-pidl-matches=True; travel-log-back=True; travel-log-forward=True");
+                    var forwardColumnCaptureHr = ShellColumnManager.Capture(folderView, out var forwardColumns);
+                    if (forwardColumnCaptureHr != 0 || forwardColumns is null)
+                        throw new InvalidOperationException($"Could not capture columns after Shell TravelLog forward: {forwardColumnCaptureHr}.");
+                    var recursiveColumnVisibleAfterForward = forwardColumns.Any(column => column.Key == sizeKey);
+                    var nestedRecursiveSizeAfterForward = recursiveColumnVisibleAfterForward
+                        ? ReadViewItemDetailsByName(folderView, viewFolder, "nested", 1)
+                        : "<column-hidden>";
+                    var recursiveColumnAndValueRestored = recursiveColumnVisibleInChild &&
+                        recursiveColumnVisibleAfterForward && nestedRecursiveSizeAfterForward == "10";
+                    Console.WriteLine($"explorerbrowser-registered-namespace: nested-pidl-matches=True; nested-row-count={nestedRowCount}; parent-pidl-matches=True; travel-log-back=True; travel-log-forward=True; recursive-column-visible-in-child={recursiveColumnVisibleInChild}; recursive-column-visible-after-forward={recursiveColumnVisibleAfterForward}; nested-size-after-forward={nestedRecursiveSizeAfterForward}; recursive-column-and-value-restored={recursiveColumnAndValueRestored}");
                 }
                 finally { Marshal.FreeCoTaskMem(expectedNestedRoot); }
 

@@ -2056,3 +2056,5 @@ NativeProbe 和 SettingsSmoke Release build 均为 0 警告/错误；增量扫�
 扩展现有隔离 ExplorerBrowser 注册 namespace 探针：在真实临时 Shell namespace root → child → nested 导航后，调用 `SBSP_PARENT` 回到 child，再用 Shell 内建 TravelLog Back/Forward 往返 nested/child；每步按当前 `IPersistFolder2` 的 class ID 和绝对 PIDL 等待导航完成，最多 5 秒，不再依赖固定短延时。根目录/子目录已有菜单、重命名、文件操作、通知合同继续留在同一探针。
 
 NativeProbe Release build 通过，0 警告/错误。按无窗口优先约束，本轮没有运行 Private Desktop ExplorerBrowser 宿主探针；因此父级与 Back/Forward 的 Shell 实际行为仍待隔离运行确认，更不代表 Explorer Dirs 产品窗口、标签历史或可见地址路径已验证。ExplorerBrowser 产品及 release 未改。`BrowseToIDList` 的父级/TravelLog flags 与空 PIDL 用法依据 [Microsoft API 文档](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-iexplorerbrowser-browsetoidlist)。
+
+后续扩展同一导航探针：Back/Forward 返回 child 后读取该文件夹的 `IColumnManager` 列集合，并从真实 child view 读取 `nested` 的递归大小，记录列是否可见且值是否仍为 `10`。NativeProbe Release rebuild 仍为 0 警告/错误；Private Desktop 运行尚未授权/执行，因此该恢复断言仅已接线，结果未知。
