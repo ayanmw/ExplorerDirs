@@ -2207,3 +2207,11 @@ NativeProbe 现在直接链接生产 `QdrViewWriter` 与 `QdrImporter` 源码，
 扩展隔离 adapter：`ParseDisplayName` 收到绝对文件系统目录路径时，将路径编码为相对 marker PIDL；`GetDisplayNameOf` 返回同一物理路径；`BindToObject` 把 marker 与当前根 PIDL 组合，并以新绝对 PIDL 初始化独立 folder 对象。NativeProbe 先初始化普通根对象指向目录 A，再通过该合同解析目录 B，核对显示名重新解析后 PIDL 字节一致，绑定后的对象只枚举 B 的独有文件，递归值为 29 B（与 A 的 13 B 条目不串）。Release build 0 警告/错误；双根 PIDL、folder-tree、按需递归列及 DLL unload 合同 smoke 通过。
 
 此合同测试直接调用 adapter 的 `IShellFolder`，父 PIDL 是普通文件系统 PIDL，尚未通过 Windows 注册的 namespace CLSID 调用 `SHParseDisplayName` / `SHBindToObject`，也没有证明 Shell 可为组合 PIDL 生成稳定的 Desktop parsing name。因此它只验证 adapter 层的 Parse/Bind/name 逻辑，不代表注册 namespace 已可承载多路径根，更不涉及 ExplorerBrowser 或产品视图。
+
+### 2026-11-02：注册 namespace 的根激活与 parsing-name 往返
+
+新增 `--registered-multi-root-pidl-smoke`，使用本次生成的临时 CLSID 注册 adapter 的 `InprocServer32` 与 Desktop `NameSpace`，通过 `SHParseDisplayName("::{CLSID}")` 自然激活根，再由该根解析物理目录 B 并用 `SHBindToObject` 绑定子根。第一次尝试返回普通 `C:\...` 文件系统名，重解析得到不同大小的 PIDL；原因是 `GetDisplayNameOf(SHGDN_FORPARSING)` 直接返回物理路径，Shell 因而丢弃了 namespace 身份。
+
+修正为 `::{CLSID}\edpath:<UTF-16 hex>` parsing name：相对显示仍用物理路径，Shell parsing name 则用稳定 CLSID 前缀与无分隔符路径 token；`ParseDisplayName` 解码 token 后校验物理目录并生成分段 PIDL。注册探针现确认绝对 parsing name 经 `SHGetNameFromIDList` 与 `SHParseDisplayName` 往返后 PIDL 字节一致，路径 B 绑定后只看到 B 的独有行及 29 B 递归值，目录 A 的数据不串。此过程临时注册项在 finally 中清理，没有创建 Shell view/window。
+
+这是自然 namespace 激活、路径 Parse/Bind 与 PIDL 名称 round-trip 的成功证据，但不是产品级完成：还需验证不同 child/path 顺序和重启后的稳定性、导航历史、真实 ExplorerBrowser 双窗格、列状态恢复、Shell 文件操作/通知及绿色部署；产品仍未采用自定义视图。

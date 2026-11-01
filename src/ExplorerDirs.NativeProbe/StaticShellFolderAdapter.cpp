@@ -2029,6 +2029,58 @@ namespace
 #pragma pack(pop)
     constexpr size_t kSyntheticRootPathPidlHeaderSize = offsetof(SyntheticRootPathPidlItem, text);
 
+    std::wstring EncodeSyntheticRootPathParsingToken(PCWSTR path)
+    {
+        constexpr WCHAR prefix[] = L"edpath:";
+        constexpr WCHAR digits[] = L"0123456789ABCDEF";
+        std::wstring token(prefix);
+        for (const auto* current = path; current && *current; ++current)
+        {
+            const auto value = static_cast<USHORT>(*current);
+            token.push_back(digits[(value >> 12) & 0xF]);
+            token.push_back(digits[(value >> 8) & 0xF]);
+            token.push_back(digits[(value >> 4) & 0xF]);
+            token.push_back(digits[value & 0xF]);
+        }
+        return token;
+    }
+
+    HRESULT DecodeSyntheticRootPathParsingToken(PCWSTR token, std::wstring* path)
+    {
+        constexpr WCHAR prefix[] = L"edpath:";
+        if (!token || !path || _wcsnicmp(token, prefix, ARRAYSIZE(prefix) - 1) != 0) return S_FALSE;
+        const auto length = wcslen(token + ARRAYSIZE(prefix) - 1);
+        if (!length || length % 4 != 0) return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+        try
+        {
+            path->clear();
+            path->reserve(length / 4);
+            const auto nibble = [](WCHAR value) -> int
+            {
+                if (value >= L'0' && value <= L'9') return value - L'0';
+                if (value >= L'A' && value <= L'F') return value - L'A' + 10;
+                if (value >= L'a' && value <= L'f') return value - L'a' + 10;
+                return -1;
+            };
+            const auto* current = token + ARRAYSIZE(prefix) - 1;
+            while (*current)
+            {
+                USHORT value = 0;
+                for (size_t index = 0; index < 4; ++index)
+                {
+                    const auto digit = nibble(current[index]);
+                    if (digit < 0) return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+                    value = static_cast<USHORT>((value << 4) | digit);
+                }
+                if (value == 0) return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+                path->push_back(static_cast<WCHAR>(value));
+                current += 4;
+            }
+        }
+        catch (const std::bad_alloc&) { path->clear(); return E_OUTOFMEMORY; }
+        return path->empty() ? HRESULT_FROM_WIN32(ERROR_INVALID_DATA) : S_OK;
+    }
+
     HRESULT CreateSyntheticRootPathPidl(PCWSTR path, PIDLIST_ABSOLUTE* value)
     {
         if (!path || !*path || !value) return E_INVALIDARG;
@@ -2895,16 +2947,20 @@ namespace
                 (name[2] == L'\\' || name[2] == L'/');
             const bool hasUncRoot = (name[0] == L'\\' && name[1] == L'\\') ||
                 (name[0] == L'/' && name[1] == L'/');
-            if (hasDriveRoot || hasUncRoot)
+            std::wstring pathFromToken;
+            auto tokenResult = DecodeSyntheticRootPathParsingToken(name, &pathFromToken);
+            if (FAILED(tokenResult)) return tokenResult;
+            if (tokenResult == S_OK || hasDriveRoot || hasUncRoot)
             {
+                const auto* physicalPath = tokenResult == S_OK ? pathFromToken.c_str() : name;
                 PIDLIST_ABSOLUTE backingPidl = nullptr;
                 SFGAOF parsedAttributes = 0;
-                auto pathResult = SHParseDisplayName(name, bind, &backingPidl, SFGAO_FOLDER, &parsedAttributes);
+                auto pathResult = SHParseDisplayName(physicalPath, bind, &backingPidl, SFGAO_FOLDER, &parsedAttributes);
                 if (FAILED(pathResult)) return pathResult;
                 CoTaskMemFree(backingPidl);
                 if (!(parsedAttributes & SFGAO_FOLDER)) return HRESULT_FROM_WIN32(ERROR_DIRECTORY);
                 PIDLIST_ABSOLUTE pathItem = nullptr;
-                pathResult = CreateSyntheticRootPathPidl(name, &pathItem);
+                pathResult = CreateSyntheticRootPathPidl(physicalPath, &pathItem);
                 if (FAILED(pathResult)) return pathResult;
                 *item = reinterpret_cast<PIDLIST_RELATIVE>(pathItem);
                 if (eaten) *eaten = static_cast<ULONG>(wcslen(name));
@@ -3354,7 +3410,7 @@ namespace
             for (auto* child : original) if (child) CoTaskMemFree(child);
             return result;
         }
-        HRESULT STDMETHODCALLTYPE GetDisplayNameOf(PCUITEMID_CHILD item, SHGDNF, STRRET* name) override
+        HRESULT STDMETHODCALLTYPE GetDisplayNameOf(PCUITEMID_CHILD item, SHGDNF flags, STRRET* name) override
         {
             if (!name) return E_POINTER;
             std::wstring rootPath;
@@ -3362,11 +3418,31 @@ namespace
                 reinterpret_cast<PCIDLIST_ABSOLUTE>(item), &rootPath);
             if (rootPathResult == S_OK)
             {
+                std::wstring displayText;
+                try
+                {
+                    if (flags & SHGDN_FORPARSING)
+                    {
+                        auto token = EncodeSyntheticRootPathParsingToken(rootPath.c_str());
+                        if (flags & SHGDN_INFOLDER) displayText = std::move(token);
+                        else
+                        {
+                            WCHAR classIdText[64]{};
+                            if (!StringFromGUID2(_classId, classIdText, ARRAYSIZE(classIdText))) return E_FAIL;
+                            displayText = L"::";
+                            displayText += classIdText;
+                            displayText += L"\\";
+                            displayText += token;
+                        }
+                    }
+                    else displayText = rootPath;
+                }
+                catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
                 name->uType = STRRET_WSTR;
-                const auto bytes = (rootPath.size() + 1) * sizeof(WCHAR);
+                const auto bytes = (displayText.size() + 1) * sizeof(WCHAR);
                 name->pOleStr = static_cast<LPWSTR>(CoTaskMemAlloc(bytes));
                 if (!name->pOleStr) return E_OUTOFMEMORY;
-                CopyMemory(name->pOleStr, rootPath.c_str(), bytes);
+                CopyMemory(name->pOleStr, displayText.c_str(), bytes);
                 return S_OK;
             }
             if (FAILED(rootPathResult)) return rootPathResult;
@@ -4800,6 +4876,13 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticMultiRootProviderSmo
     return result;
 }
 
+extern "C" __declspec(dllexport) HRESULT WINAPI VerifySyntheticFolderContentsForProbe(
+    IShellFolder2* folder, PCWSTR expectedName, PCWSTR forbiddenName, ULONGLONG recursiveBytes)
+{
+    if (!folder || !expectedName || !forbiddenName) return E_INVALIDARG;
+    return VerifyConfiguredRootForProbe(folder, expectedName, forbiddenName, recursiveBytes);
+}
+
 extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticSingleClassMultiRootPidlSmoke(
     PCWSTR firstPath, PCWSTR firstExpectedName, PCWSTR firstForbiddenName, ULONGLONG firstRecursiveBytes,
     PCWSTR secondPath, PCWSTR secondExpectedName, PCWSTR secondForbiddenName, ULONGLONG secondRecursiveBytes)
@@ -4887,9 +4970,9 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticSingleClassMultiRoot
             result = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
         STRRET displayName{};
         if (SUCCEEDED(result)) result = parsingRoot->GetDisplayNameOf(
-            reinterpret_cast<PCUITEMID_CHILD>(pathItem), SHGDN_FORPARSING, &displayName);
+            reinterpret_cast<PCUITEMID_CHILD>(pathItem), SHGDN_INFOLDER | SHGDN_FORPARSING, &displayName);
         if (SUCCEEDED(result) && (displayName.uType != STRRET_WSTR || !displayName.pOleStr ||
-            _wcsicmp(displayName.pOleStr, secondPath) != 0))
+            _wcsnicmp(displayName.pOleStr, L"edpath:", 7) != 0))
             result = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
         PIDLIST_RELATIVE reparsedItem = nullptr;
         if (SUCCEEDED(result)) result = parsingRoot->ParseDisplayName(nullptr, nullptr,
