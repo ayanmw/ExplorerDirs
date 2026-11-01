@@ -7314,7 +7314,8 @@ extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticAsyncRecursiveSizeEn
 
 extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticRecursiveSizeCacheCapacityForProbe(LONG capacity)
 {
-    if (capacity < 1 || capacity > 4096) return E_INVALIDARG;
+    // The larger bound lets isolated stress probes compare cache churn without changing product defaults.
+    if (capacity < 1 || capacity > 8192) return E_INVALIDARG;
     AcquireSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
     if (g_sharedRecursiveSizeStore)
     {

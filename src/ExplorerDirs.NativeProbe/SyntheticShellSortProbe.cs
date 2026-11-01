@@ -420,7 +420,8 @@ public static class SyntheticShellSortProbe
             int.TryParse(folderCountText, out var parsedFolderCount) ? parsedFolderCount : -1;
         var saturationRequested = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_FORCE_QUEUE_SATURATION") == "1";
         var batchRequested = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_BATCH_BY_VIEW") == "1";
-        var maximumFolderCount = saturationRequested ? 600 : batchRequested ? 1000 : 500;
+        // Four distinct batch views need more than 1,024 rows to exercise the 4,096-snapshot cache boundary.
+        var maximumFolderCount = saturationRequested ? 600 : batchRequested ? 1200 : 500;
         if (folderCount < 1 || folderCount > maximumFolderCount)
             throw new ArgumentOutOfRangeException(nameof(folderCountText), $"The on-demand Shell load probe accepts 1–{maximumFolderCount} sibling folders in this mode.");
         return folderCount;
@@ -431,8 +432,8 @@ public static class SyntheticShellSortProbe
         var capacityText = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_RECURSIVE_SIZE_CACHE_CAPACITY");
         var capacity = string.IsNullOrWhiteSpace(capacityText) ? 4096 :
             int.TryParse(capacityText, out var parsedCapacity) ? parsedCapacity : -1;
-        if (capacity is < 1 or > 4096)
-            throw new ArgumentOutOfRangeException(nameof(capacityText), "The recursive-size cache probe accepts capacities from 1 to 4096.");
+        if (capacity is < 1 or > 8192)
+            throw new ArgumentOutOfRangeException(nameof(capacityText), "The recursive-size cache probe accepts capacities from 1 to 8192.");
         return capacity;
     }
 
