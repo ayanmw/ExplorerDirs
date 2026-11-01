@@ -1453,6 +1453,41 @@ namespace
             }
             return removed;
         }
+        size_t InvalidatePath(PCWSTR changedParsingName, bool includeSubtree)
+        {
+            if (!changedParsingName || !*changedParsingName) return 0;
+            std::wstring changed;
+            try { changed.assign(changedParsingName); }
+            catch (const std::bad_alloc&) { return 0; }
+            std::lock_guard<std::mutex> lock(_mutex);
+            size_t removed = 0;
+            for (auto entry = _sizes.begin(); entry != _sizes.end();)
+            {
+                const auto& candidate = entry->first;
+                const auto prefixMatches = [](const std::wstring& left, const std::wstring& right, size_t length)
+                {
+                    return CompareStringOrdinal(left.data(), static_cast<int>(length),
+                        right.data(), static_cast<int>(length), TRUE) == CSTR_EQUAL;
+                };
+                const bool samePath = candidate.size() == changed.size() &&
+                    prefixMatches(candidate, changed, candidate.size());
+                const bool candidateIsAncestor = candidate.size() < changed.size() &&
+                    prefixMatches(candidate, changed, candidate.size()) &&
+                    (candidate.back() == L'\\' || candidate.back() == L'/' ||
+                        changed[candidate.size()] == L'\\' || changed[candidate.size()] == L'/');
+                const bool candidateIsDescendant = includeSubtree && candidate.size() > changed.size() &&
+                    prefixMatches(candidate, changed, changed.size()) &&
+                    (changed.back() == L'\\' || changed.back() == L'/' ||
+                        candidate[changed.size()] == L'\\' || candidate[changed.size()] == L'/');
+                if (samePath || candidateIsAncestor || candidateIsDescendant)
+                {
+                    entry = _sizes.erase(entry);
+                    ++removed;
+                }
+                else ++entry;
+            }
+            return removed;
+        }
         bool TryGet(const std::wstring& parsingName, const SyntheticFileIdentity& identity, ULONGLONG* bytes) const
         {
             if (!identity.available || !bytes) return false;
@@ -2176,19 +2211,25 @@ namespace
                     reinterpret_cast<void*>(wParam), static_cast<unsigned long long>(static_cast<UINT_PTR>(lParam)));
                 TraceSyntheticSortStage(notification);
                 const auto event = static_cast<LONG>(lParam) & ~SHCNE_INTERRUPT;
-                if (_recursiveSizeStore && wParam &&
-                    (event == SHCNE_DELETE || event == SHCNE_RMDIR || event == SHCNE_RENAMEFOLDER))
+                const bool affectsRecursiveSize = event == SHCNE_CREATE || event == SHCNE_DELETE ||
+                    event == SHCNE_MKDIR || event == SHCNE_RMDIR || event == SHCNE_RENAMEITEM ||
+                    event == SHCNE_RENAMEFOLDER || event == SHCNE_UPDATEITEM || event == SHCNE_UPDATEDIR;
+                const bool removesFolderSubtree = event == SHCNE_RMDIR || event == SHCNE_RENAMEFOLDER;
+                if (_recursiveSizeStore && wParam && affectsRecursiveSize)
                 {
                     auto* pidls = reinterpret_cast<PCIDLIST_ABSOLUTE*>(wParam);
-                    if (pidls[0])
+                    const auto invalidate = [&](PCIDLIST_ABSOLUTE pidl)
                     {
+                        if (!pidl) return;
                         LPWSTR parsingName = nullptr;
-                        if (SUCCEEDED(SHGetNameFromIDList(pidls[0], SIGDN_DESKTOPABSOLUTEPARSING, &parsingName)) && parsingName)
+                        if (SUCCEEDED(SHGetNameFromIDList(pidl, SIGDN_DESKTOPABSOLUTEPARSING, &parsingName)) && parsingName)
                         {
-                            (void)_recursiveSizeStore->RemoveSubtree(parsingName);
+                            (void)_recursiveSizeStore->InvalidatePath(parsingName, removesFolderSubtree);
                             CoTaskMemFree(parsingName);
                         }
-                    }
+                    };
+                    invalidate(pidls[0]);
+                    if (event == SHCNE_RENAMEITEM || event == SHCNE_RENAMEFOLDER) invalidate(pidls[1]);
                 }
                 if (InterlockedCompareExchange(&g_syntheticTranslateChildNotificationsForProbe, 0, 0) &&
                     ShouldTranslateSyntheticChildNotification(static_cast<LONG>(lParam)))
@@ -3933,6 +3974,22 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
             result = E_FAIL;
             goto cleanup;
         }
+        SyntheticRecursiveSizeSnapshotStore changedPathStore;
+        std::wstring changedFilePath;
+        try { changedFilePath = nestedPath + L"\\leaf.txt"; }
+        catch (const std::bad_alloc&) { result = E_OUTOFMEMORY; goto cleanup; }
+        if (FAILED(changedPathStore.Set(backingPath, child->identity, 1)) ||
+            FAILED(changedPathStore.Set(subtree.c_str(), child->identity, 2)) ||
+            FAILED(changedPathStore.Set(nestedPath.c_str(), child->identity, 3)) ||
+            FAILED(changedPathStore.Set(siblingPath.c_str(), siblingIdentity, 4)) ||
+            changedPathStore.InvalidatePath(changedFilePath.c_str(), false) != 3 ||
+            changedPathStore.Count() != 1)
+        {
+            TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-ancestor-invalidation-failed");
+            result = E_FAIL;
+            goto cleanup;
+        }
+        TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-ancestor-invalidation-passed");
         TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-subtree-invalidation-passed");
     }
     nested->Release();
@@ -3972,27 +4029,30 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
             result = E_FAIL;
             goto cleanup;
         }
-        PIDLIST_ABSOLUTE renamedFolderPidl = nullptr;
-        result = SHParseDisplayName(newParsingName.c_str(), nullptr, &renamedFolderPidl, 0, nullptr);
-        if (FAILED(result) || !renamedFolderPidl)
+        std::wstring changedFileParsingName = newParsingName;
+        try { changedFileParsingName += L"\\nested.txt"; }
+        catch (const std::bad_alloc&) { CoTaskMemFree(renamedFolder); result = E_OUTOFMEMORY; goto cleanup; }
+        PIDLIST_ABSOLUTE changedFilePidl = nullptr;
+        result = SHParseDisplayName(changedFileParsingName.c_str(), nullptr, &changedFilePidl, 0, nullptr);
+        if (FAILED(result) || !changedFilePidl)
         {
-            if (renamedFolderPidl) CoTaskMemFree(renamedFolderPidl);
+            if (changedFilePidl) CoTaskMemFree(changedFilePidl);
             CoTaskMemFree(renamedFolder);
             if (SUCCEEDED(result)) result = E_UNEXPECTED;
             goto cleanup;
         }
-        PCIDLIST_ABSOLUTE notificationPidls[2] = { renamedFolderPidl, nullptr };
+        PCIDLIST_ABSOLUTE notificationPidls[2] = { changedFilePidl, nullptr };
         const auto notificationResult = root->MessageSFVCB(SFVM_FSNOTIFY,
-            reinterpret_cast<WPARAM>(notificationPidls), SHCNE_RMDIR);
-        CoTaskMemFree(renamedFolderPidl);
+            reinterpret_cast<WPARAM>(notificationPidls), SHCNE_DELETE);
+        CoTaskMemFree(changedFilePidl);
         if (notificationResult != E_NOTIMPL || root->RecursiveSizeSnapshotCountForProbe() != 0)
         {
             CoTaskMemFree(renamedFolder);
-            TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-shell-delete-invalidation-failed");
+            TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-parent-summary-invalidation-failed");
             result = E_FAIL;
             goto cleanup;
         }
-        TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-shell-delete-invalidation-passed");
+        TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-parent-summary-invalidation-passed");
         CoTaskMemFree(renamedFolder);
     }
     TraceSyntheticSortStage("synthetic-folder-tree: folder-rename-and-cache-migration-passed");

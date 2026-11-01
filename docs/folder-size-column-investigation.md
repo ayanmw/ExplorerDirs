@@ -1194,3 +1194,9 @@ NativeProbe Release 构建 0 警告/错误；`--shell-change-reconciliation` 退
 缓存新增按 parsing name 子树失效：精确清除目录本身及其后代，并以分隔符边界阻止 `child` 误命中 `child-sibling`。合成 `IShellFolderViewCB::MessageSFVCB(SFVM_FSNOTIFY)` 收到 `SHCNE_DELETE`、`SHCNE_RMDIR` 或 `SHCNE_RENAMEFOLDER` 时，从通知中的第一个绝对 PIDL 取得 parsing name 并清理旧子树；带 `SHCNE_INTERRUPT` 的事件按基础事件处理。新合同覆盖子树与同前缀兄弟区分，另经 `SHCNE_RMDIR` 回调验证缓存项归零，回调仍返回 `E_NOTIMPL` 让 DefView 继续默认更新。
 
 原生 adapter `/W4 /WX` 构建、NativeProbe Release 构建和 `--static-shell-column-folder-smoke` 均通过，输出 `recursive-size-subtree-invalidation-passed` 与 `recursive-size-shell-delete-invalidation-passed`，且 `window-created=False`。仅为隔离原型的 callback/cache 路径证据；没有验证 ExplorerBrowser 产品接线、外部应用真实通知的时序、父目录移动事件覆盖、全局缓存容量或用户可见列体验。该缓存仍无容量上限。
+
+### 2026-11-01：内容变更通知使父目录递归大小快照失效
+
+继续追踪缓存正确性时发现，删除 `folder\file.txt` 只清理文件路径下方的项不会使 `folder` 行上缓存的递归总量失效。缓存现按变更路径同时清除匹配项与所有路径祖先；目录移除/重命名还清除旧/新目录子树。合成 `SFVM_FSNOTIFY` 覆盖 create/delete/mkdir/rmdir/item rename/folder rename/update item/update dir，rename 两端 PIDL 分别处理；递归总量变化通知继续返回 `E_NOTIMPL` 交给 DefView 默认更新。
+
+回归先在旧逻辑上复现：对嵌套文件路径发送 `SHCNE_DELETE` 后，父目录快照仍在，合同失败；修复后 `recursive-size-ancestor-invalidation-passed`、`recursive-size-subtree-invalidation-passed` 和 callback 路径 `recursive-size-parent-summary-invalidation-passed` 均通过，且兄弟路径不误删。Native adapter `/W4 /WX`、NativeProbe Release 和 `--static-shell-column-folder-smoke` 通过，`window-created=False`。仍未验证注册到真实 view 的外部变更通知时序、ExplorerBrowser 产品接线、用户可见排序刷新或缓存容量上限。

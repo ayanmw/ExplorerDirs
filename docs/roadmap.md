@@ -5538,3 +5538,9 @@ NativeProbe 新增 `single-item-lvm-update-live-cache-publish`，把生产递归
 将 `--shell-watcher-recovery-contract` 扩展为替换失败恢复：注入 overflow 后先删除探针监视目录，确认第一次 watcher 替换失败；重建该目录后，恢复状态机经过退避重试并成功创建新 watcher，随后接收新文件事件。连续三轮通过；NativeProbe Release build 0 警告/错误。该用例隔离验证共享恢复 helper 的退避/重试及 watcher 生命周期，不是产品 WPF Dispatcher 计时器全路径、真实 OS overflow、ExplorerBrowser 或第三方 provider 的证据。
 
 2026-11-01 递归大小原型继续补上 Shell 删除/移出事件的子树缓存失效。绝对 PIDL 转 parsing name 后按路径边界删除自身及后代；回归也证明相邻 `child-sibling` 不被误删。无窗口合同探针直接调用 `MessageSFVCB(SFVM_FSNOTIFY)` 验证 `SHCNE_RMDIR` 后缓存归零，默认 Shell 更新仍由 `E_NOTIMPL` 继续。Native adapter `/W4 /WX`、NativeProbe Release、`--static-shell-column-folder-smoke` 通过。仍限 NativeProbe 隔离原型；产品 ExplorerBrowser/可见 UI、外部通知真实时序及缓存全局容量尚未验证。详见 [递归大小列调查](folder-size-column-investigation.md#2026-11-01shell-删除移出通知清理递归大小子树快照)。
+
+### 2026-11-01：内容变更通知使父目录递归大小快照失效
+
+继续追踪缓存正确性时发现，删除 `folder\file.txt` 只清理文件路径下方的项不会使 `folder` 行上缓存的递归总量失效。缓存现按变更路径同时清除匹配项与所有路径祖先；目录移除/重命名还清除旧/新目录子树。合成 `SFVM_FSNOTIFY` 覆盖 create/delete/mkdir/rmdir/item rename/folder rename/update item/update dir，rename 两端 PIDL 分别处理；递归总量变化通知继续返回 `E_NOTIMPL` 交给 DefView 默认更新。
+
+回归先在旧逻辑上复现：对嵌套文件路径发送 `SHCNE_DELETE` 后，父目录快照仍在，合同失败；修复后 `recursive-size-ancestor-invalidation-passed`、`recursive-size-subtree-invalidation-passed` 和 callback 路径 `recursive-size-parent-summary-invalidation-passed` 均通过，且兄弟路径不误删。Native adapter `/W4 /WX`、NativeProbe Release 和 `--static-shell-column-folder-smoke` 通过，`window-created=False`。仍未验证注册到真实 view 的外部变更通知时序、ExplorerBrowser 产品接线、用户可见排序刷新或缓存容量上限。
