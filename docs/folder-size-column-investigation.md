@@ -2309,3 +2309,9 @@ HostProbe 为保存升序及降序分别构造初始会话，均验证首次完�
 扩展注册 synthetic provider HostProbe，在同一目录加入 5 B 与 29 B 两个目录、12 B 普通文件。生产 `ExplorerBrowserHost` 的可见未解析递归列升序在完整 view 刷新前得到 `folder-small → file-middle.bin → folder-large`，降序反转；导出列值按相同 Shell 行序读回 `5 → 12 → 29`，普通文件系统 `PKEY_Size` 控制仍按 5 B 与 29 B 文件排序通过。Release HostProbe 构建 0 警告/错误，升序与降序隐藏运行均通过，父窗口不可见。
 
 此结果仅证明 registered synthetic provider 的产品 Host 能在一列中比较目录递归值与普通文件原生字节值，不代表普通物理目录已获得派生列 provider、扫描更新或发布功能。Q-Dir 官方 FAQ/功能页说明文件夹大小默认忽略排序以避免性能问题，并提供显式选项；本次 HostProbe 使用递归大小排序，尚未在产品 Host 上验证该默认/可选策略，故不能称为 Q-Dir 排序语义已对齐。[FAQ 63](https://softwareok.com/?faq=63&seite=faq-Q-DIR) · [文件与文件夹大小列](https://www.softwareok.com/?seite=freeware%2Fq-dir%2FFile_and_folder_size_Column_with_percentage)
+
+### 2026-11-02：Host 原型验证忽略文件夹递归大小排序
+
+扩展隐藏 HostProbe 的测试专用开关：文件夹仍显示递归大小（5 B、29 B），但比较时将文件夹大小视为相等；普通文件继续使用原生大小值（12 B）。升序结果为 `folder-large → folder-small → file-middle.bin`，降序为 `file-middle.bin → folder-large → folder-small`；两文件夹直接比较结果相等。正常递归大小排序的升序/降序回归也通过，普通文件系统 `PKEY_Size` 排序控制通过。
+
+HostProbe Release 构建通过，四种隐藏合成视图场景（正常/忽略文件夹大小 × 升序/降序）均退出码 0。该开关只存在于 NativeProbe 合成 provider 测试适配器，不是产品选项；验证了产品 `ExplorerBrowserHost` 消费这种排序语义的原型，但不证明普通磁盘目录自定义列可用、配置可保存或用户可见 UI 行为。没有启动产品窗口，也没有更新 release。Q-Dir 的官方说明称文件夹大小因导航性能问题默认不参与排序，并提供“忽略文件夹大小排序”选项。[Q-Dir FAQ 63](https://softwareok.com/?faq=63&seite=faq-Q-DIR) · [Q-Dir 文件夹大小列说明](https://www.softwareok.com/?seite=freeware%2Fq-dir%2FFile_and_folder_size_Column_with_percentage)

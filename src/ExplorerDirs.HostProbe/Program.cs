@@ -28,6 +28,10 @@ internal static class Program
         if (args is ["--column-header-focus"]) return ColumnHeaderFocusProbe.Run();
         if (args is ["--shell-provider-location"]) return ShellProviderLocationProbe.Run();
         if (args is ["--shell-provider-location-descending"]) return ShellProviderLocationProbe.Run(descending: true);
+        if (args is ["--shell-provider-location-ignore-folder-size"])
+            return ShellProviderLocationProbe.Run(ignoreFolderSizeForSort: true);
+        if (args is ["--shell-provider-location-ignore-folder-size-descending"])
+            return ShellProviderLocationProbe.Run(descending: true, ignoreFolderSizeForSort: true);
         if (args is ["--system-theme"]) return SystemThemeProbe.Run();
         if (args is ["--native-theme-colors"]) return NativeThemeColorProbe.Run();
         if (args is ["--folder-navigation-callbacks"]) return FolderNavigationCallbacksProbe.Run();

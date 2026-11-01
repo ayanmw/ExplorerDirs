@@ -7481,6 +7481,12 @@ extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticCustomSizeColumnForP
     return S_OK;
 }
 
+extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticIgnoreRecursiveFolderSizeSortForProbe(BOOL enabled)
+{
+    InterlockedExchange(&g_syntheticIgnoreRecursiveFolderSizeSortForProbe, enabled ? 1 : 0);
+    return S_OK;
+}
+
 extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticHumanSizeTextForProbe(BOOL enabled)
 {
     InterlockedExchange(&g_syntheticHumanSizeTextForProbe, enabled ? 1 : 0);
