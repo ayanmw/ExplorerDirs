@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Windows.Forms;
 using System.Windows.Threading;
 using ExplorerDirs.App;
@@ -133,6 +134,7 @@ internal static class ExplorerBrowserWrapperProbe
         var classKeyPath = $@"Software\Classes\CLSID\{{{classId:D}}}";
         var namespaceKeyPath = $@"Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{{{classId:D}}}";
         var fixture = Path.Combine(Path.GetTempPath(), "ExplorerDirs-BrowserNamespace-" + classId.ToString("N"));
+        var peerFixture = fixture + "-peer";
         nint browser = 0, parent = 0, rootPidl = 0, shellView = 0, folderView = 0, viewFolder = 0, persist = 0, currentPidl = 0;
         nint nativeLibrary = 0;
         uint eventCookie = 0;
@@ -149,10 +151,13 @@ internal static class ExplorerBrowserWrapperProbe
             Directory.CreateDirectory(Path.Combine(fixture, "child"));
             Directory.CreateDirectory(Path.Combine(fixture, "child", "nested"));
             Directory.CreateDirectory(Path.Combine(fixture, "child-small"));
+            Directory.CreateDirectory(Path.Combine(peerFixture, "shared-folder"));
             File.WriteAllBytes(Path.Combine(fixture, "root.txt"), [1, 2, 3, 4]);
             File.WriteAllText(Path.Combine(fixture, "rename-source.txt"), "namespace rename contract");
             File.WriteAllBytes(Path.Combine(fixture, "child", "nested", "deep.bin"), Enumerable.Repeat((byte)7, 10).ToArray());
             File.WriteAllBytes(Path.Combine(fixture, "child-small", "payload.bin"), [1, 2]);
+            File.WriteAllText(Path.Combine(peerFixture, "peer-only.txt"), "peer root");
+            File.WriteAllBytes(Path.Combine(peerFixture, "shared-folder", "payload.bin"), new byte[29]);
 
             nativeLibrary = NativeLibrary.Load(FindAdapterLibrary());
             Marshal.ThrowExceptionForHR(Marshal.GetDelegateForFunctionPointer<SetFolderClassId>(
@@ -627,6 +632,9 @@ internal static class ExplorerBrowserWrapperProbe
             Console.WriteLine($"explorerbrowser-registered-namespace: background-newfolder-view-route=True; created={createdFolder.Name}; filesystem-created=True; shell-row-count={createdFolder.Before}->{createdFolder.After}; row-updated={createdFolder.After == createdFolder.Before + 1}");
             if (createdFolder.After != createdFolder.Before + 1)
                 throw new InvalidOperationException("The native New Folder command created the backing directory but the active Shell view did not add exactly one row.");
+
+            VerifyExplorerBrowserPathIdentityTravel(browser, classId, rootPidl, peerFixture, ref shellView, ref folderView,
+                ref viewFolder, ref persist, ref currentPidl);
             VerifyExplorerBrowserDestroyDuringRecursiveScan(browser, shellView, viewFolder, nativeLibrary,
                 rootPidl, fixture, ref initialized);
             return 0;
@@ -666,7 +674,62 @@ internal static class ExplorerBrowserWrapperProbe
             try { if (Directory.Exists(fixture)) Directory.Delete(fixture, recursive: true); }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
+            try { if (Directory.Exists(peerFixture)) Directory.Delete(peerFixture, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
         }
+    }
+
+    private static void VerifyExplorerBrowserPathIdentityTravel(nint browser, Guid classId, nint rootPidl, string peerFixture,
+        ref nint shellView, ref nint folderView, ref nint viewFolder, ref nint persist, ref nint currentPidl)
+    {
+        var peerParsingName = CreatePathIdentityParsingName(classId, peerFixture);
+        Marshal.ThrowExceptionForHR(SHParseDisplayName(peerParsingName, 0, out var peerPidl, 0, out _));
+        try
+        {
+            NavigateAndWaitForFolder(browser, peerPidl, 0, classId, peerPidl,
+                ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+            var peerRows = WaitForViewItemCount(folderView, 2);
+            var sizeKey = new PropertyKeyState(new Guid("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 12);
+            var captureHr = ShellColumnManager.Capture(folderView, out var capturedColumns);
+            if (captureHr != 0 || capturedColumns is null)
+                throw new InvalidOperationException($"Could not capture peer-root columns: {captureHr}.");
+            var sizeColumnInitiallyVisible = capturedColumns.Any(column => column.Key == sizeKey);
+            var savedColumns = sizeColumnInitiallyVisible
+                ? capturedColumns
+                : capturedColumns.Append(new DisplayColumnState(sizeKey, 160)).ToArray();
+            if (!sizeColumnInitiallyVisible)
+                Marshal.ThrowExceptionForHR(ShellColumnManager.Apply(folderView, savedColumns));
+            var sizeValue = ReadViewItemDetailsByName(folderView, viewFolder, "shared-folder", 1);
+            if (peerRows != 2 || sizeValue != "29")
+                throw new InvalidOperationException($"ExplorerBrowser path root did not show independent content: rows={peerRows}; recursive-size={sizeValue}.");
+
+            NavigateAndWaitForFolder(browser, 0, SbspNavigateBack, classId,
+                rootPidl, ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+            NavigateAndWaitForFolder(browser, 0, SbspNavigateForward, classId, peerPidl,
+                ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+            var returnedCaptureHr = ShellColumnManager.Capture(folderView, out var returnedColumns);
+            if (returnedCaptureHr != 0 || returnedColumns is null)
+                throw new InvalidOperationException($"Could not capture peer-root columns after TravelLog forward: {returnedCaptureHr}.");
+            var sizeColumnRestoredByShell = returnedColumns.Any(column => column.Key == sizeKey);
+            if (!sizeColumnRestoredByShell)
+                Marshal.ThrowExceptionForHR(ShellColumnManager.Apply(folderView, savedColumns));
+            var restoredSizeValue = ReadViewItemDetailsByName(folderView, viewFolder, "shared-folder", 1);
+            if (restoredSizeValue != "29")
+                throw new InvalidOperationException($"Peer-root recursive size was not readable after TravelLog forward: {restoredSizeValue}.");
+            Console.WriteLine($"explorerbrowser-path-identity: peer-root-pidl-roundtrip=True; rows={peerRows}; recursive-size={sizeValue}; shell-restored-column={sizeColumnRestoredByShell}; host-reapplied-column={!sizeColumnRestoredByShell}; back-forward=True; restored-size={restoredSizeValue}");
+            NavigateAndWaitForFolder(browser, 0, SbspNavigateBack, classId,
+                rootPidl, ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+        }
+        finally { Marshal.FreeCoTaskMem(peerPidl); }
+    }
+
+    private static string CreatePathIdentityParsingName(Guid classId, string path)
+    {
+        var token = new StringBuilder("edpath:", checked(7 + path.Length * 4));
+        foreach (var character in path)
+            token.Append(((int)character).ToString("X4", System.Globalization.CultureInfo.InvariantCulture));
+        return $"::{{{classId:D}}}\\{token}";
     }
 
     private static void VerifyExplorerBrowserDestroyDuringRecursiveScan(nint browser, nint shellView,

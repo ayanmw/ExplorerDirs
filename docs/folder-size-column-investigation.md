@@ -2221,3 +2221,11 @@ NativeProbe 现在直接链接生产 `QdrViewWriter` 与 `QdrImporter` 源码，
 新增 Private Desktop 场景 `--synthetic-shell-path-identity-two-view-private-desktop`。它通过同一临时注册 CLSID 下两个独立 `edpath` parsing name 创建 Pane1/Pane2 的 Shell view，并逐项核实两视图只枚举自己的文件。随后从一视图向另一视图执行 Shell MOVE 与 COPY：源/目标内容在对应视图更新，来源/目标文件状态符合操作结果；private desktop 守卫确认前台窗口、最后输入时间未变化，隔离桌面及夹具清理通过。NativeProbe Release build 0 警告/错误。
 
 这证明路径 PIDL 可以驱动两个并存的 `IShellView` 实例和 Shell 文件操作通知。没有验证每个路径根的 Back/Forward Travel Log、跨重建或进程重启后的历史恢复、Q-Dir/产品列状态保存、完整 ExplorerBrowser 控件、多标签会话或用户可见菜单/焦点；这是隔离迁移实验，不是产品接线或可发布功能。
+
+### 2026-11-02：ExplorerBrowser 路径根导航、TravelLog 与列状态重放
+
+扩展已注册 namespace 的真实 `IExplorerBrowser` Private Desktop 探针，新增独立 peer 目录 B（含 `peer-only.txt` 和 29 B `shared-folder`），通过稳定 CLSID 的 `edpath` parsing name 导航到 B。`NavigateAndWaitForFolder` 以 Shell 当前 view 的 `IPersistFolder2.GetCurFolder` PIDL 与目标逐字节比较；B 两行可见，递归大小读为 29。随后以 `SBSP_NAVIGATEBACK` 返回 A，再以 `SBSP_NAVIGATEFORWARD` 返回 B，两个目标 PIDL 均匹配。
+
+Shell TravelLog 前进后没有自动恢复 B 的自定义列（`shell-restored-column=False`）。隔离宿主重放先前捕获的列集合后，B 的递归值再次读为 29；探针最后回到 A，随后原有递归扫描销毁、菜单/文件操作、通知和卸载断言均通过。Release build 0 警告/错误；Private Desktop 前台及输入守卫通过。
+
+这验证单个 ExplorerBrowser 实例在多个路径根间导航、Shell 历史及宿主重放列状态；不证明两个 ExplorerBrowser 同时承载不同根、应用 SessionStore/TabState 的真实跨标签保存、重启后恢复、持久 ViewStateStore 接线或用户可见验收。产品仍使用当前 ExplorerBrowser 物理文件夹视图，未接入自定义递归列 provider。
