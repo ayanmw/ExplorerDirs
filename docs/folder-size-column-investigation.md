@@ -2526,3 +2526,9 @@ NativeProbe Release 构建 0 警告/错误；Private Desktop watchdog exit 0，�
 新增 Private Desktop NativeProbe，创建 A/B 两个 volatile provider CLSID 指向同一个临时目录，用 A 的绝对 PIDL 写入 `.lnk`，移除 A 的 CLSID 与 Desktop NameSpace 注册，再从独立子进程仅保留 B 注册后读取链接。NativeProbe Release 构建 0 警告/错误，watchdog exit 0：链接可读回 PIDL，但 A/B 同路径的绝对 PIDL 字节不同；B 自身根目录能解析和绑定，A 保存的链接在 B-only 子进程中 `SHGetNameFromIDList` 不可用、Shell folder bind 的目标内容检查失败；`IShellLink.GetPath` 返回空。四个临时 volatile 注册键均确认清理，Private Desktop 前台与 last-input 未变。日志：`src/.state/native-probe-watchdog/20261102-043319-0cfd660e.stdout.log`。
 
 因此隔离发布原样复制 `.lnk` 无法保留未来 provider 快速链接；Shell Link 不提供可改写的路径字符串，必须为 app-owned 快速链接另存可迁移的 Shell parsing identity，并在目标 profile 注册后用新 CLSID 重建 PIDL。当前 provider 尚未接入产品，用户现有快速链接还不会指向它。下一步评估最小 companion metadata 格式并为 `QuickLinkStore` 增加读写与隔离发布重映射 smoke，再推进 App 注册 owner 生命周期。逐行递归大小列仍未接入产品或 release。
+
+### 2026-11-02：快速链接保存 profile parsing identity
+
+`QuickLinkStore` 现接收当前 profile CLSID；当目标 identity 属于该 provider 时，仍创建标准 `.lnk`，并原子写入相邻的 `<link>.lnk.identity` UTF-8 sidecar。读取快速链接时仅在 sidecar CLSID 与当前 profile 相符、且 Shell identity 格式有效时优先返回该 parsing name；普通文件、文件夹和其它 Shell 位置维持原 Shell Link 解析路径。创建 sidecar 失败会清理对应 `.lnk`，避免留下看似成功但克隆后不可迁移的链接。隔离发布仅复制每个 `.lnk` 与其 sidecar，并对副本的文本身份替换 provider CLSID。
+
+SettingsSmoke 完整运行通过，包含 profile CLSID 重写后读取 sidecar 的用例；`scripts/publish-smoke.ps1` 验证 sidecar 被复制、改写且源 fixture hash 不变；App Release build 0 警告/错误。没有产品 provider 注册、真实 profile 发布或 GUI 验收。该改动只为未来 app-owned provider 快速链接提供迁移数据；旧链接仍按原 Shell PIDL/Path 行为读取。下一步推进 App 级 namespace owner 生命周期，随后把 Native adapter 接到现有 ExplorerBrowserHost，并在可见验收中验证列排序、异步值回填、导航历史与文件操作。

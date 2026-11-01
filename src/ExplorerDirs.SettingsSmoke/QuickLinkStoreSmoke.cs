@@ -87,6 +87,27 @@ internal static class QuickLinkStoreSmoke
                 ShellLocationIdentity.TryGetFolderPidl(shellFolderTarget, out shellFolderPidl);
             if (isShellFolder) Marshal.FreeCoTaskMem(shellFolderPidl);
             Check(isShellFolder, "virtual Shell folder shortcut resolves to a confirmed folder parsing name");
+
+            var providerClassId = Guid.Parse("20D04FE0-3AEA-1069-A2D8-08002B30309D");
+            var providerIdentity = $"::{{{providerClassId:D}}}";
+            var identityStore = new QuickLinkStore(Path.Combine(root, "provider-links"), providerClassId);
+            var providerShortcut = identityStore.AddFolderLocation(providerIdentity);
+            var identitySidecar = providerShortcut + ".identity";
+            Check(File.Exists(identitySidecar), "profile-owned Shell locations create a parsing-identity sidecar");
+            Check(File.ReadAllText(identitySidecar).Trim() == providerIdentity,
+                "quick-link identity sidecar stores the absolute provider parsing name");
+            Check(identityStore.TryGetTarget(providerShortcut, out var savedProviderIdentity) &&
+                  savedProviderIdentity == providerIdentity,
+                "quick-link loading prefers its profile-owned parsing identity");
+
+            var clonedClassId = Guid.NewGuid();
+            var clonedIdentity = providerIdentity.Replace(providerClassId.ToString("D"), clonedClassId.ToString("D"),
+                StringComparison.OrdinalIgnoreCase);
+            File.WriteAllText(identitySidecar, clonedIdentity);
+            var clonedStore = new QuickLinkStore(Path.Combine(root, "provider-links"), clonedClassId);
+            Check(clonedStore.TryGetTarget(providerShortcut, out var restoredClonedIdentity) &&
+                  restoredClonedIdentity == clonedIdentity,
+                "a cloned profile resolves a quick link from its remapped parsing-identity sidecar");
         }
         finally
         {

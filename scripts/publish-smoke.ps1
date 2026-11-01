@@ -71,6 +71,7 @@ $workspaceState = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($work
 $quickLinks = Join-Path $fixtureProfile 'QuickLinks'
 New-Item -ItemType Directory -Path $quickLinks, (Join-Path $quickLinks 'nested') | Out-Null
 [IO.File]::WriteAllText((Join-Path $quickLinks '我的目录.lnk'), 'shortcut fixture')
+[IO.File]::WriteAllText((Join-Path $quickLinks '我的目录.lnk.identity'), $sourceProviderIdentity)
 [IO.File]::WriteAllText((Join-Path $quickLinks 'notes.txt'), 'not a quick link')
 [IO.File]::WriteAllText((Join-Path $quickLinks 'nested/ignored.lnk'), 'not listed by QuickLinkStore')
 [IO.File]::WriteAllText((Join-Path $fixtureProfile 'unrelated.txt'), 'not app settings')
@@ -161,8 +162,14 @@ if (-not (Test-Path -LiteralPath $quickLinkCopy -PathType Leaf) -or
     (Get-FileHash -LiteralPath $quickLinkCopy -Algorithm SHA256).Hash -ne $before[(Join-Path $quickLinks '我的目录.lnk')]) {
     throw 'Isolated preview did not preserve the saved Quick Link.'
 }
+$quickLinkIdentityCopy = $quickLinkCopy + '.identity'
+if (-not (Test-Path -LiteralPath $quickLinkIdentityCopy -PathType Leaf) -or
+    -not [IO.File]::ReadAllText($quickLinkIdentityCopy).Contains($copiedProviderClassId.ToString('D'), [StringComparison]::OrdinalIgnoreCase) -or
+    [IO.File]::ReadAllText($quickLinkIdentityCopy).Contains($sourceProviderClassId.ToString('D'), [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Isolated preview did not remap the copied Quick Link parsing identity.'
+}
 if ((Get-ChildItem -LiteralPath (Join-Path $copied 'Workspaces') -Recurse -File).Count -ne 1 -or
-    (Get-ChildItem -LiteralPath (Join-Path $copied 'QuickLinks') -Recurse -File).Count -ne 1 -or
+    (Get-ChildItem -LiteralPath (Join-Path $copied 'QuickLinks') -Recurse -File).Count -ne 2 -or
     (Test-Path -LiteralPath (Join-Path $copied 'unrelated.txt')) -or
     (Test-Path -LiteralPath (Join-Path $copied 'unrelated.ini')) -or
     (Test-Path -LiteralPath (Join-Path $copied 'ExplorerDirs.window-fedcba9876543210fedcba9876543210.ini'))) {

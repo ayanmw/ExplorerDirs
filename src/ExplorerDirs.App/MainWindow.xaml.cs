@@ -215,7 +215,7 @@ public partial class MainWindow : Window
             EnvironmentStatus.Text = warning;
         _favoritesStore = new FavoritesStore(Path.Combine(_profileDirectory, "Favorites.ini"));
         _favorites = _favoritesStore.Load().ToList();
-        _quickLinkStore = new QuickLinkStore(Path.Combine(_profileDirectory, "QuickLinks"));
+        _quickLinkStore = new QuickLinkStore(Path.Combine(_profileDirectory, "QuickLinks"), _shellNamespaceProfileClassId);
         _programStarterStore = new ProgramStarterStore(Path.Combine(_profileDirectory, "ProgramStarter.ini"));
         _programStarterEntries = _programStarterStore.Load();
         if (_programStarterStore.LoadWarning is { } programStarterWarning)

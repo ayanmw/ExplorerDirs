@@ -16,10 +16,11 @@ internal static class QuickLinkOpenPolicy
             : QuickLinkOpenDestination.CurrentPane;
 }
 
-internal sealed class QuickLinkStore(string directory)
+internal sealed class QuickLinkStore(string directory, Guid? shellNamespaceProfileClassId = null)
 {
     private static readonly Guid ShellLinkClassId = new("00021401-0000-0000-C000-000000000046");
     private readonly string _directory = Path.GetFullPath(directory);
+    private readonly Guid? _shellNamespaceProfileClassId = shellNamespaceProfileClassId;
     public string? LoadWarning { get; private set; }
 
     public IReadOnlyList<QuickLinkEntry> Load()
@@ -62,7 +63,8 @@ internal sealed class QuickLinkStore(string directory)
         try
         {
             return SaveShortcut(ShellLocationIdentity.GetDisplayName(identity),
-                shellLink => Marshal.ThrowExceptionForHR(shellLink.SetIDList(pidl)));
+                shellLink => Marshal.ThrowExceptionForHR(shellLink.SetIDList(pidl)),
+                IsProfileProviderIdentity(identity) ? identity : null);
         }
         finally { Marshal.FreeCoTaskMem(pidl); }
     }
@@ -106,6 +108,7 @@ internal sealed class QuickLinkStore(string directory)
         target = string.Empty;
         if (!File.Exists(shortcutPath) || !Path.GetExtension(shortcutPath).Equals(".lnk", StringComparison.OrdinalIgnoreCase))
             return false;
+        if (TryReadProfileIdentity(shortcutPath, out target)) return true;
 
         object? instance = null;
         try
@@ -148,12 +151,12 @@ internal sealed class QuickLinkStore(string directory)
     private string GetAvailablePath(string title)
     {
         var candidate = Path.Combine(_directory, $"{title}.lnk");
-        for (var suffix = 2; File.Exists(candidate); suffix++)
+        for (var suffix = 2; File.Exists(candidate) || File.Exists(candidate + ".identity"); suffix++)
             candidate = Path.Combine(_directory, $"{title} ({suffix}).lnk");
         return candidate;
     }
 
-    private string SaveShortcut(string title, Action<IShellLinkW> configure)
+    private string SaveShortcut(string title, Action<IShellLinkW> configure, string? persistedIdentity = null)
     {
         var invalidCharacters = Path.GetInvalidFileNameChars().ToHashSet();
         title = new string(title.Select(character =>
@@ -168,8 +171,58 @@ internal sealed class QuickLinkStore(string directory)
             configure(shellLink);
             Marshal.ThrowExceptionForHR(((IPersistFile)shellLink).Save(shortcutPath, true));
         }
+        catch
+        {
+            try { if (File.Exists(shortcutPath)) File.Delete(shortcutPath); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            throw;
+        }
         finally { Marshal.FinalReleaseComObject(shellLink); }
+        if (persistedIdentity is not null)
+        {
+            try
+            {
+                PortableIniWriter.WriteIfUnchanged(shortcutPath + ".identity", expected: null,
+                    persistedIdentity + Environment.NewLine,
+                    "快速链接身份文件已被其他操作创建，请重试。");
+            }
+            catch
+            {
+                try { if (File.Exists(shortcutPath)) File.Delete(shortcutPath); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+                throw;
+            }
+        }
         return shortcutPath;
+    }
+
+    private bool IsProfileProviderIdentity(string identity)
+    {
+        if (_shellNamespaceProfileClassId is not { } classId) return false;
+        var prefix = $"::{{{classId:D}}}";
+        return identity.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+            (identity.Length == prefix.Length || identity[prefix.Length] is '\\' or '/');
+    }
+
+    private bool TryReadProfileIdentity(string shortcutPath, out string identity)
+    {
+        identity = string.Empty;
+        try
+        {
+            var saved = File.ReadAllText(shortcutPath + ".identity").Trim();
+            if (!IsProfileProviderIdentity(saved) || !ShellLocationIdentity.TryNormalize(saved, out identity, out _))
+            {
+                identity = string.Empty;
+                return false;
+            }
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     [ComImport, Guid("000214F9-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]

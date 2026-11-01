@@ -237,7 +237,7 @@ if ($IsolatedProfile) {
         }
     }
     # Quick Links are user-managed Shell shortcuts. Copy only the top-level
-    # .lnk files the runtime menu reads; do not carry unrelated profile files.
+    # .lnk files the runtime menu reads and their optional identity sidecars.
     $quickLinksSource = Join-Path $profileSourceRoot 'QuickLinks'
     if (Test-Path -LiteralPath $quickLinksSource -PathType Container) {
         $quickLinks = @(Get-ChildItem -LiteralPath $quickLinksSource -File -Force |
@@ -247,6 +247,10 @@ if ($IsolatedProfile) {
             New-Item -ItemType Directory -Path $quickLinksCopy | Out-Null
             foreach ($link in $quickLinks) {
                 Copy-Item -LiteralPath $link.FullName -Destination (Join-Path $quickLinksCopy $link.Name)
+                $identityPath = $link.FullName + '.identity'
+                if (Test-Path -LiteralPath $identityPath -PathType Leaf) {
+                    Copy-Item -LiteralPath $identityPath -Destination (Join-Path $quickLinksCopy ($link.Name + '.identity'))
+                }
             }
         }
     }
@@ -256,6 +260,12 @@ if ($IsolatedProfile) {
         $newClassIdText = $previewShellProviderClassId.ToString('D')
         foreach ($ini in Get-ChildItem -LiteralPath $profileCopy -Filter '*.ini' -File -Recurse) {
             Update-CopiedTextProviderIdentity -Path $ini.FullName -OldClassId $oldClassIdText -NewClassId $newClassIdText
+        }
+        $quickLinksCopy = Join-Path $profileCopy 'QuickLinks'
+        if (Test-Path -LiteralPath $quickLinksCopy -PathType Container) {
+            foreach ($identityFile in Get-ChildItem -LiteralPath $quickLinksCopy -Filter '*.lnk.identity' -File) {
+                Update-CopiedTextProviderIdentity -Path $identityFile.FullName -OldClassId $oldClassIdText -NewClassId $newClassIdText
+            }
         }
         $workspaceCopies = Join-Path $profileCopy 'Workspaces'
         if (Test-Path -LiteralPath $workspaceCopies -PathType Container) {
