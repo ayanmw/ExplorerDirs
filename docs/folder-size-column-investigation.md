@@ -2032,3 +2032,9 @@ SettingsSmoke、App 与 NativeProbe Release 构建均为 0 警告/错误；增�
 整批 `ApplyRecursiveScanResults` 会把结果字典缺少的文件夹行清空，因此不能安全消费一个目录一个目录到达的回调。为原型行模型新增单项应用入口：只匹配指定绝对路径，核对行快照身份、扫描句柄身份与当前路径身份后写入该行；其它行的待计算状态或已有值保持不变。同路径目录已被替换时，旧结果被拒绝且只清空目标行的旧递归值。
 
 SettingsSmoke 的红测在实现前因增量入口缺失而编译失败；实现后 Release 构建 0 警告/错误，行模型 smoke 与递归扫描器 smoke 通过。随后将队列、真实句柄扫描器和行模型入口组合到同一无窗口 probe：worker 在首个目录回调暂停时，owner 从队列取结果并只更新目标行；扫描结束后八个文件夹行与最终结果逐一对账，根目录回调不误匹配任何子项。此项打通了 callback 结果到隔离行模型的更新语义，但尚未把它接到 NativeProbe 的 peer ListView 更新循环或产品 Dispatcher；尚无可见行渐进更新证据。
+
+### 2026-11-01：扫描协调器逐项 owner 发布与过期队列门控
+
+扩展隔离 `DirectoryTreeScanCoordinator` 的最新扫描合同：worker 每产出一项就投递到 owner `SynchronizationContext` 并等待该项被处理，再继续扫描，保证更新有序且最多一个待处理增量，owner 处理速度会自然限制扫描推进；最终摘要在所有增量之后发布。若队列等待期间该 ticket 被新扫描/取消/释放取代，owner 回调重新校验代次并丢弃该项，worker 随后停止，旧请求返回未发布。
+
+新增 STA Dispatcher 检查 owner 线程及“单项在最终结果前”的顺序；queued context 检查已排队结果在代次退休后不可发布。SettingsSmoke Release build 0 警告/错误，包含 coordinator、行模型与递归扫描的 smoke 通过。该协调器并未接入 peer ListView，也没有可见增量绘制结果；这是 owner 派发/背压原型，不是产品功能。

@@ -44,11 +44,80 @@ internal static class DirectoryTreeScanCoordinatorSmoke
             "disposing a scan owner cancels outstanding work and blocks stale publication");
 
         VerifyLatestAsyncPublication();
+        VerifyLatestIncrementalPublication();
+        VerifyQueuedStaleIncrementalPublication();
         VerifyQueuedStalePublication();
         VerifyFilesystemChangeInvalidatesQueuedPublication();
         VerifyRetiredWorkerFailure();
 
         Console.WriteLine("Directory tree scan coordinator smoke: PASS");
+    }
+
+    private static void VerifyLatestIncrementalPublication()
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                using var owner = new ExplorerDirs.NativeProbe.DirectoryTreeScanCoordinator();
+                var dispatcher = Dispatcher.CurrentDispatcher;
+                var context = new DispatcherSynchronizationContext(dispatcher);
+                var ownerThreadId = Environment.CurrentManagedThreadId;
+                var workerThreadId = 0;
+                var order = new List<string>();
+                var request = owner.RunLatestIncrementalAsync<int, int>(
+                    (token, publish) =>
+                    {
+                        workerThreadId = Environment.CurrentManagedThreadId;
+                        token.ThrowIfCancellationRequested();
+                        publish(7);
+                        return 42;
+                    }, context,
+                    value =>
+                    {
+                        Check(Environment.CurrentManagedThreadId == ownerThreadId,
+                            "incremental values publish on the owner synchronization context");
+                        order.Add($"item:{value}");
+                    },
+                    result =>
+                    {
+                        Check(Environment.CurrentManagedThreadId == ownerThreadId,
+                            "final scan result publishes on the owner synchronization context");
+                        order.Add($"final:{result}");
+                    });
+                PumpDispatcherUntil(request);
+                Check(request.GetAwaiter().GetResult() && workerThreadId != ownerThreadId &&
+                      order.SequenceEqual(["item:7", "final:42"]),
+                    "incremental row values are delivered before the final scan summary");
+            }
+            catch (Exception ex) { failure = ex; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        if (failure is not null) throw new InvalidOperationException("Incremental owner publication smoke failed.", failure);
+    }
+
+    private static void VerifyQueuedStaleIncrementalPublication()
+    {
+        using var owner = new ExplorerDirs.NativeProbe.DirectoryTreeScanCoordinator();
+        using var context = new QueuedSynchronizationContext();
+        var progressPublished = false;
+        var finalPublished = false;
+        var request = owner.RunLatestIncrementalAsync<int, int>(
+            (_, publish) =>
+            {
+                publish(7);
+                return 42;
+            }, context, _ => progressPublished = true, _ => finalPublished = true);
+        if (!context.WaitForPost(TimeSpan.FromSeconds(5)))
+            throw new TimeoutException("The incremental scan result did not reach its owner context.");
+
+        var newerRequest = owner.Begin();
+        context.RunPostedCallback();
+        Check(!request.GetAwaiter().GetResult() && !progressPublished && !finalPublished && owner.IsCurrent(newerRequest),
+            "a queued incremental value is discarded after its scan generation is retired");
     }
 
     private static void VerifyLatestAsyncPublication()

@@ -67,6 +67,58 @@ internal sealed class DirectoryTreeScanCoordinator : IDisposable
         return await published.Task.ConfigureAwait(false);
     }
 
+    internal async Task<bool> RunLatestIncrementalAsync<TItem, TResult>(
+        Func<CancellationToken, Action<TItem>, TResult> scan,
+        SynchronizationContext ownerContext,
+        Action<TItem> publishItem,
+        Action<TResult> publishFinal)
+    {
+        ArgumentNullException.ThrowIfNull(scan);
+        ArgumentNullException.ThrowIfNull(ownerContext);
+        ArgumentNullException.ThrowIfNull(publishItem);
+        ArgumentNullException.ThrowIfNull(publishFinal);
+        var ticket = Begin();
+        TResult result;
+        try
+        {
+            result = await Task.Run(() => scan(ticket.CancellationToken, item =>
+            {
+                if (!IsCurrent(ticket)) throw new OperationCanceledException(ticket.CancellationToken);
+                if (!PostToOwnerAsync(() => publishItem(item)).GetAwaiter().GetResult())
+                    throw new OperationCanceledException(ticket.CancellationToken);
+            }), ticket.CancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception) when (!IsCurrent(ticket))
+        {
+            // Retired incremental work must not report a failure after a newer scan has taken ownership.
+            return false;
+        }
+
+        if (!IsCurrent(ticket)) return false;
+        try { return await PostToOwnerAsync(() => publishFinal(result)).ConfigureAwait(false); }
+        catch (Exception) when (!IsCurrent(ticket)) { return false; }
+
+        Task<bool> PostToOwnerAsync(Action publish)
+        {
+            var published = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            ownerContext.Post(_ =>
+            {
+                if (!IsCurrent(ticket))
+                {
+                    published.TrySetResult(false);
+                    return;
+                }
+                try
+                {
+                    publish();
+                    published.TrySetResult(true);
+                }
+                catch (Exception exception) { published.TrySetException(exception); }
+            }, null);
+            return published.Task;
+        }
+    }
+
     internal void CancelCurrent()
     {
         DirectoryTreeScanTicket? retired;
