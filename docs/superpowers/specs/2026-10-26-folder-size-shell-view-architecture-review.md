@@ -1,12 +1,12 @@
 # 逐行文件夹大小列：原生 Shell 视图架构评审
 
-状态：架构评审完成；用户已授权隔离 `IShellView` 原型验证，不授权产品视图迁移。本文件补充[逐行文件夹大小与子项计数列调查](../../folder-size-column-investigation.md)和[IShellView 分阶段迁移门槛](2026-10-25-ishellview-host-migration-gates.md)。
+状态：架构评审持续更新；用户已授权隔离 `IShellView` 原型验证，不授权产品视图迁移。本文件补充[逐行文件夹大小与子项计数列调查](../../folder-size-column-investigation.md)和[IShellView 分阶段迁移门槛](2026-10-25-ishellview-host-migration-gates.md)。
 
 ## 结论
 
-不要为了逐行大小列直接实现自绘文件列表或完整自定义 `IShellView`。最值得继续验证的方向是：**隔离宿主 + 文件系统 `IShellFolder2` 适配层 + Windows DefView（由 `SHCreateShellFolderView` 创建的系统文件视图）**。适配层委托真实文件夹的项目身份、图标、菜单、打开、文件操作和数据对象，只增加本程序的派生列，并为其定义稳定的数值排序。
+早期阶段优先验证了**隔离宿主 + 文件系统 `IShellFolder2` 适配层 + Windows DefView**，因为它理论上能委托原生项目身份与 Shell 操作。后续真实 DefView 探针未请求适配器提供的逐行自定义列值或比较键；包装真实 child PIDL 后也只观察到列标题请求。因此当前证据不支持把这条路线作为逐行派生列的实现方案，不能仅凭 `IShellFolder2` 方法合同完整而假定 DefView 会消费新列。
 
-这条路有机会保留大部分 Windows 文件列表行为，但仍是独立 Shell 浏览器宿主，不是可以直接塞进当前 `ExplorerBrowser` 的列插件。它必须先证明视图、folder adapter 与浏览器服务之间的契约；当前产品继续使用 ExplorerBrowser。`IColumnProvider`、`SetViewProperty` 缓存和自绘 ListView 均不满足目标。
+继续研究的方向是**受控行视图 + 真实 Shell 行身份和操作委托**，但这会承担快捷键、菜单、视图状态、拖放、provider、焦点、通知和无障碍等完整兼容责任。它是高成本隔离迁移原型，不是可以直接塞进当前 `ExplorerBrowser` 的列插件，也未获准接入产品。产品继续使用 ExplorerBrowser；`IColumnProvider`、`SetViewProperty` 缓存和单独的 PIDL 包装均不能满足已验证的逐行列要求。
 
 ## Q-Dir 目标行为
 
@@ -20,8 +20,8 @@ Q-Dir 官方 [FAQ 63](https://www.softwareok.com/?faq=63&seite=faq-Q-DIR) 描述
 | --- | --- | --- |
 | ExplorerBrowser + `SetViewProperty(System.Size)` | 本地隔离探针能写入视图缓存；Shell 大小排序忽略注入值，`Refresh()` 清除缓存；API 已弃用 | 淘汰。显示、排序和刷新不能保持一致 |
 | ExplorerBrowser + `IColumnProvider` 或注册 Property Handler | `IColumnProvider` 是旧式方案；Property Handler 面向已关联文件类型，不是便携地给任意目录增加派生列 | 淘汰。不适用于当前绿色化、任意目录和逐行递归数据 |
-| 自定义 folder adapter + Windows DefView | 用 `IShellFolder2` 的列元数据/取值接口暴露新增列；委托项目 PIDL 与 Shell 操作；可利用系统 DefView 的标准列表交互 | 推荐做隔离原型。需自行提供 adapter PIDL/导航和 `IShellBrowser` 宿主，COM 委托与异步派生值风险仍高 |
-| 完全自定义 `IShellView` / WPF 列表 | 列和排序可完全控制 | 不推荐为单列投入；需自行重做 Shell 菜单、快捷键、选择、拖放、属性、实时通知和无障碍 |
+| 自定义 folder adapter + Windows DefView | Shell 列元数据和数值比较接口可由 adapter 正确实现；但当前 DefView 探针没有请求逐行值或比较键，真实 child PIDL 包装也未改变该结果 | 不满足当前列消费门槛；不再重复 adapter-only / PIDL-only 接线 |
+| 受控行视图 + 真实 Shell 行身份与操作委托 | 可以控制派生列、排序及行更新；NativeProbe 已分别验证 Shell 枚举、部分文件操作、通知和焦点能力 | 仅继续隔离集成原型；需把分散合同组合并补足菜单、真实 OLE 拖放、provider、状态恢复和可见验收 |
 | 暂缓逐行列，保留 F9 与状态栏 | 不增加列能力 | 当前产品默认。直到原型证明 Shell 行为可保留，不改变 ExplorerBrowser |
 
 Microsoft 文档说明，`IShellFolder2` 为文件夹视图提供项目列详情与属性键映射；Shell 也提供默认 DefView，namespace extension 可用它而不自行重做整个视图。Microsoft 同时指出，自定义 `IShellView` 会要求扩展自行实现视图，且部分视图能力只由默认 Shell view 提供。[IShellFolder2 及列详情](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-ishellfolder2)、[Shell namespace 与 DefView](https://learn.microsoft.com/en-us/windows/win32/shell/nse-works)、[Shell interfaces](https://learn.microsoft.com/en-us/windows/win32/shell/interfaces)。
@@ -50,7 +50,7 @@ Microsoft 文档说明，`IShellFolder2` 为文件夹视图提供项目列详情
 
 - 评审结果是**值得做隔离 DefView + `IShellFolder2` adapter 原型**，不是批准迁移产品。
 - 不采用“双宿主按位置静默切换”作为产品方案；同一个标签不能因位置或布局不同而改变菜单、历史、键盘、列或文件操作语义。
-- 如果 adapter 无法同时提供可排序数值列和可委托的原生 Shell 项目操作，就保留 ExplorerBrowser + F9 汇总，不用只显示但不可排序/刷新错误的大小列冒充完成。
+- 已验证 DefView 没有消费 adapter 暴露的逐行派生值，因此不再通过追加列 adapter 或仅替换 child PIDL 推进该列；产品保留 ExplorerBrowser + F9 汇总，受控行视图在迁移门槛通过前仅限隔离实验。
 - 原型评估递归列前，先确认产品策略：逐行大小列是否视为用户显式请求、是否只在 Details 中按需启用，以及网络/权限不全时如何显示。现有“不要自动递归计算”的约束继续有效。
 
 ## 评审后下一步
