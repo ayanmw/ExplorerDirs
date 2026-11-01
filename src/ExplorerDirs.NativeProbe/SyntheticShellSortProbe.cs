@@ -355,6 +355,7 @@ public static class SyntheticShellSortProbe
     internal static int Run(bool recursiveDirectorySizeSortOnly = false, bool maskFilesystemAttributes = false,
         bool selfOwnedAttributes = false, bool customSizeColumn = false, bool useWpfParent = false,
         bool exerciseUpdateNotifications = false, bool slowCustomSizeColumn = false, bool twoViewDistinctLocations = false,
+        bool twoViewPathIdentityLocations = false,
         bool focusRecoveryExperiment = false, bool factorySnapshotCacheOnly = false,
         uint? relativePercentColumnType = null, bool humanSizeText = false,
         int sizeDisplayUnit = 0, int sizeDisplayDecimals = 2, bool sizeDisplayThousands = false,
@@ -363,6 +364,8 @@ public static class SyntheticShellSortProbe
         bool asyncOnDemandRecursiveSize = false, ViewState? viewStateToRestore = null,
         bool loadQdrStateFromFile = false, bool verifyRecursiveRowValues = true)
     {
+        if (twoViewPathIdentityLocations && !twoViewDistinctLocations)
+            throw new ArgumentException("Path-identity view roots require the isolated two-view target-sync scenario.", nameof(twoViewPathIdentityLocations));
         if (relativePercentColumnType is not null && !recursiveDirectorySizeSortOnly)
             throw new ArgumentException("The relative-percent metadata probe requires the isolated recursive-size view.", nameof(relativePercentColumnType));
         var sizeUpdateStrategy = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_SIZE_UPDATE_STRATEGY") ?? "single-item";
@@ -637,9 +640,15 @@ public static class SyntheticShellSortProbe
             secondViewRootPidl = rootPidl;
             if (twoViewDistinctLocations)
             {
-                // Same-root twin views cannot prove per-pane notification routing; resolve two child Shell locations instead.
-                Check(SHParseDisplayName($"::{syntheticFolderClassId:B}\\Pane1", 0, out firstViewRootPidl, 0, out _));
-                Check(SHParseDisplayName($"::{syntheticFolderClassId:B}\\Pane2", 0, out secondViewRootPidl, 0, out _));
+                // Same-root twin views cannot prove per-pane notification routing; use separate children or path-identity PIDLs.
+                var firstParsingName = twoViewPathIdentityLocations
+                    ? CreatePathIdentityParsingName(syntheticFolderClassId, firstPaneFolder)
+                    : $"::{syntheticFolderClassId:B}\\Pane1";
+                var secondParsingName = twoViewPathIdentityLocations
+                    ? CreatePathIdentityParsingName(syntheticFolderClassId, secondPaneFolder)
+                    : $"::{syntheticFolderClassId:B}\\Pane2";
+                Check(SHParseDisplayName(firstParsingName, 0, out firstViewRootPidl, 0, out _));
+                Check(SHParseDisplayName(secondParsingName, 0, out secondViewRootPidl, 0, out _));
             }
             else if (asyncSharedViewDistinctRoots)
             {
@@ -4441,6 +4450,14 @@ public static class SyntheticShellSortProbe
         }, 0);
         if (listView == 0) throw new InvalidOperationException("The synthetic DefView did not create its SysListView32.");
         return listView;
+    }
+
+    private static string CreatePathIdentityParsingName(Guid classId, string path)
+    {
+        var token = new StringBuilder("edpath:", checked(7 + path.Length * 4));
+        foreach (var character in path)
+            token.Append(((int)character).ToString("X4", System.Globalization.CultureInfo.InvariantCulture));
+        return $"::{{{classId:D}}}\\{token}";
     }
 
     private static string FindAdapterLibrary()

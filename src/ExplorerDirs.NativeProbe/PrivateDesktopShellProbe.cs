@@ -259,6 +259,11 @@ internal static class PrivateDesktopShellProbe
     internal static int RunSyntheticShellTwoViewTargetSync() =>
         Run("synthetic-shell-two-view-target-sync", () => SyntheticShellSortProbe.Run(twoViewDistinctLocations: true), TimeSpan.FromSeconds(45), initializeOle: true);
 
+    internal static int RunSyntheticShellPathIdentityTwoView() =>
+        Run("synthetic-shell-path-identity-two-view", () => SyntheticShellSortProbe.Run(
+            twoViewDistinctLocations: true, twoViewPathIdentityLocations: true),
+            TimeSpan.FromSeconds(60), initializeOle: true);
+
     internal static int RunSyntheticShellFocusRecoveryExperiment() =>
         Run("synthetic-shell-focus-recovery", () => SyntheticShellSortProbe.Run(focusRecoveryExperiment: true), TimeSpan.FromSeconds(45), initializeOle: true);
 

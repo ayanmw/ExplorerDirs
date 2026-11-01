@@ -2215,3 +2215,9 @@ NativeProbe 现在直接链接生产 `QdrViewWriter` 与 `QdrImporter` 源码，
 修正为 `::{CLSID}\edpath:<UTF-16 hex>` parsing name：相对显示仍用物理路径，Shell parsing name 则用稳定 CLSID 前缀与无分隔符路径 token；`ParseDisplayName` 解码 token 后校验物理目录并生成分段 PIDL。注册探针现确认绝对 parsing name 经 `SHGetNameFromIDList` 与 `SHParseDisplayName` 往返后 PIDL 字节一致，路径 B 绑定后只看到 B 的独有行及 29 B 递归值，目录 A 的根对象仍同时存活且保持 13 B；文件夹内显示名为目录叶名称，不暴露 token。此过程临时注册项在 finally 中清理，没有创建 Shell view/window。
 
 这是自然 namespace 激活、路径 Parse/Bind 与 PIDL 名称 round-trip 的成功证据，但不是产品级完成：还需验证不同 child/path 顺序和重启后的稳定性、导航历史、真实 ExplorerBrowser 双窗格、列状态恢复、Shell 文件操作/通知及绿色部署；产品仍未采用自定义视图。
+
+### 2026-11-02：同 CLSID 路径根的双 IShellView 操作验证
+
+新增 Private Desktop 场景 `--synthetic-shell-path-identity-two-view-private-desktop`。它通过同一临时注册 CLSID 下两个独立 `edpath` parsing name 创建 Pane1/Pane2 的 Shell view，并逐项核实两视图只枚举自己的文件。随后从一视图向另一视图执行 Shell MOVE 与 COPY：源/目标内容在对应视图更新，来源/目标文件状态符合操作结果；private desktop 守卫确认前台窗口、最后输入时间未变化，隔离桌面及夹具清理通过。NativeProbe Release build 0 警告/错误。
+
+这证明路径 PIDL 可以驱动两个并存的 `IShellView` 实例和 Shell 文件操作通知。没有验证每个路径根的 Back/Forward Travel Log、跨重建或进程重启后的历史恢复、Q-Dir/产品列状态保存、完整 ExplorerBrowser 控件、多标签会话或用户可见菜单/焦点；这是隔离迁移实验，不是产品接线或可发布功能。
