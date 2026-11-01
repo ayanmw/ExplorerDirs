@@ -1538,3 +1538,11 @@ NativeProbe 新增 `--shell-view-real-pidl-navigation-smoke`，使用临时真�
 异步批次现在只把 `S_OK` 作为已发布结果：被通知丢弃的 `S_FALSE` 不会计为成功，也不会触发多余的 view 更新。原生 adapter `/W4 /WX` 构建、NativeProbe Release 构建、`--static-shell-column-folder-smoke` 与 `--synthetic-async-on-demand-recursive-size-column-smoke` 均通过；静态输出含 `recursive-size-inflight-invalidation-passed`，两命令均为无 Shell view 窗口合同。未启动 GUI。
 
 边界：这是隔离 NativeProbe 的缓存与异步提交正确性修复，不证明真实 `IShellView` 通知时序或 ExplorerBrowser 产品接线。递归大小列仍是 P2 原型；ExplorerBrowser 包装真实目录的宿主切片仍是接入门槛。
+
+### 2026-11-01：按需递归大小快照同时保存文件与文件夹数量
+
+对照 Q-Dir 的“类型列显示递归文件/文件夹数量”选项时发现 NativeProbe 异步按需路径有缺口：枚举阶段刻意不扫描后代，`SyntheticRecursiveSizeSnapshotStore` 之前只缓存字节数，Type 列因此可能显示 `0 files, 0 folders`，而且读取 Type 列不会启动扫描。扩展同一快照保存递归 bytes/files/folders；启用扩展元数据时，Type 列首次读取会复用大小列的同一有界异步任务，未完成先返回空文本，扫描后返回递归计数。没有额外启动第二次扫描。
+
+无窗口 NativeProbe 回归先因 pending count 返回 `0 files, 0 folders` 按预期失败；修复后逐项队列和按 view 批次均读到 `2 files, 1 folder`，仍为两 worker、重复读取命中缓存、关闭后取消剩余任务。Native adapter `/W4 /WX`、NativeProbe Release、两种异步队列 smoke 与静态 folder contract 通过。快照每项增加两个 `ULONGLONG` 计数字段；这里只证明原型快照行为。
+
+边界：未接入 ExplorerBrowser 产品，不证明可见 Type 列绘制、Q-Dir 本地化/格式偏好或可见刷新效果；这仍是隔离 P2 原型。包装真实本地目录的 ExplorerBrowser 宿主切片仍未过迁移门槛。

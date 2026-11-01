@@ -5673,3 +5673,7 @@ NativeProbe 已将每个 view 的合并批次拆为至多两个并行半批，�
 ### 2026-11-01：修复递归大小列扫描通知竞态
 
 NativeProbe 递归快照缓存新增 in-flight 失效标记，确保目录变更通知与 worker 提交在同一锁下仲裁：通知先到时旧扫描不得回填缓存，结束后新请求可重试。只对真正发布的结果触发 view 更新，避免已失效扫描产生无意义重绘。无窗口红/绿合同、原生 `/W4 /WX` 构建、NativeProbe Release 构建及异步队列 smoke 通过。该项提升隔离原型的正确性；产品仍为 ExplorerBrowser，逐行递归大小列尚未接入。详见[调查记录](folder-size-column-investigation.md#2026-11-01递归大小扫描期间-shell-通知的失效竞态)。
+
+### 2026-11-01：按需大小列补齐异步递归文件/文件夹数量
+
+Q-Dir 对照确认 Type 列的递归 counts 也需要复用后台扫描值。NativeProbe 之前只缓存 bytes，异步按需模式下 Type 会得到空扫描数据；现已让 Type 首次读取加入同一有界任务，并随 bytes 一起发布递归文件/文件夹数量。未完成时为空，完成后隔离夹具读到 `2 files, 1 folder`；逐项与 view-batch smoke、原生/Release 构建通过。仍是 NativeProbe 原型，不代表产品 ExplorerBrowser 接线或可见验收。详见[调查记录](folder-size-column-investigation.md#2026-11-01按需递归大小快照同时保存文件与文件夹数量)。

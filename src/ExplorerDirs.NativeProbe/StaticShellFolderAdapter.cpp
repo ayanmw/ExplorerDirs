@@ -1360,6 +1360,8 @@ namespace
     {
         SyntheticFileIdentity identity;
         ULONGLONG bytes = 0;
+        ULONGLONG files = 0;
+        ULONGLONG folders = 0;
         ULONGLONG lastAccess = 0;
     };
 
@@ -1404,7 +1406,8 @@ namespace
             if (!references) delete this;
             return references;
         }
-        HRESULT Set(PCWSTR parsingName, const SyntheticFileIdentity& identity, ULONGLONG bytes)
+        HRESULT Set(PCWSTR parsingName, const SyntheticFileIdentity& identity, ULONGLONG bytes,
+            ULONGLONG files = 0, ULONGLONG folders = 0)
         {
             if (!parsingName || !*parsingName || !identity.available) return E_INVALIDARG;
             try
@@ -1414,7 +1417,7 @@ namespace
                 // An item-change notification can arrive after a worker starts scanning;
                 // never let that pre-notification result repopulate the invalidated cache.
                 if (inProgress != _scansInProgress.end() && inProgress->second) return S_FALSE;
-                _sizes[parsingName] = { identity, bytes, NextAccessSequence() };
+                _sizes[parsingName] = { identity, bytes, files, folders, NextAccessSequence() };
                 TrimToCapacity();
             }
             catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
@@ -1525,7 +1528,8 @@ namespace
                 if (matchesChangedPath(entry.first)) entry.second = true;
             return removed;
         }
-        bool TryGet(const std::wstring& parsingName, const SyntheticFileIdentity& identity, ULONGLONG* bytes) const
+        bool TryGet(const std::wstring& parsingName, const SyntheticFileIdentity& identity, ULONGLONG* bytes,
+            ULONGLONG* files = nullptr, ULONGLONG* folders = nullptr) const
         {
             if (!identity.available || !bytes) return false;
             std::lock_guard<std::mutex> lock(_mutex);
@@ -1540,6 +1544,8 @@ namespace
             }
             found->second.lastAccess = NextAccessSequence();
             *bytes = found->second.bytes;
+            if (files) *files = found->second.files;
+            if (folders) *folders = found->second.folders;
             return true;
         }
         ScanReservation TryReserveScan(const std::wstring& parsingName,
@@ -1890,11 +1896,16 @@ namespace
         return child ? child->size : 0;
     }
 
+    std::wstring SyntheticContentsText(ULONGLONG files, ULONGLONG folders)
+    {
+        return std::to_wstring(files) + (files == 1 ? L" file, " : L" files, ") +
+            std::to_wstring(folders) + (folders == 1 ? L" folder" : L" folders");
+    }
+
     std::wstring SyntheticContentsText(const SyntheticChild* child)
     {
         if (!child) return {};
-        return std::to_wstring(child->fileCount) + (child->fileCount == 1 ? L" file, " : L" files, ") +
-            std::to_wstring(child->folderCount) + (child->folderCount == 1 ? L" folder" : L" folders");
+        return SyntheticContentsText(child->fileCount, child->folderCount);
     }
 
     struct SyntheticDirectoryMetrics
@@ -3095,7 +3106,10 @@ namespace
             else
             {
                 if (!child) return E_INVALIDARG;
-                if (column == 1 &&
+                const bool recursiveContentsColumn = column == 2 && extended &&
+                    (child->attributes & FILE_ATTRIBUTE_DIRECTORY) &&
+                    !(child->attributes & FILE_ATTRIBUTE_REPARSE_POINT);
+                if ((column == 1 || recursiveContentsColumn) &&
                     InterlockedCompareExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, 0, 0) &&
                     (child->attributes & FILE_ATTRIBUTE_DIRECTORY) &&
                     !(child->attributes & FILE_ATTRIBUTE_REPARSE_POINT))
@@ -3109,7 +3123,8 @@ namespace
                     }
                 }
                 bool asyncValuePending = false;
-                if (column == 1 && InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanForProbe, 0, 0) &&
+                if ((column == 1 || recursiveContentsColumn) &&
+                    InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanForProbe, 0, 0) &&
                     (child->attributes & FILE_ATTRIBUTE_DIRECTORY) && !(child->attributes & FILE_ATTRIBUTE_REPARSE_POINT))
                 {
                     std::wstring parsingName;
@@ -3121,7 +3136,7 @@ namespace
                     (asyncValuePending ? L"" : InterlockedCompareExchange(&g_syntheticHumanSizeTextForProbe, 0, 0)
                         ? FormatSyntheticSizeText(SizeForItem(item)) : std::to_wstring(SizeForItem(item))) :
                     column == 2 ? ((extended && (child->attributes & FILE_ATTRIBUTE_DIRECTORY))
-                        ? SyntheticContentsText(child)
+                        ? (asyncValuePending ? L"" : ContentsForItem(item))
                         : ((child->attributes & FILE_ATTRIBUTE_DIRECTORY) ? L"File folder" : L"File")) :
                     std::to_wstring(RelativePercentForItem(item)) + L"%";
                 details->fmt = column == 1 || column == 3 ? LVCFMT_RIGHT : LVCFMT_LEFT;
@@ -3286,7 +3301,7 @@ namespace
                 return HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
             if (!afterScan.available || less(beforeScan, afterScan) || less(afterScan, beforeScan))
                 return HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
-            return _recursiveSizeStore->Set(parsingName.c_str(), afterScan, metrics.bytes);
+            return _recursiveSizeStore->Set(parsingName.c_str(), afterScan, metrics.bytes, metrics.files, metrics.folders);
         }
         HRESULT ScheduleRecursiveSizeSnapshot(const SyntheticChild* child) const
         {
@@ -3370,7 +3385,8 @@ namespace
                             if (SUCCEEDED(scanResult) && InterlockedCompareExchange(&self->_asyncScansCancelled, 0, 0))
                                 scanResult = HRESULT_FROM_WIN32(ERROR_CANCELLED);
                             if (SUCCEEDED(scanResult))
-                                scanResult = self->_recursiveSizeStore->Set(parsingName.c_str(), afterScan, metrics.bytes);
+                                scanResult = self->_recursiveSizeStore->Set(
+                                    parsingName.c_str(), afterScan, metrics.bytes, metrics.files, metrics.folders);
                             if (SUCCEEDED(scanResult))
                                 InterlockedIncrement(&g_syntheticAsyncRecursiveSizeScanCompletedForProbe);
                             else if (scanResult != HRESULT_FROM_WIN32(ERROR_CANCELLED))
@@ -3488,7 +3504,8 @@ namespace
                     itemResult = HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
                 if (SUCCEEDED(itemResult) && InterlockedCompareExchange(&self->_asyncScansCancelled, 0, 0))
                     itemResult = HRESULT_FROM_WIN32(ERROR_CANCELLED);
-                if (SUCCEEDED(itemResult)) itemResult = self->_recursiveSizeStore->Set(entry.key.c_str(), after, metrics.bytes);
+                if (SUCCEEDED(itemResult)) itemResult = self->_recursiveSizeStore->Set(
+                    entry.key.c_str(), after, metrics.bytes, metrics.files, metrics.folders);
                 if (scanReserved) self->_recursiveSizeStore->ReleaseScan(entry.key);
                 // S_FALSE means a notification invalidated this in-flight scan before commit;
                 // do not advertise it as a fresh value or trigger a redundant view update.
@@ -3721,6 +3738,19 @@ namespace
                     InterlockedIncrement(&g_syntheticRecursiveSizeCacheMissesDuringCompareCount);
             }
             return SyntheticSize(child);
+        }
+        std::wstring ContentsForItem(PCUITEMID_CHILD item) const
+        {
+            const auto* child = SyntheticData(item);
+            if (!child) return {};
+            std::wstring parsingName;
+            if (_recursiveSizeStore && SUCCEEDED(GetAbsoluteParsingName(child, &parsingName)))
+            {
+                ULONGLONG bytes = 0, files = 0, folders = 0;
+                if (_recursiveSizeStore->TryGet(parsingName, child->identity, &bytes, &files, &folders))
+                    return SyntheticContentsText(files, folders);
+            }
+            return SyntheticContentsText(child);
         }
         double RelativePercentForItem(PCUITEMID_CHILD item) const
         {
@@ -5271,12 +5301,14 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticAsyncOnDemandRecursi
     const auto previousDemandSetting = InterlockedExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, 1);
     const auto previousAsyncSetting = InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanForProbe, 1);
     const auto previousCustomColumnSetting = InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 1);
+    const auto previousExtendedMetadataSetting = InterlockedExchange(&g_syntheticExtendedMetadataColumnsForProbe, 1);
     auto gate = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (!gate)
     {
         InterlockedExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, previousDemandSetting);
         InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanForProbe, previousAsyncSetting);
         InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, previousCustomColumnSetting);
+        InterlockedExchange(&g_syntheticExtendedMetadataColumnsForProbe, previousExtendedMetadataSetting);
         return HRESULT_FROM_WIN32(GetLastError());
     }
     g_syntheticAsyncRecursiveSizeScanGateForProbe = gate;
@@ -5320,6 +5352,18 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticAsyncOnDemandRecursi
     for (size_t index = 0; SUCCEEDED(result) && index < static_cast<size_t>(requestCount); ++index)
     {
         auto item = items[index];
+        SHELLDETAILS pendingContents{};
+        const auto contentsResult = root->GetDetailsOf(item, 2, &pendingContents);
+        const bool contentsReturnedPending = SUCCEEDED(contentsResult) && pendingContents.str.uType == STRRET_WSTR &&
+            pendingContents.str.pOleStr && !*pendingContents.str.pOleStr &&
+            InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0, 0) == 0;
+        if (pendingContents.str.uType == STRRET_WSTR && pendingContents.str.pOleStr) CoTaskMemFree(pendingContents.str.pOleStr);
+        if (FAILED(contentsResult) || !contentsReturnedPending)
+        {
+            TraceSyntheticSortStage("async-queue-smoke: recursive-count-read-did-not-return-pending");
+            result = FAILED(contentsResult) ? contentsResult : E_FAIL;
+            break;
+        }
         SHELLDETAILS pendingDetails{};
         const auto detailsResult = root->GetDetailsOf(item, 1, &pendingDetails);
         const bool returnedPending = SUCCEEDED(detailsResult) && pendingDetails.str.uType == STRRET_WSTR &&
@@ -5355,6 +5399,17 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticAsyncOnDemandRecursi
     for (size_t index = 0; SUCCEEDED(result) && index < static_cast<size_t>(requestCount); ++index)
     {
         auto item = items[index];
+        SHELLDETAILS completedContents{};
+        const auto contentsResult = root->GetDetailsOf(item, 2, &completedContents);
+        const bool contentsMatch = SUCCEEDED(contentsResult) && completedContents.str.uType == STRRET_WSTR &&
+            completedContents.str.pOleStr && _wcsicmp(completedContents.str.pOleStr, L"2 files, 1 folder") == 0;
+        if (completedContents.str.uType == STRRET_WSTR && completedContents.str.pOleStr) CoTaskMemFree(completedContents.str.pOleStr);
+        if (FAILED(contentsResult) || !contentsMatch)
+        {
+            TraceSyntheticSortStage("async-queue-smoke: recursive-count-value-mismatch");
+            result = FAILED(contentsResult) ? contentsResult : E_FAIL;
+            break;
+        }
         SHELLDETAILS completedDetails{};
         const auto detailsResult = root->GetDetailsOf(item, 1, &completedDetails);
         const bool completedValueMatches = SUCCEEDED(detailsResult) && completedDetails.str.uType == STRRET_WSTR &&
@@ -5426,10 +5481,11 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticAsyncOnDemandRecursi
     InterlockedExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, previousDemandSetting);
     InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanForProbe, previousAsyncSetting);
     InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, previousCustomColumnSetting);
+    InterlockedExchange(&g_syntheticExtendedMetadataColumnsForProbe, previousExtendedMetadataSetting);
     if (SUCCEEDED(result))
         TraceSyntheticSortStage(batchByView
-            ? "synthetic-async-on-demand-size: mode=view-batch; callbacks-returned-empty; reads-coalesced; peak-active-workers=2; snapshots-published; released-view-cancelled-batch; repeated-reads-cached"
-            : "synthetic-async-on-demand-size: mode=per-row; callbacks-returned-empty; 8-reads-queued; peak-active-workers=2; 8-snapshots-published; released-view-cancelled-8-queued-reads; repeated-reads-cached");
+            ? "synthetic-async-on-demand-size: mode=view-batch; callbacks-returned-empty; reads-coalesced; recursive-counts=2-files/1-folder; peak-active-workers=2; snapshots-published; released-view-cancelled-batch; repeated-reads-cached"
+            : "synthetic-async-on-demand-size: mode=per-row; callbacks-returned-empty; 8-reads-queued; recursive-counts=2-files/1-folder; peak-active-workers=2; 8-snapshots-published; released-view-cancelled-8-queued-reads; repeated-reads-cached");
     return result;
 }
 

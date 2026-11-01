@@ -150,7 +150,7 @@ public static class SyntheticShellSortProbe
                     "SetSyntheticAsyncRecursiveSizeScanDelayForProbe"))(0);
                 NativeLibrary.Free(module);
             }
-            Console.WriteLine($"synthetic-async-on-demand-recursive-size-column-smoke: queue-mode={(batchByView ? "view-batch" : "per-row")}; requested-scan-count={requestedScanCount}; first-value-read-returns-before-scan=True; worker-publishes-10-bytes=True; repeated-value-read-uses-cache=True; scan-delay-ms={delayMilliseconds}; shell-view-created=False");
+            Console.WriteLine($"synthetic-async-on-demand-recursive-size-column-smoke: queue-mode={(batchByView ? "view-batch" : "per-row")}; requested-scan-count={requestedScanCount}; first-value-read-returns-before-scan=True; worker-publishes-10-bytes-and-2-files-1-folder=True; repeated-value-read-uses-cache=True; scan-delay-ms={delayMilliseconds}; shell-view-created=False");
             return 0;
         }
         finally { Directory.Delete(fixture, recursive: true); }
