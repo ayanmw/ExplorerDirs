@@ -2623,3 +2623,11 @@ HostProbe Release build 通过，0 警告/错误，`git diff --check` 通过。�
 完整 HostProbe 本轮随后分别尝试 2 项、16 项及表头排序场景，但都在逐项 `SHCNE_UPDATEITEM` 观察阶段中止，观察器未收到预期事件，因此没有产生 provider 行数与 DefView 行数同一时间点的对照，也没有到排序点击步骤。该次无事件结果可能与通知/观察器时序有关，不能证明产品通知链路已经回归；之前同类通知链曾通过独立探针复验。当前可得的结论仅是：单独绑定并枚举产品 provider 时，目录计数与夹具一致；此前 DefView 的 0/4 行现象仍未能归因于 provider 重复枚举或列表内部瞬态行状态。
 
 HostProbe Release build 0 警告/错误。没有可见窗口、没有产品行为改动、没有发布。下一步先用独立的通知观察器复验当前产品 adapter 的项更新送达，再在通知已确认的同一轮中保留跨进程枚举基线并同步采集 DefView 行快照；在得到稳定同轮样本前，不接自动排序。
+
+### 2026-11-02：Desktop 级通知观察与排序瞬态复验
+
+跨进程子探针分别对 2 项、16 项夹具枚举到 2、16 个目录。通知监听范围对照显示，注册在 provider 根和物理 backing 根的观察器都未收到目标事件；改用 `SHGetSpecialFolderLocation(CSIDL_DESKTOP)` 取得 Desktop PIDL 并以递归方式监听后，小夹具收到 2 条 `SHCNE_UPDATEITEM`，名称为 `folder-small` 与 `folder-large`。因此此前把“窄范围观察器未命中”当成“adapter 没发通知”是错误的观察依据，HostProbe 已改用 Desktop 级监听并过滤夹具项名称。
+
+16 项夹具现要求所有逐行递归值精确等于 5、29、101–114 B，避免将可解析的 `0 B` 占位误当作扫描完成。该门槛通过，但 Desktop 观察器在 15 秒内只收到 11 条事件（`folder-extra-00` 至 `folder-extra-10`）；`folder-small`、`folder-large` 与 `folder-extra-11` 至 `13` 未见对应事件。此前同路径产品 HostProbe 记录过 16/16，因此当前结果显示事件送达/观测仍有运行间差异，不能只靠视图读取到缓存值推断事件数，也不能据此认定 Shell 稳定丢弃 5 条。下一步需对照 adapter 发送计数和 Desktop 接收计数。
+
+2 项表头排序复验中，独立 provider 枚举数保持 2；两次原生递归列标题点击最终得到正确升序，但采样期间 `IFolderView.ItemCount`、`SysListView32` 与导出行数均出现 `0→2`。这再次验证自动重排会短暂清空 Shell 列表。完整 HostProbe 该场景按预期以失败码拒绝通过，不接产品排序。HostProbe Release build 0 警告/错误；没有可见 UI、产品代码或 release 修改。

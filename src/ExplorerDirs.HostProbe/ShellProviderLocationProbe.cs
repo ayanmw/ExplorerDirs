@@ -23,6 +23,9 @@ internal static class ShellProviderLocationProbe
         var largeFolder = Path.Combine(viewRoot, "folder-large");
         var notificationBurst = sortStrategy == "notification-burst";
         var expectedFolderCount = notificationBurst ? 16 : 2;
+        var expectedRecursiveValues = notificationBurst
+            ? Enumerable.Range(101, 14).Select(value => (ulong)value).Append(5UL).Append(29UL).Order().ToArray()
+            : new[] { 5UL, 29UL };
         var expectedItemPaths = new HashSet<string>([smallFolder, largeFolder], StringComparer.OrdinalIgnoreCase);
         var classId = Guid.NewGuid();
         var classKeyPath = $@"Software\Classes\CLSID\{{{classId:D}}}";
@@ -34,6 +37,7 @@ internal static class ShellProviderLocationProbe
         HwndSource? source = null;
         ShellItemUpdateObserver? itemUpdateObserver = null;
         ShellItemUpdateObserver? filesystemUpdateObserver = null;
+        ShellItemUpdateObserver? desktopUpdateObserver = null;
         HwndHost? host = null;
         var foregroundBefore = GetForegroundWindow();
         try
@@ -71,6 +75,7 @@ internal static class ShellProviderLocationProbe
 
             stage = "construct-view-state";
             var targetIdentity = $"::{{{classId:D}}}\\edpath:{EncodePath(viewRoot)}";
+            var expectedUpdatedNames = new HashSet<string>(expectedItemPaths.Select(path => Path.GetFileName(path)!), StringComparer.OrdinalIgnoreCase);
             var appAssembly = Assembly.Load("ExplorerDirs.App");
             var viewStateType = appAssembly.GetType("ExplorerDirs.App.ViewState", throwOnError: true)!;
             var propertyKeyType = appAssembly.GetType("ExplorerDirs.App.PropertyKeyState", throwOnError: true)!;
@@ -98,6 +103,7 @@ internal static class ShellProviderLocationProbe
             });
             itemUpdateObserver = new ShellItemUpdateObserver(source, targetIdentity);
             filesystemUpdateObserver = new ShellItemUpdateObserver(source, viewRoot);
+            desktopUpdateObserver = ShellItemUpdateObserver.ForDesktop(source);
             source.RootVisual = grid;
             grid.Measure(new Size(640, 360));
             grid.Arrange(new Rect(0, 0, 640, 360));
@@ -134,10 +140,9 @@ internal static class ShellProviderLocationProbe
             WaitUntil(() =>
             {
                 values = (string[])readValues.Invoke(null, [hostType, host, expectedFolderCount])!;
-                return values.Length == expectedFolderCount && (!notificationBurst ||
-                    values.All(value => TryReadBytes(value, out _))) && (notificationBurst ||
-                    values.Select(value => TryReadBytes(value, out var bytes) ? bytes : ulong.MaxValue)
-                        .Order().SequenceEqual([5UL, 29UL]));
+                return values.Length == expectedFolderCount && values.Select(value =>
+                    TryReadBytes(value, out var bytes) ? bytes : ulong.MaxValue)
+                    .Order().SequenceEqual(expectedRecursiveValues);
             }, TimeSpan.FromSeconds(20), $"the product Shell view did not fill all {expectedFolderCount} recursive values asynchronously");
 
             if (sortStrategy is "scheduled" or "notification-burst")
@@ -145,13 +150,13 @@ internal static class ShellProviderLocationProbe
                 stage = "item-update-delivery";
                 try
                 {
-                    WaitUntil(() => expectedItemPaths.SetEquals(filesystemUpdateObserver.UpdatedItemPaths),
-                        TimeSpan.FromSeconds(5), "the hidden Shell observer did not receive one item update for every completed folder");
+                    WaitUntil(() => expectedUpdatedNames.SetEquals(desktopUpdateObserver.UpdatedItemPaths),
+                        TimeSpan.FromSeconds(15), "the Desktop-scope Shell observer did not receive one item update for every completed folder");
                 }
                 catch (TimeoutException) { }
-                Console.WriteLine($"shell-provider-product-async-notifications: expected-item-paths=[{string.Join('|', expectedItemPaths)}]; virtual-root-item-pidls={itemUpdateObserver.UpdatedItemPidls}; virtual-root-events=[{itemUpdateObserver.EventSummary}]; filesystem-item-paths=[{string.Join('|', filesystemUpdateObserver.UpdatedItemPaths)}]; filesystem-events=[{filesystemUpdateObserver.EventSummary}]");
-                if (!expectedItemPaths.SetEquals(filesystemUpdateObserver.UpdatedItemPaths))
-                    throw new InvalidOperationException($"The product adapter did not notify every completed row: expected=[{string.Join('|', expectedItemPaths)}]; received=[{string.Join('|', filesystemUpdateObserver.UpdatedItemPaths)}]; virtual-root-events=[{itemUpdateObserver.EventSummary}]; filesystem-events=[{filesystemUpdateObserver.EventSummary}].");
+                Console.WriteLine($"shell-provider-product-async-notifications: expected-item-names=[{string.Join('|', expectedUpdatedNames)}]; provider-root-item-pidls={itemUpdateObserver.UpdatedItemPidls}; provider-root-events=[{itemUpdateObserver.EventSummary}]; physical-root-item-paths=[{string.Join('|', filesystemUpdateObserver.UpdatedItemPaths)}]; physical-root-events=[{filesystemUpdateObserver.EventSummary}]; desktop-item-names=[{string.Join('|', desktopUpdateObserver.UpdatedItemPaths)}]; desktop-events=[{desktopUpdateObserver.EventSummary}]");
+                if (!expectedUpdatedNames.SetEquals(desktopUpdateObserver.UpdatedItemPaths))
+                    throw new InvalidOperationException($"The Desktop-scope observer did not receive every changed row: expected=[{string.Join('|', expectedUpdatedNames)}]; received=[{string.Join('|', desktopUpdateObserver.UpdatedItemPaths)}]; provider-root-events=[{itemUpdateObserver.EventSummary}]; physical-root-events=[{filesystemUpdateObserver.EventSummary}]; desktop-events=[{desktopUpdateObserver.EventSummary}].");
                 if (notificationBurst)
                 {
                     var rowObservation = ObserveProductRowCounts(hostType, host, TimeSpan.FromSeconds(2));
@@ -269,7 +274,7 @@ internal static class ShellProviderLocationProbe
             else if (sortStrategy == "header-click")
             {
                 stage = "native-header-click-sort";
-                WaitUntil(() => expectedItemPaths.SetEquals(filesystemUpdateObserver!.UpdatedItemPaths),
+                WaitUntil(() => expectedUpdatedNames.SetEquals(desktopUpdateObserver!.UpdatedItemPaths),
                     TimeSpan.FromSeconds(5), "the hidden Shell observer did not receive both completed-folder updates before header sorting");
                 var sortHeaderViewWindowField = hostType.GetField("_viewWindow", BindingFlags.Instance | BindingFlags.NonPublic)!;
                 var header = FindSortHeader((nint)sortHeaderViewWindowField.GetValue(host)!);
@@ -311,6 +316,7 @@ internal static class ShellProviderLocationProbe
         {
             itemUpdateObserver?.Dispose();
             filesystemUpdateObserver?.Dispose();
+            desktopUpdateObserver?.Dispose();
             if (source is not null)
             {
                 source.RootVisual = null;

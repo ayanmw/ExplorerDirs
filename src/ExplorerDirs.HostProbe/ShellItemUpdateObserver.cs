@@ -43,6 +43,27 @@ internal sealed class ShellItemUpdateObserver : IDisposable
         finally { Marshal.FreeCoTaskMem(rootPidl); }
     }
 
+    internal static ShellItemUpdateObserver ForDesktop(HwndSource source)
+    {
+        Marshal.ThrowExceptionForHR(SHGetSpecialFolderLocation(0, 0, out var desktopPidl));
+        try { return new ShellItemUpdateObserver(source, desktopPidl); }
+        finally { Marshal.FreeCoTaskMem(desktopPidl); }
+    }
+
+    private ShellItemUpdateObserver(HwndSource source, nint rootPidl)
+    {
+        _source = source;
+        _source.AddHook(OnMessage);
+        var entry = new Entry { Pidl = rootPidl, Recursive = 1 };
+        _registration = SHChangeNotifyRegister(_source.Handle, 0x8000 | 0x1000 | 0x0003,
+            0x7FFFFFFF, Message, 1, ref entry);
+        if (_registration == 0)
+        {
+            _source.RemoveHook(OnMessage);
+            throw new InvalidOperationException($"SHChangeNotifyRegister failed with {Marshal.GetLastPInvokeError()}.");
+        }
+    }
+
     private nint OnMessage(nint hwnd, int message, nint wParam, nint lParam, ref bool handled)
     {
         if (message != Message) return 0;
@@ -87,6 +108,8 @@ internal sealed class ShellItemUpdateObserver : IDisposable
         string name, nint bindContext, out nint pidl, uint attributes, out uint attributesOut);
     [DllImport("shell32.dll", SetLastError = true)] private static extern uint SHChangeNotifyRegister(
         nint window, int sources, int events, int message, int count, ref Entry entries);
+    [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHGetSpecialFolderLocation(
+        nint owner, int folder, out nint item);
     [DllImport("shell32.dll", EntryPoint = "SHChangeNotification_Lock")] private static extern nint SHChangeNotificationLock(
         nint change, uint process, out nint pidls, out int events);
     [DllImport("shell32.dll", EntryPoint = "SHChangeNotification_Unlock")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SHChangeNotificationUnlock(nint locked);
