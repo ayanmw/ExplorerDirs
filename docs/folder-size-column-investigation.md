@@ -1394,3 +1394,9 @@ RED 阶段的 8 项并发合同先失败于缺失峰值计数导出；加入队�
 另测 300 目录配 256 快照上限并在 60 秒内反复读取整列：没有收敛，累计 14,749 次扫描、145 次通知与 48 次重枚举。200ms 通知合并相较此前 50ms 试验的 551 次通知降低了刷新频率，但不能修复快照上限小于整列目录数造成的 LRU 淘汰/重扫。这个整列主动读取负载也超出初始可视行集合；结果用于暴露缓存容量边界，不代表用户初始进入目录会扫描全部 300 个目录。增加缓存容量可使该夹具收敛，但缓存实际堆开销及产品容量仍未决定。
 
 Shell 通知现由有界队列合并：首个待发送更新后等待最多 200ms，再发送一次目录更新；合并任务与扫描任务共用两个 worker，因此该延迟是刷新风暴和扫描并发之间的原型取舍，尚未评估多窗格竞争、慢磁盘、长生命周期或可见排序回填。仍不接入 ExplorerBrowser 产品；实际用户可见闪烁、磁盘/网络路径表现、全列排序稳定性及容量的内存成本待后续独立门槛验证。日志：`src/.state/native-probe-watchdog/20261101-121229-e348ce5c.stdout.log`、`src/.state/native-probe-watchdog/20261101-121238-aefb2c50.stdout.log`；256/300 的边界复现日志：`src/.state/native-probe-watchdog/20261101-121021-e8f4c9af.stdout.log`。
+
+### 2026-11-01：异步递归大小回填触发 Shell 排序重排
+
+将异步按需递归大小列置于 500 个同级目录的实际隐藏 DefView 排序场景：目录 `folder-400` 与 `folder-401` 在初始可视请求范围之外，初始两者仍按名称顺序（400 在 401 前）；`folder-400` 的递归大小为 20 B，`folder-401` 为 10 B。探针先点击自定义大小列头建立升序并选中/聚焦 `folder-400`，再请求整列、让后台扫描回填。连续两轮均完成 501 个目录快照，Shell 重新枚举 1 次，分别发送 5/6 次合并更新通知；排序正确变为 `folder-401` 在 `folder-400` 前、`folder-400` 在 30 B 的 `child` 前，原选中和焦点仍落在 `folder-400`。峰值 worker 均为 2，Private Desktop watchdog 均 exit 0，前台/输入与隔离清理守卫通过；100 目录/256 缓存异步基准、NativeProbe Release build 及静态无窗口合同也通过。
+
+500 目录轮的快照载荷统计为 151,292 字节（不含 map 节点/分配器开销）；进程 Private Bytes 与 Working Set 同时受 Shell/WPF/托管运行时影响，不能把本轮增量当作产品缓存实占。该排序结果证明本机隐藏合成 `IShellView` 可在通知驱动的整视图更新中用已回填值重新排序并保持选中/焦点身份；没有采样可见像素，不能证明无闪烁。仍是 NativeProbe，不是 ExplorerBrowser 产品接线；多窗格共享队列竞争、慢磁盘/网络、不同排序/分组及用户可见体验待验证。日志：`src/.state/native-probe-watchdog/20261101-121924-6b1aa3c1.stdout.log`、`src/.state/native-probe-watchdog/20261101-121947-50643c10.stdout.log`、常规回归 `src/.state/native-probe-watchdog/20261101-122014-b2b03f5f.stdout.log`。

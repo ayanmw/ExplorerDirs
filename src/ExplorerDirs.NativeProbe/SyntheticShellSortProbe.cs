@@ -308,6 +308,8 @@ public static class SyntheticShellSortProbe
         var largeViewSortProbe = largeViewSortRefreshProbe || largeViewSortUpdateObjectProbe;
         if (largeViewSortProbe && (!onDemandRecursiveSize || onDemandFolderCount == 0))
             throw new ArgumentException("The large-view sort probe requires on-demand recursive sizing and at least one synthetic sibling folder.");
+        if (asyncOnDemandRecursiveSize && largeViewSortProbe && onDemandFolderCount < 402)
+            throw new ArgumentException("The asynchronous recursive-size sort probe requires folders 400 and 401 to stay outside the initial viewport.");
         var foreground = GetForegroundWindow();
         var runIdText = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_RUN_ID");
         if (runIdText is not null && !Guid.TryParseExact(runIdText, "N", out _))
@@ -349,7 +351,7 @@ public static class SyntheticShellSortProbe
                         Directory.CreateDirectory(loadProbeFolder);
                         for (var fileIndex = 0; fileIndex < 10; fileIndex++)
                             File.WriteAllBytes(Path.Combine(loadProbeFolder, $"item-{fileIndex:D2}.bin"),
-                                largeViewSortProbe && folderIndex == 0 && fileIndex == 0 ? new byte[11] : [0x01]);
+                                largeViewSortProbe && (folderIndex == 0 || folderIndex == 400) && fileIndex == 0 ? new byte[11] : [0x01]);
                     }
                 }
                 if (shellWindowScrollProbe)
@@ -558,32 +560,68 @@ public static class SyntheticShellSortProbe
                 var cacheSnapshotsBeforeFullRead = onDemandRecursiveSize
                     ? ReadCounter(module, "GetSyntheticRecursiveSizeCacheSnapshotCountForProbe") : 0;
                 var processMemoryBeforeFullRead = ReadCurrentProcessMemory();
+                var asyncSortBeforeRead = Array.Empty<string>();
+                var asyncSortSelectionName = "folder-400";
+                if (asyncOnDemandRecursiveSize && largeViewSortProbe)
+                {
+                    asyncSortBeforeRead = SortByHeader(module, sizeListView, columnIndex: 1,
+                        expectedCount: expectedInitialCount, stage: "async-recursive-size-sort-before-fill");
+                    var hasUnfilledRowsInNameOrder = IsNameBefore(asyncSortBeforeRead, "folder-400", "folder-401");
+                    if (!hasUnfilledRowsInNameOrder)
+                        throw new IOException("The async sort fixture did not preserve name order for offscreen, not-yet-scanned folders before filling the size column.");
+                    SetListViewSelectionAndFocus(sizeListView, asyncSortSelectionName, asyncSortBeforeRead);
+                    initialNames = asyncSortBeforeRead;
+                    Console.WriteLine($"synthetic-async-recursive-size-sort: phase=before-fill; folder-400-before-401={hasUnfilledRowsInNameOrder}; selected-focused={asyncSortSelectionName}");
+                }
+                var initialEnumerationCount = ReadCounter(module, "GetSyntheticEnumObjectsCount");
                 var initialSizes = ReadColumnTexts(sizeListView, module, 1, expectedCount: expectedInitialCount);
                 if (asyncOnDemandRecursiveSize)
                 {
                     // Fill every requested row to expose bounded-queue overflow and retry behavior under Shell notifications.
                     var deadline = Environment.TickCount64 + 60_000;
-                    var childIndexForAsync = Array.FindIndex(initialNames, name => string.Equals(name, "child", StringComparison.OrdinalIgnoreCase));
-                    var initialEnumerationCount = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+                    string ExpectedAsyncColumnSize(string name) => name switch
+                    {
+                        "small.bin" => "4",
+                        "child" when largeViewSortProbe => "30",
+                        "folder-000" when largeViewSortProbe => "20",
+                        "folder-400" when largeViewSortProbe => "20",
+                        _ => "10"
+                    };
                     bool AllAsyncColumnValuesReady()
                     {
                         if (initialSizes.Length != initialNames.Length) return false;
                         for (var index = 0; index < initialNames.Length; index++)
                         {
-                            var expectedSize = string.Equals(initialNames[index], "small.bin", StringComparison.OrdinalIgnoreCase) ? "4" : "10";
+                            var expectedSize = ExpectedAsyncColumnSize(initialNames[index]);
                             if (!string.Equals(initialSizes[index], expectedSize, StringComparison.Ordinal)) return false;
                         }
                         return true;
                     }
+                    initialNames = ReadNames(sizeListView, module, expectedCount: expectedInitialCount);
+                    initialSizes = ReadColumnTexts(sizeListView, module, 1, expectedCount: expectedInitialCount);
                     var allAsyncColumnValuesReady = AllAsyncColumnValuesReady();
                     while (!allAsyncColumnValuesReady && Environment.TickCount64 < deadline)
                     {
                         Pump(25);
+                        initialNames = ReadNames(sizeListView, module, expectedCount: expectedInitialCount);
                         initialSizes = ReadColumnTexts(sizeListView, module, 1, expectedCount: expectedInitialCount);
                         allAsyncColumnValuesReady = AllAsyncColumnValuesReady();
                     }
-                    var asyncViewRequeryObserved = childIndexForAsync >= 0 &&
-                        string.Equals(initialSizes[childIndexForAsync], "10", StringComparison.Ordinal);
+                    if (asyncOnDemandRecursiveSize && largeViewSortProbe)
+                    {
+                        var requeryDeadline = Environment.TickCount64 + 5_000;
+                        while (ReadCounter(module, "GetSyntheticEnumObjectsCount") - initialEnumerationCount <= 0 &&
+                            Environment.TickCount64 < requeryDeadline)
+                        {
+                            Pump(25);
+                            initialNames = ReadNames(sizeListView, module, expectedCount: expectedInitialCount);
+                            initialSizes = ReadColumnTexts(sizeListView, module, 1, expectedCount: expectedInitialCount);
+                            allAsyncColumnValuesReady = AllAsyncColumnValuesReady();
+                        }
+                    }
+                    var childIndexForAsync = Array.FindIndex(initialNames, name => string.Equals(name, "child", StringComparison.OrdinalIgnoreCase));
+                    var asyncViewRequeryObserved = childIndexForAsync >= 0 && childIndexForAsync < initialSizes.Length &&
+                        string.Equals(initialSizes[childIndexForAsync], ExpectedAsyncColumnSize("child"), StringComparison.Ordinal);
                     var asyncEnumDelta = ReadCounter(module, "GetSyntheticEnumObjectsCount") - initialEnumerationCount;
                     var asyncScans = ReadCounter(module, "GetSyntheticOnDemandSizeScanCount");
                     var asyncNotificationCount = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeNotificationCountForProbe");
@@ -592,6 +630,16 @@ public static class SyntheticShellSortProbe
                     if (!asyncViewRequeryObserved || !allAsyncColumnValuesReady || asyncScans != onDemandFolderCount + 1 ||
                         asyncNotificationCount > 16 || asyncPeakWorkers > 2)
                         throw new IOException($"The hidden Shell view did not converge bounded asynchronous size rows: all-values-ready={allAsyncColumnValuesReady}; scans={asyncScans}; notifications={asyncNotificationCount}; peak-workers={asyncPeakWorkers}; folders={onDemandFolderCount}.");
+                    if (asyncOnDemandRecursiveSize && largeViewSortProbe)
+                    {
+                        var finalNames = ReadNames(sizeListView, module, expectedCount: expectedInitialCount);
+                        var offscreenRowsResorted = IsNameBefore(finalNames, "folder-401", "folder-400");
+                        var sizeSortMaintained = IsNameBefore(finalNames, "folder-400", "child");
+                        var asyncSelectionPreserved = HasSelectionAndFocus(sizeListView, finalNames, asyncSortSelectionName);
+                        Console.WriteLine($"synthetic-async-recursive-size-sort: phase=after-fill; folder-401-before-400={offscreenRowsResorted}; folder-400-before-child={sizeSortMaintained}; selected-focused-preserved={asyncSelectionPreserved}; rows={finalNames.Length}; order=[{FormatProbeRows(finalNames)}]");
+                        if (!offscreenRowsResorted || !sizeSortMaintained || !asyncSelectionPreserved || asyncEnumDelta == 0)
+                            throw new IOException("The async size fill did not reorder offscreen rows by their completed sizes while preserving the selected and focused row.");
+                    }
                 }
                 var processMemoryAfterFullRead = ReadCurrentProcessMemory();
                 var cacheSnapshotsAfterFullRead = onDemandRecursiveSize
