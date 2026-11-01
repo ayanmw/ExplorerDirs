@@ -1855,6 +1855,10 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 
 同一隐藏控件收到合成 `WM_MOUSEWHEEL` 后视口未变化；这说明隐藏控件不能用来证明滚轮生效。当前证据验证了原生 `WM_VSCROLL` 到视口观察器、去抖与请求取消的链路，不代表物理鼠标/滚轮输入、滚动条拖动、可见 ListView 或 ExplorerBrowser 产品接线。慢目录中已启动扫描的取消与并发上限也未验证。
 
+在以上消息切片继续把旧请求停在 worker 已打开目标目录的回调点，再发送 `WM_VSCROLL` 切换到 `size-100`。观察器取消正在运行的 `size-10` scan；释放旧 worker 后它响应取消，不返回可发布结果，新视口请求成功完成。三次 Release apphost Private Desktop 运行均记录 `scans-started=2`、`scans-completed=1`、`obsolete-inflight-scan-canceled=True`，旧目录仍为空，仅最终可见目录值发布；通知失效后的新缓存、PIDL 行身份、多选/焦点及前台/清理合同继续通过。
+
+这证明 NativeProbe scanner 合作响应取消并丢弃过期结果，不代表真实慢盘或网络 I/O 总能快速中止；没有测 worker 并发上限、物理滚轮/鼠标输入、产品 UI 或 ExplorerBrowser 接线。
+
 ### 2026-11-01：自控 Shell 行复用产品所选项命令适配器
 
 在同一隐藏真实 `IShellView` 行投影中保留每行相对 PIDL；从选中 `size-10` 行的相对 PIDL 调用真实父 `IShellFolder.GetUIObjectOf(IContextMenu)`，再将 COM 菜单交给产品 `NativeShellCommandMenu`。产品适配器识别并确认 `cut/copy/delete/rename/properties` 均启用；未显示 popup、未调用动词，也未接触系统剪贴板。此前已通过的按需递归扫描、排序、通知失效和焦点合同继续通过。NativeProbe Release build 0 警告/错误，Private Desktop 探针 exit 0，前台/last-input 与隔离清理守卫通过。

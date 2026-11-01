@@ -1528,7 +1528,11 @@ internal static class ShellViewHostFilterProbe
             Task<(IReadOnlyDictionary<string, ShellListViewRowScanResult> Rows, int WorkerThread, string[] Paths)>? latestViewportRequest = null;
             Task<(IReadOnlyDictionary<string, ShellListViewRowScanResult> Rows, int WorkerThread, string[] Paths)>? supersededViewportRequest = null;
             var startedViewportScans = 0;
+            var completedViewportScans = 0;
             var viewportChangeEvents = 0;
+            using var obsoleteScanEntered = new ManualResetEventSlim();
+            using var releaseObsoleteScan = new ManualResetEventSlim();
+            var obsoletePath = Path.GetFullPath(selectedRow.FileSystemPath!);
             Task<(IReadOnlyDictionary<string, ShellListViewRowScanResult> Rows, int WorkerThread, string[] Paths)> ScheduleVisibleScan()
             {
                 if (pendingViewportRequest is not null)
@@ -1549,7 +1553,14 @@ internal static class ShellViewHostFilterProbe
                     await Task.Delay(120, requestToken);
                     Interlocked.Increment(ref startedViewportScans);
                     var workerThread = Environment.CurrentManagedThreadId;
-                    var rows = HandleBoundRecursiveDirectoryScanner.Scan(paths, requestToken);
+                    var rows = HandleBoundRecursiveDirectoryScanner.Scan(paths, requestToken, (path, _) =>
+                    {
+                        if (!string.Equals(path, obsoletePath, StringComparison.OrdinalIgnoreCase)) return;
+                        obsoleteScanEntered.Set();
+                        if (!releaseObsoleteScan.Wait(TimeSpan.FromSeconds(5)))
+                            throw new TimeoutException("The in-flight viewport scan was not released by the probe.");
+                    });
+                    Interlocked.Increment(ref completedViewportScans);
                     return (Rows: rows, WorkerThread: workerThread, Paths: paths);
                 }, requestToken);
                 return latestViewportRequest;
@@ -1564,9 +1575,18 @@ internal static class ShellViewHostFilterProbe
             var initialVisibleRows = GetVisibleRecursiveFolderRows(listView, projection.Rows);
             if (!initialVisibleRows.Any(row => row.Id == selectedRow.Id))
                 throw new InvalidOperationException("The selected recursive-size fixture was not within the peer ListView viewport.");
+            var scanStartDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+            while (!obsoleteScanEntered.IsSet && DateTime.UtcNow < scanStartDeadline)
+            {
+                Application.DoEvents();
+                Thread.Sleep(10);
+            }
+            if (!obsoleteScanEntered.IsSet)
+                throw new TimeoutException("The first visible-directory scan did not enter its controlled in-flight gate.");
             var topBeforeLineScroll = GetPeerListTopIndex(listView);
             _ = SendMessageW(listView, 0x0115, 1, 0); // WM_VSCROLL / SB_LINEDOWN
             var lineScrollMovedViewport = GetPeerListTopIndex(listView) != topBeforeLineScroll;
+            releaseObsoleteScan.Set();
             var topBeforeWheel = GetPeerListTopIndex(listView);
             _ = SendMessageW(listView, 0x020A, (nint)0x00780000, 0); // WM_MOUSEWHEEL / +WHEEL_DELTA
             var wheelMovedViewport = GetPeerListTopIndex(listView) != topBeforeWheel;
@@ -1600,8 +1620,8 @@ internal static class ShellViewHostFilterProbe
                 StringComparer.OrdinalIgnoreCase);
             if (!sizes.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(completed.Paths) ||
                 !completed.Paths.ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(finalVisibleRows.Select(row => Path.GetFullPath(row.FileSystemPath!))) ||
-                startedViewportScans != 1)
-                throw new InvalidOperationException("Viewport debounce did not scan only the final visible rows once.");
+                startedViewportScans != 2 || completedViewportScans != 1)
+                throw new InvalidOperationException("Viewport cancellation did not discard the in-flight old scan and complete only the final visible-row scan.");
             var requestedPaths = completed.Paths;
             var recursiveSizeCache = new Dictionary<string, ulong>(sizes, StringComparer.OrdinalIgnoreCase);
             var bytesById = new Dictionary<int, ulong>();
@@ -1666,7 +1686,7 @@ internal static class ShellViewHostFilterProbe
             if (!sortedIds.SequenceEqual(expectedOrder.Select(row => row.Id)) || selectedState != 0x0003)
                 throw new InvalidOperationException($"Recursive-size sort order or selected row identity was lost: ids=[{string.Join(',', sortedIds)}], expected=[{string.Join(',', expectedOrder.Select(row => row.Id))}], selected-state=0x{selectedState:X}.");
             pendingViewportRequest?.Dispose();
-            Console.WriteLine($"ishellview-peer-recursive-size: shell-rows={projection.Rows.Count}; wm-vscroll-moved-viewport={lineScrollMovedViewport}; wm-mousewheel-moved-viewport={wheelMovedViewport}; native-viewport-events={viewportChangeEvents}; superseded-viewport-request-canceled={supersededViewportRequest!.IsCanceled}; viewport-updates-coalesced={viewportChangeEvents - startedViewportScans}; visible-folder-rows-requested={completed.Paths.Length}; viewport-top-index={GetPeerListTopIndex(listView)}; viewport-count-per-page={GetPeerListCountPerPage(listView)}; only-final-visible-rows-scanned=True; other-rows-pending={otherFolderRowsRemainPending}; worker-thread={completed.WorkerThread}; owner-thread={ownerThread}; rows-retained-during-scan=True; bytes=[size-2:2,size-10:10,size-100:100]; numeric-order=[{string.Join(',', sortedRows)}]; selected-focused-id={selectedRow.Id}; selection-focus-preserved=True; foreground-unchanged={GetForegroundWindow() == foreground}; product-view-changed=False");
+            Console.WriteLine($"ishellview-peer-recursive-size: shell-rows={projection.Rows.Count}; wm-vscroll-moved-viewport={lineScrollMovedViewport}; wm-mousewheel-moved-viewport={wheelMovedViewport}; native-viewport-events={viewportChangeEvents}; obsolete-inflight-scan-canceled={supersededViewportRequest!.IsCanceled}; scans-started={startedViewportScans}; scans-completed={completedViewportScans}; viewport-updates-coalesced={viewportChangeEvents - completedViewportScans}; visible-folder-rows-requested={completed.Paths.Length}; viewport-top-index={GetPeerListTopIndex(listView)}; viewport-count-per-page={GetPeerListCountPerPage(listView)}; only-final-visible-rows-published=True; other-rows-pending={otherFolderRowsRemainPending}; worker-thread={completed.WorkerThread}; owner-thread={ownerThread}; rows-retained-during-scan=True; bytes=[size-2:2,size-10:10,size-100:100]; numeric-order=[{string.Join(',', sortedRows)}]; selected-focused-id={selectedRow.Id}; selection-focus-preserved=True; foreground-unchanged={GetForegroundWindow() == foreground}; product-view-changed=False");
 
             var changedDirectory = Path.GetFullPath(projection.Rows.Single(row => row.Name == "size-10").FileSystemPath!);
             var changedPayload = Path.Combine(changedDirectory, "payload.bin");
