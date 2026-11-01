@@ -304,7 +304,7 @@ public static class SyntheticShellSortProbe
             throw new InvalidOperationException("The recursive view-state fixture must keep separate Shell sort/data keys and three display columns.");
         Console.WriteLine($"recursive-view-state-restore: imported-state-shape=True; sort-key={view.SortColumns[0].Key}; data-group-key={view.GroupKey}; columns={view.DisplayColumns.Count}");
         return Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
-            useWpfParent: true, viewStateToRestore: view);
+            useWpfParent: true, viewStateToRestore: view, loadQdrStateFromFile: true);
     }
 
     internal static int RunRelativePercentColumnMetadata(uint type)
@@ -340,7 +340,8 @@ public static class SyntheticShellSortProbe
         int sizeDisplayUnit = 0, int sizeDisplayDecimals = 2, bool sizeDisplayThousands = false,
         string? expectedDirectorySizeText = null, string? expectedFileSizeText = null,
         long? syntheticChildSizeOverride = null, bool onDemandRecursiveSize = false, int onDemandFolderCount = 0,
-        bool asyncOnDemandRecursiveSize = false, ViewState? viewStateToRestore = null)
+        bool asyncOnDemandRecursiveSize = false, ViewState? viewStateToRestore = null,
+        bool loadQdrStateFromFile = false)
     {
         if (relativePercentColumnType is not null && !recursiveDirectorySizeSortOnly)
             throw new ArgumentException("The relative-percent metadata probe requires the isolated recursive-size view.", nameof(relativePercentColumnType));
@@ -745,17 +746,47 @@ public static class SyntheticShellSortProbe
             Check(Marshal.QueryInterface(view, in FolderView2Id, out folderView));
             if (viewStateToRestore is not null)
             {
-                var restoreSucceeded = ShellViewStateRestore.Restore(viewStateToRestore,
+                var stateToRestore = viewStateToRestore;
+                if (loadQdrStateFromFile)
+                {
+                    var qdrPath = Path.Combine(Path.GetTempPath(), $"ExplorerDirs-RecursiveSize-{Guid.NewGuid():N}.qdr");
+                    try
+                    {
+                        var qdrView = QdrViewWriter.Write(stateToRestore) ??
+                            throw new InvalidOperationException("The QDR writer did not serialize the recursive-size view state.");
+                        File.WriteAllText(qdrPath,
+                            $"Q-Dir Version=12.79\nViewMode=0\nDir1={backingFolder}\nColsAndSort1={qdrView}\n",
+                            new System.Text.UTF8Encoding(false));
+                        var imported = QdrImporter.Load(qdrPath);
+                        if (imported.Panes.Count == 0 || imported.Panes[0].Count == 0)
+                            throw new InvalidOperationException("The production QDR importer returned no first-pane tab.");
+                        if (!string.Equals(Path.GetFullPath(imported.Panes[0][0].Path),
+                            Path.GetFullPath(backingFolder), StringComparison.OrdinalIgnoreCase))
+                            throw new InvalidOperationException("The production QDR importer changed the synthetic folder location.");
+                        stateToRestore = imported.Panes[0][0].View;
+                        if (stateToRestore.DisplayColumns is null ||
+                            !stateToRestore.DisplayColumns.SequenceEqual(viewStateToRestore.DisplayColumns!) ||
+                            !stateToRestore.SortColumns.SequenceEqual(viewStateToRestore.SortColumns) ||
+                            stateToRestore.GroupKey != viewStateToRestore.GroupKey)
+                            throw new InvalidOperationException("The production QDR file import changed the recursive column state.");
+                        Console.WriteLine($"recursive-view-state-restore: qdr-file-import=True; warnings=[{string.Join("; ", imported.Warnings)}]; source={Path.GetFileName(qdrPath)}");
+                    }
+                    finally
+                    {
+                        if (File.Exists(qdrPath)) File.Delete(qdrPath);
+                    }
+                }
+                var restoreSucceeded = ShellViewStateRestore.Restore(stateToRestore,
                     new NativeShellViewStateTarget(folderView),
                     (step, result) => throw new InvalidOperationException($"Imported Q-Dir view restore failed at {step}: 0x{result:X8}."),
                     () => true);
                 if (!restoreSucceeded)
                     throw new InvalidOperationException("Imported Q-Dir recursive view state did not complete native Shell restoration.");
                 Check(ShellColumnManager.Capture(folderView, out var restoredColumns));
-                if (restoredColumns is null || !restoredColumns.SequenceEqual(viewStateToRestore.DisplayColumns!) ||
+                if (restoredColumns is null || !restoredColumns.SequenceEqual(stateToRestore.DisplayColumns!) ||
                     !CaptureNativeSortColumns(folderView).Select(column => new SortColumnState(
                         new(column.Key.FormatId, column.Key.PropertyId), column.Direction))
-                        .SequenceEqual(viewStateToRestore.SortColumns))
+                        .SequenceEqual(stateToRestore.SortColumns))
                     throw new InvalidOperationException("Native Shell did not read back the imported Q-Dir recursive column layout/sort state.");
                 Console.WriteLine($"recursive-view-state-restore: native-restore=True; columns=[{FormatColumns(restoredColumns)}]; sorts=[{FormatSortColumns(CaptureNativeSortColumns(folderView))}]");
                 var restoreListView = FindListView(view);

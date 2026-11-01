@@ -2167,4 +2167,10 @@ SettingsSmoke 的跨进程 INI 用例现分别保存并核对 Shell sort/display
 
 将已核实的 QDR 递归列状态形状（Shell sort/display key `{9e5e05ac-1936-4a75-94f7-4704b8b01923}:1`、provider 数据/分组 key `{7e1f84b7-c052-4e51-8a3c-869254a6b910}:1`、三列自定义顺序与宽度）构造成 `ViewState`，经生产 `ShellViewStateRestore` 恢复到 synthetic `IShellView`。`IColumnManager` 读回三列顺序/宽度，`IFolderView2::GetSortColumns` 读回自定义列及升序；原生行读取确认目录值 10、文件值 4，点击该列标题后方向在 `-1/+1` 间切换且行序反转。NativeProbe Release 构建 0 警告/错误；Private Desktop watchdog exit 0，前台窗口、最后输入和隔离清理守卫均通过；探针输出由本轮命令直接采集。
 
-这是“QDR 字段语义/状态恢复”与“隔离 Shell 实际消费值及排序”的拼接验证：NativeProbe 未直接调用 App 内部 QDR importer/exporter，也没有把真实 `.qdr` 文件解析后恢复到该视图。因此不能称为端到端导入；真实 Q-Dir 文件互操作、产品 ExplorerBrowser 的列提供、跨窗格、多视图刷新和可见交互仍未验证，产品架构未改变。
+这是“QDR 字段语义/状态恢复”与“隔离 Shell 实际消费值及排序”的拼接验证：当时 NativeProbe 未直接调用 App 内部 QDR importer/exporter，也没有把 `.qdr` 文件解析后恢复到该视图。下一节已补上由生产 importer 加载文件的闭环，但输入仍是本项目 writer 生成的格式；真实 Q-Dir 文件互操作、产品 ExplorerBrowser 的列提供、跨窗格、多视图刷新和可见交互仍未验证，产品架构未改变。
+
+### 2026-11-01：生产 QDR 文件解析到隔离视图闭环
+
+NativeProbe 现在直接链接生产 `QdrViewWriter` 与 `QdrImporter` 源码，在临时目录夹具上写入 `.qdr` 文件，再由 `QdrImporter.Load` 解析实际文件；探针核对导入路径、三列 PROPERTYKEY/宽度、排序键和分组键后，将导入的 `ViewState` 传给生产 `ShellViewStateRestore`。Private Desktop 上 Shell 读回列与排序状态，递归值为 10/4，标题交互方向为 `-1/+1` 且行序反转；预期导入提示为“窗口位置及程序启动命令不导入”。NativeProbe Release build 0 警告/错误，探针 exit 0，前台/输入/清理守卫通过。
+
+这证明本程序生成的合法 QDR 文件可经生产 importer 到达隔离 Shell 视图，补足上节“拼接验证”缺少真实文件解析的部分。文件来自当前 QdrViewWriter，不是从 Q-Dir 安装中取得的第三方 `.qdr`；不能据此证明 Q-Dir 导出文件兼容。产品 ExplorerBrowser 未接入递归列，用户可见交互、多窗格及生产刷新仍未验证。

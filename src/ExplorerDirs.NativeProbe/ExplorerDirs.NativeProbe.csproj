@@ -59,6 +59,14 @@
     <Compile Include="../ExplorerDirs.App/ColumnLayout.cs" Link="ColumnLayout.cs" />
     <Compile Include="../ExplorerDirs.App/ShellColumnManager.cs" Link="ShellColumnManager.cs" />
     <Compile Include="../ExplorerDirs.App/ShellViewStateRestore.cs" Link="ShellViewStateRestore.cs" />
+    <Compile Include="../ExplorerDirs.App/QdrImporter.cs" Link="QdrImporter.cs" />
+    <Compile Include="../ExplorerDirs.App/QdrExporter.cs" Link="QdrExporter.cs" />
+    <Compile Include="../ExplorerDirs.App/QdrLayoutMap.cs" Link="QdrLayoutMap.cs" />
+    <Compile Include="../ExplorerDirs.App/QdrProportions.cs" Link="QdrProportions.cs" />
+    <Compile Include="../ExplorerDirs.App/LayoutProportionsStore.cs" Link="LayoutProportionsStore.cs" />
+    <Compile Include="../ExplorerDirs.App/LayoutPreset.cs" Link="LayoutPreset.cs" />
+    <Compile Include="../ExplorerDirs.App/NavigationTreeWidthsStore.cs" Link="NavigationTreeWidthsStore.cs" />
+    <Compile Include="../ExplorerDirs.App/PinnedTabsStore.cs" Link="PinnedTabsStore.cs" />
     <Compile Include="../ExplorerDirs.App/ViewPresetStore.cs" Link="ViewPresetStore.cs" />
     <Compile Include="../ExplorerDirs.App/FileViewExport.cs" Link="FileViewExport.cs" />
     <Compile Include="../ExplorerDirs.App/FileViewPrintLayout.cs" Link="FileViewPrintLayout.cs" />
