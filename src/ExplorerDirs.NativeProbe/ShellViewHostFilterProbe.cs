@@ -2812,6 +2812,7 @@ internal static class ShellViewHostFilterProbe
             Check(queryHr);
             var itemCount = GetMenuItemCount(menu);
             if (itemCount <= 0) throw new InvalidOperationException("The selected Shell context menu returned no popup items.");
+            VerifyPeerContextMenuSubmenuCallbacks(contextMenu, selectedCount);
 
             var popup = TrackPopupMenuAndCancel(owner, menu, contextMenu);
             if (popup.SelectedCommand != 0 || popup.InitPopupCount != 1 ||
@@ -2837,6 +2838,45 @@ internal static class ShellViewHostFilterProbe
             finally { _ = DestroyMenu(defaultMenu); }
         }
         finally { _ = DestroyMenu(menu); }
+    }
+
+    private static void VerifyPeerContextMenuSubmenuCallbacks(nint contextMenu, int selectedCount)
+    {
+        const int EnforceDefault = 0x0010;
+        const int ExtendedVerbs = 0x0100;
+        var contextMenu3Id = new Guid("BCFCE0A0-EC17-11D0-8D10-00A0C90F2719");
+        var menu = CreatePopupMenu();
+        if (menu == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create the submenu callback diagnostic menu.");
+        nint contextMenu3 = 0;
+        try
+        {
+            Check(At<QueryContextMenu>(contextMenu, 3)(contextMenu, menu, 0, 1, 0x7fff,
+                EnforceDefault | ExtendedVerbs));
+            var queryHr = Marshal.QueryInterface(contextMenu, in contextMenu3Id, out contextMenu3);
+            if (queryHr < 0)
+            {
+                Console.WriteLine($"ishellview-peer-context-menu-submenu-callbacks: selected-count={selectedCount}; context-menu3-query=0x{queryHr:X8}; submenu-count=0");
+                return;
+            }
+
+            var results = new List<string>();
+            var menuCount = GetMenuItemCount(menu);
+            for (var index = 0; index < menuCount; index++)
+            {
+                var submenu = GetSubMenu(menu, index);
+                if (submenu == 0) continue;
+                var caption = new System.Text.StringBuilder(128);
+                _ = GetMenuStringW(menu, (uint)index, caption, caption.Capacity, 0x400); // MF_BYPOSITION
+                var hr = At<MenuMessage2>(contextMenu3, 7)(contextMenu3, 0x0117, submenu, index, out _);
+                results.Add($"{caption}:0x{hr:X8}");
+            }
+            Console.WriteLine($"ishellview-peer-context-menu-submenu-callbacks: selected-count={selectedCount}; context-menu3-query=0x{queryHr:X8}; submenu-count={results.Count}; results=[{string.Join('|', results)}]");
+        }
+        finally
+        {
+            if (contextMenu3 != 0) Marshal.Release(contextMenu3);
+            _ = DestroyMenu(menu);
+        }
     }
 
     private static void VerifyPeerMultiSelectionCopy(nint shellFolder, nint owner, nint listView,

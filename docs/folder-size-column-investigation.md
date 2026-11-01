@@ -1038,6 +1038,12 @@ BCL 返回的长度和属性是枚举条目快照；文件在枚举后被删除�
 
 这补充证明当前 Windows 本机文件 Shell 菜单对象在多选包装 PIDL 后可查询 `IContextMenu3`，并能处理 4/5 个内存子菜单的初始化消息。第 5 个的 `E_NOTIMPL` 上层如何处理、真实窗口消息转发、`WM_DRAWITEM`、`WM_MEASUREITEM`、菜单边界/视觉尚未验证；第三方扩展与多 provider 也未覆盖。产品仍使用 ExplorerBrowser，未做宿主迁移。
 
+### 2026-11-01：peer 文件系统菜单初始化 HRESULT 对照
+
+在隔离 `IShellView` peer 行选中单项与双项后，分别为完整菜单及 `CMF_DEFAULTONLY` 菜单进入原生 popup 消息循环并立即取消；另枚举完整菜单的子菜单，直接记录 `IContextMenu3::HandleMenuMsg2(WM_INITMENUPOPUP)`。单项完整菜单有 9 个子菜单，回调 HRESULT 分布为 5 个 `S_OK`、2 个 `E_NOTIMPL`、1 个 `S_FALSE`、1 个 `E_FAIL`；双项菜单有 6 个，分别为 4 个 `S_OK`、2 个 `E_NOTIMPL`。但根 popup 的 `WM_INITMENUPOPUP` 在单选、多选和 `CMF_DEFAULTONLY` 下均返回 `E_FAIL`；该 flag 仍构造 22 个顶层项，未形成无扩展的干净对照。所有 popup 均取消且未调用命令，前台和输入守卫未变化，Private Desktop 清理通过。NativeProbe Release 构建 0 警告/错误。日志：`src/.state/native-probe-watchdog/20261101-205609-2298ae89.stdout.log`。
+
+这表明失败不是所有子菜单回调的一致结果，但尚不能判定根 popup `E_FAIL` 是由 Windows Shell、某个第三方扩展或消息参数/路由引起；直接初始化子菜单也不等于实际打开子菜单时的窗口消息处理。产品仍使用 ExplorerBrowser，此探针未改产品菜单路由，也没有可见菜单验收。
+
 ### 2026-10-31：初始 Shell 文件夹行缺少扫描身份，通知到达时先废弃旧 ticket
 
 当前隐藏行模型合同复跑在初次读取 `RecursiveSummary` 时抛空引用。定位到原因是 `ShellListViewEnumerator` 构造目录行时没有填 `FileSystemIdentity`，而 `ApplyRecursiveScanResults` 按既定安全合同要求行快照、句柄扫描结果及发布时路径三者身份相同；旧扫描结果因此被清空。现在仅对有文件系统路径且带 `SFGAO_FOLDER` 的行读取卷序列号及 128 位文件 ID，并随行快照保存。隐藏相对大小合同先在该改动前复现失败，修正后初始与更新值、比例排序和焦点/选区均通过。
