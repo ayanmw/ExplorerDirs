@@ -5744,3 +5744,5 @@ NativeProbe 已完成受控精确失效合同：四个不同根的异步 Shell �
 ### 2026-11-01：Shell 通知与递归缓存键精确匹配
 
 真实跨进程 Shell 文件通知已在隐藏四视图 NativeProbe 中命中 `folder-000` 的在途 reservation：`SFVM_FSNOTIFY` 收到 `SHCNE_UPDATEDIR`，绝对 PIDL 解析到与缓存键相同的物理子目录；旧扫描提交被丢弃，显式刷新后值由 1 B 更新为 38 B。四视图列值、隔离选择/焦点、Private Desktop 输入守卫通过；基线 20 次扫描加一次重试，零队列拒绝。该证据覆盖当前合成 filesystem namespace 的此通知路径，不覆盖真实产品、所有事件类型或可见刷新体验。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01真实-shell-通知命中在途递归扫描)。
+
+2026-11-01 无窗口验证 `SHCNE_RENAMEFOLDER` 双 PIDL 失效路径：旧、新文件夹 PIDL 各命中一条在途 reservation，两个旧提交均被拒绝；NativeProbe Release 和原生 adapter `/W4 /WX` 通过。此合同没有创建视图，不代表外部移动/重命名的真实通知时序或产品接线。下一个高价值验证是获准后在 Private Desktop 中对真实临时目录执行外部移动/重命名，并核对双路径失效及列回填。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01文件夹重命名通知双-pidl-失效合同)。

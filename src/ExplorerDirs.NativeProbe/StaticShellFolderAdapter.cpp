@@ -5281,6 +5281,54 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
         inFlightInvalidationStore.ReleaseScan(nestedPath);
         TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-inflight-invalidation-passed");
 
+        // Exercise the real SFVM_FSNOTIFY PIDL pair path without creating a Shell view.
+        std::wstring renameDestination;
+        try { renameDestination = std::wstring(backingPath) + L"\\rename-destination"; }
+        catch (const std::bad_alloc&) { result = E_OUTOFMEMORY; goto cleanup; }
+        if (!CreateDirectoryW(renameDestination.c_str(), nullptr))
+        {
+            result = HRESULT_FROM_WIN32(GetLastError());
+            goto cleanup;
+        }
+        PIDLIST_ABSOLUTE oldRenamePidl = nullptr;
+        PIDLIST_ABSOLUTE newRenamePidl = nullptr;
+        SyntheticRecursiveSizeSnapshotStore* renameStore = new (std::nothrow) SyntheticRecursiveSizeSnapshotStore();
+        SyntheticSortFolder* renameFolder = renameStore ? new (std::nothrow) SyntheticSortFolder(renameStore) : nullptr;
+        if (renameStore) renameStore->Release();
+        result = renameFolder ? renameFolder->Initialize(rootPidl) : E_OUTOFMEMORY;
+        if (SUCCEEDED(result)) result = SHParseDisplayName(subtree.c_str(), nullptr, &oldRenamePidl, 0, nullptr);
+        if (SUCCEEDED(result)) result = SHParseDisplayName(renameDestination.c_str(), nullptr, &newRenamePidl, 0, nullptr);
+        if (SUCCEEDED(result))
+        {
+            ULONGLONG ignoredBytes = 0;
+            const auto oldReservation = renameStore->TryReserveScan(subtree, child->identity, &ignoredBytes);
+            const auto newReservation = renameStore->TryReserveScan(renameDestination, child->identity, &ignoredBytes);
+            if (oldReservation != SyntheticRecursiveSizeSnapshotStore::ScanReservation::Acquired ||
+                newReservation != SyntheticRecursiveSizeSnapshotStore::ScanReservation::Acquired)
+                result = E_FAIL;
+            else
+            {
+                PCIDLIST_ABSOLUTE renamePidls[] = { oldRenamePidl, newRenamePidl };
+                const auto previousTranslation = InterlockedExchange(&g_syntheticTranslateChildNotificationsForProbe, 0);
+                const auto notificationResult = renameFolder->MessageSFVCB(SFVM_FSNOTIFY,
+                    reinterpret_cast<WPARAM>(renamePidls), SHCNE_RENAMEFOLDER);
+                InterlockedExchange(&g_syntheticTranslateChildNotificationsForProbe, previousTranslation);
+                const auto oldCommit = renameStore->Set(subtree.c_str(), child->identity, 41);
+                const auto newCommit = renameStore->Set(renameDestination.c_str(), child->identity, 42);
+                if (notificationResult != E_NOTIMPL || oldCommit != S_FALSE || newCommit != S_FALSE)
+                    result = E_FAIL;
+                else
+                    TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-rename-pair-inflight-invalidation-passed");
+                renameStore->ReleaseScan(subtree);
+                renameStore->ReleaseScan(renameDestination);
+            }
+        }
+        if (oldRenamePidl) CoTaskMemFree(oldRenamePidl);
+        if (newRenamePidl) CoTaskMemFree(newRenamePidl);
+        if (renameFolder) renameFolder->Release();
+        RemoveDirectoryW(renameDestination.c_str());
+        if (FAILED(result)) goto cleanup;
+
         SyntheticRecursiveSizeSnapshotStore boundedStore;
         std::wstring oldestPath;
         std::wstring secondPath;
