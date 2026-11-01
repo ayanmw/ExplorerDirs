@@ -2183,3 +2183,9 @@ NativeProbe 现在直接链接生产 `QdrViewWriter` 与 `QdrImporter` 源码，
 拖放诊断需谨慎解释：注册 namespace child 的直接 `IDropTarget::DragEnter/Drop` 调用接受 COPY；MOVE 在这段测试中报告 effect=0。探针源码明确说明直接调用没有执行 `DoDragDrop` 的源端完成阶段，因此此结果不能判为真实 Shell MOVE 失败。独立的 Shell `IFileOperation` IDataObject MOVE 已成功，源被移除且目标内容一致。仍需使用真实 OLE drag loop 才能判定拖放 MOVE；未验证可见 Explorer Dirs 窗格、真实物理路径、多窗格竞争和产品生命周期。
 
 本次仅复跑隔离探针，没有修改产品或发布版。结果日志位于用户临时目录 `explorer-dirs-registered-namespace-20261102.log` 与 `explorer-dirs-recursive-probe-20261102.log`。接下来优先评估注册 namespace 方案的便携部署和物理文件夹转接成本，再决定是否推进产品级 host 原型；ExplorerBrowser `BrowseToObject` 不能作为这层转接的替代方案。
+
+### 2026-11-02：多视图探针的物理根目录覆盖边界
+
+为评估进入多窗格阶段的差距，检查 NativeProbe 自定义文件夹 provider 的实例化链：`SetSyntheticSortBackingPath` 写入全局 `g_syntheticSortBackingPath`；`DllGetClassObject` 仅接受全局 `g_syntheticFolderClassId`；Shell 根文件夹 `Initialize` 从该全局路径绑定文件系统对象。子文件夹实例随后继承父实例 `_backingPath`，所以已有多视图测试能验证多个 view 共用同一物理树时的缓存/列行为，但不能证明两个不同物理根目录能并行映射。
+
+要验证真实多窗格路线，下一步原型需给 namespace 根提供稳定且独立的物理路径身份（而非临时改写全局路径），并同时打开两个不同临时根目录的 ExplorerBrowser，交叉导航后分别核对 parsing name、枚举内容、递归列值及会话恢复。当前 Shell 注册探针每次只注册一个临时 CLSID；逐窗格注册 CLSID 可以做诊断，却不是合适的产品方案。产品架构与 release 未修改。
