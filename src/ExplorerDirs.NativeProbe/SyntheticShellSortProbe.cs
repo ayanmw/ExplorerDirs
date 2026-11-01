@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32;
+using System.Windows.Threading;
 using ExplorerDirs.App;
 
 public static class SyntheticShellSortProbe
@@ -235,7 +236,7 @@ public static class SyntheticShellSortProbe
         var shellWindowScrollProbe = sizeUpdateStrategy == "single-item-recreate-shell-window-scroll";
         if (exerciseUpdateNotifications && sizeUpdateStrategy == "all")
             throw new ArgumentException("Run each recursive-size update strategy in its own fresh probe process; 'all' cannot share a view baseline.");
-        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("single-item" or "single-item-reapply-column" or "single-item-reapply-column-recreate-view" or "single-item-reapply-column-save-state-recreate-window" or "single-item-recreate-shell-window" or "single-item-recreate-shell-window-multiselect" or "single-item-recreate-shell-window-scroll" or "single-item-capture-reapply-recreate-window" or "single-item-live-cache-publish" or "single-item-lvm-update-live-cache-publish" or "item-plus-parent-live-cache-publish" or "full-view-refresh-live-cache-publish" or "full-view-refresh-redraw-live-cache-publish" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
+        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("single-item" or "single-item-reapply-column" or "single-item-reapply-column-recreate-view" or "single-item-reapply-column-save-state-recreate-window" or "single-item-recreate-shell-window" or "single-item-recreate-shell-window-multiselect" or "single-item-recreate-shell-window-scroll" or "single-item-capture-reapply-recreate-window" or "single-item-live-cache-publish" or "single-item-lvm-update-live-cache-publish" or "item-plus-parent-live-cache-publish" or "full-view-refresh-live-cache-publish" or "full-view-refresh-background-scan-live-cache-publish" or "full-view-refresh-redraw-live-cache-publish" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
             throw new ArgumentException($"Unknown recursive-size update strategy '{sizeUpdateStrategy}'.");
         var foreground = GetForegroundWindow();
         var runIdText = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_RUN_ID");
@@ -1420,6 +1421,11 @@ public static class SyntheticShellSortProbe
                     Check(At<RefreshView>(view, 8)(view)),
                     module, folderView, view, backingFolder, publishLiveSnapshot: true,
                     expectLiveRefresh: true, host: host);
+            if (strategyFilter == "full-view-refresh-background-scan-live-cache-publish")
+                RunSizeUpdateStrategy("full-view-refresh-background-scan-live-cache-publish", 1, () =>
+                    Check(At<RefreshView>(view, 8)(view)),
+                    module, folderView, view, backingFolder, publishLiveSnapshot: true,
+                    scanInBackground: true, expectLiveRefresh: true, host: host);
             if (strategyFilter == "full-view-refresh-redraw-live-cache-publish")
                 RunSizeUpdateStrategy("full-view-refresh-redraw-live-cache-publish", 1, () =>
                     Check(At<RefreshView>(view, 8)(view)),
@@ -1458,13 +1464,56 @@ public static class SyntheticShellSortProbe
         }
     }
 
+    private static IReadOnlyDictionary<string, RecursiveDirectoryScanResult> ScanRecursiveDirectoryOffOwnerThread(
+        string childPath, out int workerThreadId, out int publishThreadId)
+    {
+        var dispatcher = Dispatcher.CurrentDispatcher;
+        var ownerThreadId = Environment.CurrentManagedThreadId;
+        var ownerContext = new DispatcherSynchronizationContext(dispatcher);
+        (IReadOnlyDictionary<string, RecursiveDirectoryScanResult> Results, int WorkerThreadId) result = (null!, 0);
+        var completedPublishThreadId = 0;
+        using var coordinator = new ExplorerDirs.NativeProbe.DirectoryTreeScanCoordinator();
+        var request = coordinator.RunLatestAsync(ticket =>
+        {
+            var results = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
+                Path.GetDirectoryName(childPath)!, [childPath], ticket);
+            return (Results: results, WorkerThreadId: Environment.CurrentManagedThreadId);
+        }, ownerContext, value =>
+        {
+            result = value;
+            completedPublishThreadId = Environment.CurrentManagedThreadId;
+        });
+        PumpDispatcherUntil(() => request.IsCompleted);
+        if (!request.GetAwaiter().GetResult())
+            throw new OperationCanceledException("The recursive-size Shell probe scan was retired before publication.");
+        workerThreadId = result.WorkerThreadId;
+        publishThreadId = completedPublishThreadId;
+        if (publishThreadId != ownerThreadId)
+            throw new InvalidOperationException($"The background scan result published on thread {publishThreadId}; expected owner thread {ownerThreadId}.");
+        return result.Results;
+    }
+
+    private static void PumpDispatcherUntil(Func<bool> completed)
+    {
+        var frame = new DispatcherFrame();
+        var timer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(10)
+        };
+        timer.Tick += (_, _) => { if (completed()) frame.Continue = false; };
+        timer.Start();
+        try { Dispatcher.PushFrame(frame); }
+        finally { timer.Stop(); }
+    }
+
     private static void RunSizeUpdateStrategy(string name, long updatedSize, Action notify,
         nint module, nint folderView, nint view, string backingFolder, bool reapplyCustomSizeColumn = false,
         bool recreateDetailsView = false, bool recreateShellWindow = false, StreamViewHost? host = null,
         nint hostPointer = 0, bool multiSelect = false, bool preserveScrollAnchor = false,
         string? copyDestination = null, bool saveViewStateBeforeRecreateWindow = false,
         bool reapplyCapturedColumns = false, bool publishLiveSnapshot = false,
-        bool expectLiveRefresh = false, bool holdListViewRedrawUntilSettled = false)
+        bool expectLiveRefresh = false, bool holdListViewRedrawUntilSettled = false,
+        bool scanInBackground = false)
     {
         // Start from the new view's actual custom-column state. IColumnManager does not
         // capture this provider-defined key, so refreshing and replaying its snapshot
@@ -1510,8 +1559,18 @@ public static class SyntheticShellSortProbe
         if (publishLiveSnapshot)
         {
             var childPath = Path.Combine(backingFolder, "child");
-            var scan = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
-                backingFolder, [childPath], CancellationToken.None);
+            var ownerThreadId = Environment.CurrentManagedThreadId;
+            var workerThreadId = 0;
+            var publishThreadId = 0;
+            var scan = scanInBackground
+                ? ScanRecursiveDirectoryOffOwnerThread(childPath, out workerThreadId, out publishThreadId)
+                : RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(backingFolder, [childPath], CancellationToken.None);
+            if (scanInBackground)
+            {
+                if (workerThreadId == ownerThreadId || publishThreadId != ownerThreadId || Environment.CurrentManagedThreadId != ownerThreadId)
+                    throw new InvalidOperationException($"Background scan thread contract failed: owner={ownerThreadId}; worker={workerThreadId}; publish={publishThreadId}; current={Environment.CurrentManagedThreadId}.");
+                Console.WriteLine($"synthetic-size-update: scan-thread-contract=passed; owner={ownerThreadId}; worker={workerThreadId}; publish={publishThreadId}");
+            }
             if (!scan.TryGetValue(Path.GetFullPath(childPath), out var scannedChild) ||
                 scannedChild.Bytes != checked((ulong)updatedSize))
                 throw new InvalidOperationException($"The production scanner did not produce the expected {updatedSize}-byte live update.");

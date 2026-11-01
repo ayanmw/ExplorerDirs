@@ -1316,3 +1316,9 @@ Private Desktop 隐藏 view 探针将 `child` 的递归大小快照覆盖为 1,2
 将按需模式接入现有 Private Desktop WPF `IShellView` 探针，使用 100 个目录（每个 10 个文件）、一个两层子目录和一个普通文件，共 102 行。`CreateViewWindow` 稳定后、探针主动读取整列前，DefView 已请求 22 行大小文本并触发 22 次扫描（23 次指标函数调用、213 个后代条目）；随后探针显式读取全部 102 行文本，大小列请求数升至 102、扫描数升至 101（102 次指标调用、1,003 个后代条目）。累计扫描器耗时约 15.7 ms。目录值/文件值仍分别显示 10/4；`CompareIDs` 阶段扫描数为 0。NativeProbe Release build 0 警告/错误，Private Desktop watchdog exit 0，前台、最后输入和隔离清理守卫通过。
 
 这说明隐藏 DefView 初始化会请求一部分大小行值，而额外行值请求会按行触发同步计算；全 102 行的 101 次扫描是探针主动读取整列造成，不能解释为 DefView 冷启动必然请求全部目录。约 15.7 ms 只来自本机合成夹具和当前缓存状态，不是磁盘/网络目录性能承诺。仍未验证产品 ExplorerBrowser 的列请求、可见 UI 感受或异步回填；同步工作可能在 Shell 请求线程执行。下一步应评估后台扫描完成后仅更新对应行值的原型，并保持排序、选区、焦点和通知行为，不据隐藏探针直接迁移产品架构。
+
+### 2026-11-01：后台扫描、STA 发布与 DefView 完整刷新闭环
+
+在既有 `full-view-refresh-live-cache-publish` 隔离策略上增加 `full-view-refresh-background-scan-live-cache-publish`：先于 view STA 修改夹具目录，再用项目的 `RecursiveDirectoryScanner` 和 `DirectoryTreeScanCoordinator` 在 worker 扫描；扫描结果经 WPF `DispatcherSynchronizationContext` 回到 view 所属线程后写入当前 provider 快照，最后调用 `IShellView::Refresh()`。三次独立 Private Desktop WPF view 运行都确认 owner/worker/publish 线程为 `5/7/5`，新大小值 `1 B` 被显示，排序为 `small.bin|child`，选区与焦点保持，DefView 重枚举 2 行并执行一次大小比较；刷新读回分别为 140、172、157 ms。既有 `--common-listview-relative-size-contract` 亦通过，确认自有 ListView 的后台扫描、owner 线程发布、排序及选择/焦点合同仍通过。
+
+此结果将真实扫描工作从 Shell STA 移走，并证明结果可在 STA 安全发布后被当前合成 DefView 消费；派生值仍需完整 view refresh 才更新，因此尚未实现单行更新。140–172 ms 是两行夹具的刷新到稳定读回时间，不是纯扫描延迟，也不能外推大目录耗时。未采集像素，不能判断刷新白闪；未验证真实 ExplorerBrowser、可见 UI、多窗格负载或网络路径。后台扫描策略只存在于 NativeProbe，产品仍未接入逐行递归大小列。
