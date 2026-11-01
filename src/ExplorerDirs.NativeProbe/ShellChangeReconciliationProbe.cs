@@ -980,11 +980,12 @@ internal static class ShellChangeReconciliationProbe
         public int TextMax; public int Image; public int Order; public int MinWidth; public int DefaultWidth; public int IdealWidth;
     }
 
-    private sealed class ChangeWindow : NativeWindow, IDisposable
+    internal sealed class ChangeWindow : NativeWindow, IDisposable
     {
         private readonly List<uint> _events = [];
         private readonly List<ShellChangeEvent> _changeEvents = [];
         private readonly Dictionary<string, string> _renamedParsingNames = new(StringComparer.OrdinalIgnoreCase);
+        private uint _registration;
         internal IReadOnlyList<uint> Events => _events;
         internal IReadOnlyList<ShellChangeEvent> ChangeEvents => _changeEvents;
         internal IReadOnlyDictionary<string, string> RenamedParsingNames => _renamedParsingNames;
@@ -992,6 +993,16 @@ internal static class ShellChangeReconciliationProbe
         internal ChangeWindow()
         {
             CreateHandle(new CreateParams { Caption = "ExplorerDirs Shell change probe", Parent = new nint(-3) });
+        }
+
+        internal void Register(nint folderPidl)
+        {
+            if (_registration != 0) throw new InvalidOperationException("The Shell change window is already registered.");
+            var watch = new ShellChangeEntry { Pidl = folderPidl, Recursive = true };
+            _registration = SHChangeNotifyRegister(Handle, ShellAndInterruptSources, WatchEvents,
+                ChangeMessage, 1, ref watch);
+            if (_registration == 0)
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "SHChangeNotifyRegister failed.");
         }
 
         internal bool WaitFor(uint[] expected, TimeSpan timeout)
@@ -1081,10 +1092,15 @@ internal static class ShellChangeReconciliationProbe
             finally { Marshal.FreeCoTaskMem(name); }
         }
 
-        public void Dispose() => DestroyHandle();
+        public void Dispose()
+        {
+            if (_registration != 0) _ = SHChangeNotifyDeregister(_registration);
+            _registration = 0;
+            DestroyHandle();
+        }
     }
 
-    private sealed record ShellChangeEvent(uint EventId, string? FirstPath, string? SecondPath);
+    internal sealed record ShellChangeEvent(uint EventId, string? FirstPath, string? SecondPath);
 
     [StructLayout(LayoutKind.Sequential)] private struct ShellChangeEntry { public nint Pidl; [MarshalAs(UnmanagedType.Bool)] public bool Recursive; }
 

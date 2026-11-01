@@ -38,6 +38,7 @@ internal static class ShellViewHostFilterProbe
     private const uint LvmIsGroupViewEnabled = 0x10AF;
     private const uint ShellChangeCreated = 0x00000002;
     private const uint ShellChangeDeleted = 0x00000004;
+    private const uint ShellChangeRenamedItem = 0x00000001;
     private const uint ShellChangePathUnicode = 0x00000005;
     private const uint SigDnFileSystemPath = 0x80058000;
 
@@ -1369,7 +1370,7 @@ internal static class ShellViewHostFilterProbe
             try
             {
                 File.WriteAllText(createdPeerPath, "peer-shell-change");
-                SHChangeNotify(ShellChangeCreated, ShellChangePathUnicode, createdPeerPath, 0);
+                SHChangeNotify(ShellChangeCreated, ShellChangePathUnicode, createdPeerPath, null);
                 WaitForPeerShellItem(folderView, createdPeerPath, shouldExist: true, initialCount + 1);
                 var addedProjection = ProjectPeerShellOrder(peerList, folderView, folderPidl, shellFolder,
                     peerRows, ref nextPeerRowId, initialCount + 1, groupByType: true);
@@ -1382,7 +1383,7 @@ internal static class ShellViewHostFilterProbe
                     throw new Exception("Shell create notification did not preserve existing peer PIDL rows and assign the new row a distinct identity.");
 
                 File.Delete(createdPeerPath);
-                SHChangeNotify(ShellChangeDeleted, ShellChangePathUnicode, createdPeerPath, 0);
+                SHChangeNotify(ShellChangeDeleted, ShellChangePathUnicode, createdPeerPath, null);
                 WaitForPeerShellItem(folderView, createdPeerPath, shouldExist: false, initialCount);
                 var deletedProjection = ProjectPeerShellOrder(peerList, folderView, folderPidl, shellFolder,
                     peerRows, ref nextPeerRowId, initialCount, groupByType: true);
@@ -1392,6 +1393,30 @@ internal static class ShellViewHostFilterProbe
                 if (!deletedIdentityRetired)
                     throw new Exception("Shell delete notification did not retire the removed peer row while preserving surviving PIDL identities.");
                 Console.WriteLine($"ishellview-peer-shell-change: create=True;delete=True;existing-pidl-ids-retained={originalRowsRetained};new-row-id-assigned={newRowIdentityAssigned};deleted-row-id-retired={deletedIdentityRetired};details-reconciled=True");
+
+                var renamedOldPath = Path.Combine(peerFixturePath, "keep.txt");
+                var renamedNewPath = Path.Combine(peerFixturePath, "keep-renamed.txt");
+                var renamedOldRow = peerRows.Single(row => string.Equals(row.Name, Path.GetFileName(renamedOldPath), StringComparison.OrdinalIgnoreCase));
+                using var renameWatch = new ShellChangeReconciliationProbe.ChangeWindow();
+                renameWatch.Register(folderPidl);
+                var renameEventIndex = renameWatch.Events.Count;
+                File.Move(renamedOldPath, renamedNewPath);
+                SHChangeNotify(ShellChangeRenamedItem, ShellChangePathUnicode, renamedOldPath, renamedNewPath);
+                if (!renameWatch.WaitForAnySince(renameEventIndex, [ShellChangeRenamedItem], TimeSpan.FromSeconds(5)))
+                    throw new TimeoutException("The isolated Shell change window did not receive SHCNE_RENAMEITEM.");
+                WaitForPeerShellRename(folderView, renamedOldPath, renamedNewPath, initialCount);
+                var renamedProjection = ProjectPeerShellOrder(peerList, folderView, folderPidl, shellFolder,
+                    peerRows, ref nextPeerRowId, initialCount, groupByType: true,
+                    renamedParsingNames: renameWatch.RenamedParsingNames);
+                peerRows = renamedProjection.Rows;
+                var renamedPeerRow = peerRows.Single(row => string.Equals(row.Name, Path.GetFileName(renamedNewPath), StringComparison.OrdinalIgnoreCase));
+                var renameIdentityPreserved = renamedPeerRow.Id == renamedOldRow.Id && renamedProjection.ExistingIdentitiesPreserved;
+                var renamedDetailsUpdated = renamedPeerRow.DetailValues.Length > 0 &&
+                    string.Equals(renamedPeerRow.DetailValues[0], Path.GetFileName(renamedNewPath), StringComparison.OrdinalIgnoreCase);
+                var renameOtherIdsPreserved = originalPeerIds.Where(id => id != renamedOldRow.Id).All(id => peerRows.Any(row => row.Id == id));
+                if (!renameIdentityPreserved || !renamedDetailsUpdated || !renameOtherIdsPreserved)
+                    throw new Exception("Shell rename reconciliation did not preserve the old row ID and update the renamed row's details.");
+                Console.WriteLine($"ishellview-peer-shell-change: rename=True;rename-notification=True;old-id={renamedOldRow.Id};new-id={renamedPeerRow.Id};identity-preserved={renameIdentityPreserved};details-updated={renamedDetailsUpdated};other-pidl-ids-retained={renameOtherIdsPreserved}");
             }
             finally
             {
@@ -1595,7 +1620,8 @@ internal static class ShellViewHostFilterProbe
     }
 
     private static (List<PeerShellRow> Rows, nint SystemImageList) CapturePeerShellRows(nint folderView,
-        nint folderPidl, nint shellFolder, IReadOnlyList<PeerShellRow> previous, ref int nextId)
+        nint folderPidl, nint shellFolder, IReadOnlyList<PeerShellRow> previous, ref int nextId,
+        IReadOnlyDictionary<string, string>? renamedParsingNames = null)
     {
         Check(At<ItemCount>(folderView, 7)(folderView, 2, out var count));
         var enumeration = ShellListViewEnumerator.Enumerate(folderPidl, shellFolder);
@@ -1630,8 +1656,8 @@ internal static class ShellViewHostFilterProbe
                                 ? "File"
                                 : Path.GetExtension(row.FileSystemPath).TrimStart('.').ToUpperInvariant() + " file";
                     var detailValues = ReadShellDetailValues(shellFolder2, row.RelativePidl, detailTitles.Length);
-                    current.Add(new PeerShellRow(0, retainedPidl, row.DisplayName, groupTitle, row.SystemImageIndex,
-                        detailTitles, detailValues));
+                    current.Add(new PeerShellRow(0, retainedPidl, row.DisplayName, row.ParsingName, groupTitle,
+                        row.SystemImageIndex, detailTitles, detailValues));
                     retainedPidl = 0;
                 }
                 finally
@@ -1647,6 +1673,10 @@ internal static class ShellViewHostFilterProbe
             foreach (var row in current)
             {
                 var old = previous.FirstOrDefault(candidate => ILIsEqual(candidate.AbsolutePidl, row.AbsolutePidl));
+                if (old is null && renamedParsingNames is not null &&
+                    renamedParsingNames.TryGetValue(row.ParsingName, out var oldParsingName))
+                    old = previous.FirstOrDefault(candidate => string.Equals(candidate.ParsingName, oldParsingName,
+                        StringComparison.OrdinalIgnoreCase));
                 if (old is null)
                     assigned.Add(row with { Id = ++nextId });
                 else
@@ -1710,6 +1740,26 @@ internal static class ShellViewHostFilterProbe
             throw new TimeoutException($"The Shell view did not settle to {expectedCount} rows with '{itemName}' present={shouldExist}.");
     }
 
+    private static void WaitForPeerShellRename(nint folderView, string oldPath, string newPath, int expectedCount)
+    {
+        var oldName = Path.GetFileName(oldPath);
+        var newName = Path.GetFileName(newPath);
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        var stableSamples = 0;
+        while (DateTime.UtcNow < deadline && stableSamples < 3)
+        {
+            Application.DoEvents();
+            Check(At<ItemCount>(folderView, 7)(folderView, 2, out var count));
+            var names = count > 0 ? ReadVisibleItemNames(folderView, count) : [];
+            var renameSettled = count == expectedCount && names.Contains(newName, StringComparer.OrdinalIgnoreCase) &&
+                !names.Contains(oldName, StringComparer.OrdinalIgnoreCase);
+            stableSamples = renameSettled ? stableSamples + 1 : 0;
+            if (stableSamples < 3) Thread.Sleep(50);
+        }
+        if (stableSamples < 3)
+            throw new TimeoutException($"The Shell view did not settle after renaming '{oldName}' to '{newName}'.");
+    }
+
     private static int ReadShellDetail(nint shellFolder2, nint item, uint column, out string text)
     {
         var details = Marshal.AllocCoTaskMem(Marshal.SizeOf<NativeShellDetails>());
@@ -1744,9 +1794,10 @@ internal static class ShellViewHostFilterProbe
 
     private static (List<PeerShellRow> Rows, bool ExistingIdentitiesPreserved) ProjectPeerShellOrder(nint listView,
         nint folderView, nint folderPidl, nint shellFolder, IReadOnlyList<PeerShellRow> previous,
-        ref int nextId, int expectedCount, bool groupByType = false)
+        ref int nextId, int expectedCount, bool groupByType = false,
+        IReadOnlyDictionary<string, string>? renamedParsingNames = null)
     {
-        var projection = CapturePeerShellRows(folderView, folderPidl, shellFolder, previous, ref nextId);
+        var projection = CapturePeerShellRows(folderView, folderPidl, shellFolder, previous, ref nextId, renamedParsingNames);
         if (projection.Rows.Count != expectedCount)
             throw new Exception($"The Shell row projection count differs: expected={expectedCount}, actual={projection.Rows.Count}.");
         var idsPreserved = projection.Rows.Count == previous.Count &&
@@ -2408,7 +2459,7 @@ internal static class ShellViewHostFilterProbe
     private struct NativeShellDetails { public int Format, Width; public NativeStrRet Text; }
 
     private sealed record NativeMenuCommandDescriptor(int Id, string Verb, string Caption);
-    private sealed record PeerShellRow(int Id, nint AbsolutePidl, string Name, string TypeName, int SystemImageIndex,
+    private sealed record PeerShellRow(int Id, nint AbsolutePidl, string Name, string ParsingName, string TypeName, int SystemImageIndex,
         string[] DetailTitles, string[] DetailValues);
 
     [StructLayout(LayoutKind.Sequential)]
@@ -2589,7 +2640,7 @@ internal static class ShellViewHostFilterProbe
     }
     [DllImport("shell32.dll")] private static extern bool ILIsEqual(nint first, nint second);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern void SHChangeNotify(uint eventId, uint flags, string path1, nint path2);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern void SHChangeNotify(uint eventId, uint flags, string path1, string? path2);
     [DllImport("shlwapi.dll", CharSet = CharSet.Unicode)] private static extern int StrRetToBufW(nint strret, nint pidl, System.Text.StringBuilder buffer, uint capacity);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint CreateWindowExW(uint ex,
         string cls, string name, uint style, int x, int y, int width, int height,

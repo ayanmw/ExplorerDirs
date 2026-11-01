@@ -1776,3 +1776,9 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 在同一隔离 Private Desktop `IShellView` 菜单合同中，对真实 filesystem fixture 新建一个文本文件并广播 `SHCNE_CREATE`，等待 Shell 行数稳定后，用 Shell PIDL 顺序重投影 peer 四列；原三行 ID 全部保留，新行获得唯一 ID。随后删除该文件并广播 `SHCNE_DELETE`，再次投影后新行 ID 退役、原行身份和详情值仍对齐。NativeProbe Release 构建 0 警告/错误，`--ishellview-menu-command-private-desktop` exit 0，前台/last-input 与隔离清理守卫通过。
 
 该验证覆盖创建/删除通知及标准详情列的重投影；不覆盖重命名 PIDL identity remap、跨目录移动、通知合并/风暴、通知延迟/丢失、选择焦点恢复、多窗格或可见更新。创建与删除由探针显式调用 `SHChangeNotify`，不是由其它进程自然触发；仍属隐藏 NativeProbe，不代表产品接线或视觉体验。下一步验证重命名通知下旧/新 PIDL 的同一行身份映射与详情字段更新，再推进按需递归值排序。
+
+### 2026-11-01：Shell 重命名通知保留 peer 行身份
+
+在同一隔离 filesystem `IShellView` fixture 中，将 `keep.txt` 改名为 `keep-renamed.txt`，通过专用 `ChangeWindow` 收取 `SHCNE_RENAMEITEM` 并解析通知携带的旧/新绝对 Shell parsing name。peer reconcile 用“新 parsing name → 旧 parsing name”映射旧 row identity；重投影后原 row ID 仍为 3，名称详情已更新为新文件名，其余两行 ID 也保留。逐列读回、创建/删除通知合同、NativeProbe Release 构建通过；`--ishellview-menu-command-private-desktop` exit 0，前台/last-input 与隔离清理守卫通过。
+
+该验证证明本地单文件改名通知映射与 peer 行/详情更新。它没有覆盖文件夹改名或跨目录移动、重名冲突、连续通知合并、选区/焦点恢复、第三方 Shell provider、可见 UI 或产品 ExplorerBrowser；重命名项是固定 fixture 文件，实验没有触碰用户文件。接下来才适合在 peer 的 Details 模型中加入显式按需递归值，并单独验证数值排序与扫描期间更新策略。

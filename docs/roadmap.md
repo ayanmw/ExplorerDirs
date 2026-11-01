@@ -5778,3 +5778,7 @@ peer SysListView32 现读取 Shell 文件夹的名称、大小、项目类型、
 ### 2026-11-01：Shell 创建与删除通知同步 peer 详情列
 
 同一隔离 `IShellView` 合同在真实 filesystem fixture 上显式广播 `SHCNE_CREATE`/`SHCNE_DELETE`，等待 Shell 行模型稳定后重投影 peer 详情列。新增行获得唯一 PIDL 行 ID，原有三行 ID 保留；删除后新增行 ID 退役，存活行详情仍逐列对齐。NativeProbe Release 0 警告/错误，Private Desktop 探针 exit 0，前台、输入与清理守卫通过。此证据仅覆盖显式广播的创建/删除，未覆盖重命名身份映射、跨目录移动、通知风暴、可见更新、产品 ExplorerBrowser 或递归列；仍留在 NativeProbe。详见[调查记录](folder-size-column-investigation.md#2026-11-01shell-创建与删除通知同步-peer-详情列)。
+
+### 2026-11-01：Shell 重命名通知保留 peer 行身份
+
+通过复用 `ChangeWindow` 捕获 `SHCNE_RENAMEITEM` 的旧/新 parsing name，peer 重投影以新名映射旧 row ID。`keep.txt` 改名后仍保留 ID=3，Name 详情更新为新名，其它行身份及四列逐项读回正常；NativeProbe Release 与 Private Desktop 菜单/视图探针通过，前台、输入和隔离清理守卫通过。仅覆盖本地单文件改名，未测文件夹/跨目录移动、重名冲突、选择焦点、可见更新或产品接线。下一步在 NativeProbe 将按需递归值接入现有 Shell 详情桥，并验证数值排序；产品仍使用 ExplorerBrowser。详见[调查记录](folder-size-column-investigation.md#2026-11-01shell-重命名通知保留-peer-行身份)。
