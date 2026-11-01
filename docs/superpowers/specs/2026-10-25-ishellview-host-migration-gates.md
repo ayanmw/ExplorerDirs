@@ -178,3 +178,7 @@ Private Desktop 宿主 teardown 和前台守卫问题已在 WPF 根宿主路径�
 
 2026-11-01 ZIP 跨卷 MoveItems 续验：隔离 `IShellView` 从 D: ZIP provider 将虚拟文件与含嵌套文件的目录分别移动到 C:；两项操作均 S_OK、未取消、内容正确且归档源移除，源 view 分别由 2→1 项、再收敛至 0。Private Desktop 前台/输入/清理守卫及 Release build 通过。当前 Windows ZIP provider 的程序化跨卷 MoveItems 子门槛有证据；通知 PIDL 与延迟、交互 UI、真实拖放、ExplorerBrowser 产品接线和其它 provider 仍开放，不关闭完整阶段 4/5。
 2026-11-01 ZIP 跨卷通知 PIDL：在 ZIP 源 view 与 C: 目标分别注册 Shell 监听。文件 MoveItems 的 `UPDATEITEM`（归档）、`DELETE`（虚拟文件）及 `CREATE`（目标文件）均收到并解析为预期 parsing name，作为成功断言。目录单独移动也收到虚拟子项删除及目标文件夹/嵌套文件创建。先移动 ZIP 文件再移动目录的组合中，NativeProbe 初版把第一步观察结果留作可变列表引用，导致第二步按增长后的计数跳过通知；冻结事件快照后连续两次复跑均收到归档 `UPDATEITEM` 与嵌套文件 `DELETE`，但没有文件夹 `DELETE` 或目标创建事件；第二步改为从当前 view 重新枚举目录 PIDL 后仍复现。修正的是探针诊断；仅当前 Windows ZIP provider 的隔离结果，产品通知接线、其它 provider、可见 UI 仍开放。
+
+### 2026-11-01：七类虚拟 Shell 位置的历史往返
+
+在现有隐藏 host-filter Private Desktop 探针中，将 PIDL Back/Forward 身份检查推广至 Desktop、This PC、Recycle Bin、Libraries、Network Places、Search Folder 和 ZIP provider。每个目标都验证 view 创建后 Back 恢复实际前置绝对 PIDL，Forward 恢复本目标绝对 PIDL；项目数只记录首个成功读取值，不等待索引稳定。连续两轮完整 watchdog 均 exit 0，所有虚拟目标首个 Back/Forward 计数均为 0，前台、输入与隔离清理守卫通过。该结果只覆盖本机当前 Windows 的这七个目标，不证明搜索结果最终加载、其他 provider、产品 ExplorerBrowser 或可见行为。NativeProbe Release 构建 0 警告/错误。日志：`src/.state/native-probe-watchdog/20261101-083358-592227e0.stdout.log`、`20261101-083358-592227e0.stderr.log`、`src/.state/native-probe-watchdog/20261101-083428-be0ccd92.stdout.log`、`src/.state/native-probe-watchdog/20261101-083428-be0ccd92.stderr.log`。

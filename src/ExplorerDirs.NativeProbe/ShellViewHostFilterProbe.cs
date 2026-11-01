@@ -42,7 +42,7 @@ internal static class ShellViewHostFilterProbe
         var fixtureRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
         var fixture = Path.Combine(fixtureRoot, Guid.NewGuid().ToString("N"));
         string? zipPath = null;
-        nint parent = 0, folderPidl = 0, childFolderPidl = 0, grandchildFolderPidl = 0, alternateFolderPidl = 0, volumeRootPidl = 0, virtualFolderPidl = 0, searchFolderPidl = 0, preSearchLocationPidl = 0, filePidl = 0, folder = 0, view = 0, viewPointer = 0, viewWindow = 0, folderView = 0;
+        nint parent = 0, folderPidl = 0, childFolderPidl = 0, grandchildFolderPidl = 0, alternateFolderPidl = 0, volumeRootPidl = 0, virtualFolderPidl = 0, filePidl = 0, folder = 0, view = 0, viewPointer = 0, viewWindow = 0, folderView = 0;
         bool created = false;
         var itemCountLastHResult = 0;
         FilteredHost? host = null;
@@ -471,24 +471,7 @@ internal static class ShellViewHostFilterProbe
             })
                 BrowseVirtualScope(parsingName, label);
 
-            var searchUri = ShellSearchLocation.BuildUri(fixture, "nested");
-            searchFolderPidl = ShellSearchLocation.ParsePidl(searchUri);
-            preSearchLocationPidl = ILClone(host.CurrentPidl);
-            Check(host.BrowseObject(searchFolderPidl, 0));
-            var searchItemCount = AdoptPendingView(expectedItemCount: null);
-            if (!ILIsEqual(host.CurrentPidl, searchFolderPidl))
-                throw new Exception("The isolated host did not retain the Search Folder PIDL.");
-            Console.WriteLine($"ishellview-host-filter: search-folder-view-created=True; enumerated-items={searchItemCount}; {InspectNativeContracts(readVerbs: true)}");
-
-            Check(host.BrowseObject(0, SbspNavigateBack));
-            var backFromSearchItemCount = AdoptPendingView(expectedItemCount: null, returnOnFirstSuccessfulCount: true);
-            if (!ILIsEqual(host.CurrentPidl, preSearchLocationPidl))
-                throw new Exception("Back from the Search Folder did not restore the prior location.");
-            Check(host.BrowseObject(0, SbspNavigateForward));
-            var forwardToSearchItemCount = AdoptPendingView(expectedItemCount: null, returnOnFirstSuccessfulCount: true);
-            if (!ILIsEqual(host.CurrentPidl, searchFolderPidl))
-                throw new Exception("Forward to the Search Folder did not restore its absolute PIDL identity.");
-            Console.WriteLine($"ishellview-host-filter: search-folder-history=True; back-items={backFromSearchItemCount}; forward-items={forwardToSearchItemCount}");
+            BrowseVirtualScope(ShellSearchLocation.BuildUri(fixture, "nested"), "SearchFolder");
 
             BrowseVirtualScope(CreateZipFixture(), "ZipContainer");
             return 0;
@@ -502,12 +485,13 @@ internal static class ShellViewHostFilterProbe
             void BrowseVirtualScope(string parsingName, string label)
             {
                 TraceVirtualScope($"{label}-parse-before", foreground);
-                if (label == "SearchFolder")
-                    virtualFolderPidl = ShellSearchLocation.ParsePidl(parsingName);
-                else
-                    Check(SHParseDisplayName(parsingName, 0, out virtualFolderPidl, 0, out _));
+                var previousLocationPidl = ILClone(host.CurrentPidl);
                 try
                 {
+                    if (label == "SearchFolder")
+                        virtualFolderPidl = ShellSearchLocation.ParsePidl(parsingName);
+                    else
+                        Check(SHParseDisplayName(parsingName, 0, out virtualFolderPidl, 0, out _));
                     TraceVirtualScope($"{label}-browse-before", foreground);
                     Check(host.BrowseObject(virtualFolderPidl, 0));
                     TraceVirtualScope($"{label}-browse-after", foreground);
@@ -518,11 +502,23 @@ internal static class ShellViewHostFilterProbe
                     var listView = FindChildByClass(viewWindow, "SysListView32");
                     var listViewItems = listView == 0 ? -1 : SendMessageW(listView, 0x1004, 0, 0).ToInt32();
                     Console.WriteLine($"ishellview-host-filter: virtual-shell-view-created=True; target={label}; folder-view-items={itemCount}; folder-view-items-hr=0x{itemCountLastHResult:X8}; list-view-items={listViewItems}; {InspectNativeContracts(readVerbs: label is not "ZipContainer" and not "ControlPanel")}");
+                    Check(host.BrowseObject(0, SbspNavigateBack));
+                    var backItemCount = AdoptPendingView(expectedItemCount: null,
+                        allowItemCountFailure: label == "ControlPanel", returnOnFirstSuccessfulCount: true);
+                    if (!ILIsEqual(host.CurrentPidl, previousLocationPidl))
+                        throw new Exception($"Back from {label} did not restore the previous absolute location.");
+                    Check(host.BrowseObject(0, SbspNavigateForward));
+                    var forwardItemCount = AdoptPendingView(expectedItemCount: null,
+                        allowItemCountFailure: label == "ControlPanel", returnOnFirstSuccessfulCount: true);
+                    if (!ILIsEqual(host.CurrentPidl, virtualFolderPidl))
+                        throw new Exception($"Forward to {label} did not restore its absolute PIDL identity.");
+                    Console.WriteLine($"ishellview-host-filter: virtual-history-roundtrip=True; target={label}; back-items={backItemCount}; forward-items={forwardItemCount}; pidl-identity-preserved=True");
                     TraceVirtualScope($"{label}-complete", foreground);
                 }
                 finally
                 {
                     Marshal.FreeCoTaskMem(virtualFolderPidl);
+                    Marshal.FreeCoTaskMem(previousLocationPidl);
                     virtualFolderPidl = 0;
                 }
             }
@@ -665,8 +661,6 @@ internal static class ShellViewHostFilterProbe
             if (folder != 0) Marshal.Release(folder);
             if (grandchildFolderPidl != 0) Marshal.FreeCoTaskMem(grandchildFolderPidl);
             if (alternateFolderPidl != 0) Marshal.FreeCoTaskMem(alternateFolderPidl);
-            if (searchFolderPidl != 0) Marshal.FreeCoTaskMem(searchFolderPidl);
-            if (preSearchLocationPidl != 0) Marshal.FreeCoTaskMem(preSearchLocationPidl);
             if (virtualFolderPidl != 0) Marshal.FreeCoTaskMem(virtualFolderPidl);
             if (volumeRootPidl != 0) Marshal.FreeCoTaskMem(volumeRootPidl);
             if (childFolderPidl != 0) Marshal.FreeCoTaskMem(childFolderPidl);
