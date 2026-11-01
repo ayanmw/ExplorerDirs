@@ -2295,3 +2295,9 @@ HostProbe Release build 0 警告/错误；`--shell-provider-location` exit 0，�
 在产品 HostProbe 的合成注册 namespace 上尝试用 `IShellFolderView::Rearrange` 替代完整刷新：以 provider `GetDetailsOf` ordinal 调用时接口返回 `S_OK`，但行序仍是 `folder-large → folder-small`，比较器也未被触发；把参数换成 `IColumnManager` 可见列索引后，后续 `IFolderView2.GetItem` 读行出现 `E_FAIL`，探针无法继续读取属性。撤回了产品宿主接线，避免将不稳定的旧接口用于用户视图。
 
 恢复基线 HostProbe 后可重复确认：初始恢复键读回升序，但刷新前仍为大→小；完整 `IShellView.Refresh` 返回 `S_OK`、触发一次 provider 比较器并重排为小→大。普通文件系统 `PKEY_Size` 初次读行前已经正确升序。故当前差异仍限定在合成 provider 产品 Host。微软文档指出 `Rearrange` 的排序规则由文件夹定义，系统仅保证低 16 位传列规则，并建议调用方改用 `GetSortColumns`；该 API 不适合作为 ExplorerBrowser 产品宿主的通用修复。当前仅把它记录为原型失败结果，后续应验证 provider 自己的初始排序合同或评估受限完整刷新，不改变普通目录路径。
+
+### 2026-11-02：注册 provider 初始递归排序不依赖完整刷新
+
+继续验证 Shell 自己的 canonical 排序命令：在 Shell 已返回初始行后，执行一次相反方向命令，再隔一个 Dispatcher tick 执行会话保存的方向。真实产品 `ExplorerBrowserHost` 在 synthetic 注册 provider 上因此触发递归列比较器，并在完整 `IShellView.Refresh` 前收敛到目标顺序。宿主仅在非文件系统虚拟位置、无分组、恰有一个已保存排序键且该键对应可见未解析列时安排这两次命令；物理目录、标准已解析列和分组视图不进入此路径。排序命令通过现有 `IContextMenu` canonical verb 路径发送，不弹出右键菜单。
+
+HostProbe 为保存升序及降序分别构造初始会话，均验证首次完整刷新前行序与目标方向一致；完整探针仍通过导出、Shell 列值、菜单排序、Header 交互及普通文件系统 `PKEY_Size` 控制。Release build 0 警告/错误，两种方向的隐藏 `--shell-provider-location` 运行均 exit 0，父 HWND 不可见。没有可见 UI 证据；两条 Shell 命令分两个 100 ms Dispatcher tick 执行，是否出现短暂中间行序尚待 UI 检查。此为产品 Host 的注册 synthetic provider 原型，不表示递归列已部署到普通物理目录或 release。

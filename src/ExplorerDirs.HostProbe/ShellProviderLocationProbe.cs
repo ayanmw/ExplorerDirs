@@ -13,7 +13,7 @@ using System.Windows.Threading;
 // Exercises the production ExplorerBrowserHost against a disposable Shell folder provider.
 internal static class ShellProviderLocationProbe
 {
-    internal static int Run()
+    internal static int Run(bool descending = false)
     {
         var root = Path.Combine(Path.GetTempPath(), "ExplorerDirs-HostProvider-" + Guid.NewGuid().ToString("N"));
         var pathA = Path.Combine(root, "default-root");
@@ -58,7 +58,8 @@ internal static class ShellProviderLocationProbe
             var recursiveSortKey = Activator.CreateInstance(propertyKeyType,
                 Guid.Parse("9E5E05AC-1936-4A75-94F7-4704B8B01923"), 1u)!;
             var sortColumns = Array.CreateInstance(sortColumnType, 1);
-            sortColumns.SetValue(Activator.CreateInstance(sortColumnType, [recursiveSortKey, 1]), 0);
+            var initialDirection = descending ? -1 : 1;
+            sortColumns.SetValue(Activator.CreateInstance(sortColumnType, [recursiveSortKey, initialDirection]), 0);
             var displayColumns = Array.CreateInstance(displayColumnType, 2);
             var nameKey = Activator.CreateInstance(propertyKeyType, basicFormat, 10u)!;
             displayColumns.SetValue(Activator.CreateInstance(displayColumnType, [recursiveSortKey, 180]), 0);
@@ -116,13 +117,20 @@ internal static class ShellProviderLocationProbe
                 directRecursiveValues = ReadRecursiveValues(hostType, host, 2);
                 return directRecursiveValues.Length == 2 && directRecursiveValues.All(value => !string.IsNullOrWhiteSpace(value));
             }, TimeSpan.FromSeconds(15), "the product host's IShellFolder2.GetDetailsEx did not return recursive values");
+            PumpDispatcher(TimeSpan.FromMilliseconds(300));
+            WaitUntil(() =>
+            {
+                var settledCounts = readCounts.Invoke(host, [false, false]);
+                return settledCounts is not null &&
+                    (int)settledCounts.GetType().GetProperty("Total")!.GetValue(settledCounts)! == 2;
+            }, TimeSpan.FromSeconds(10), "the product Shell view did not settle its row count after initial custom sorting");
             var recursiveDisplay = ReadRecursiveDisplayText(adapter, hostType, host, 2);
             if (!string.Equals(recursiveDisplay.Header, "Recursive Size", StringComparison.Ordinal) ||
                 recursiveDisplay.Values.Select(value => TryReadBytes(value, out var bytes) ? bytes : ulong.MaxValue)
                     .Order().SequenceEqual([5UL, 29UL]) is false)
                 throw new InvalidOperationException($"The provider's recursive GetDetailsOf contract is unexpected: header='{recursiveDisplay.Header}', values=[{string.Join('|', recursiveDisplay.Values)}].");
             var providerColumnContract = ReadProviderColumnContract(hostType, host);
-            if (providerColumnContract.CompareResult != 1 ||
+            if (providerColumnContract.CompareResult is not (-1 or 1) ||
                 providerColumnContract.DataKey.FormatId != new Guid("7E1F84B7-C052-4E51-8A3C-869254A6B910") ||
                 providerColumnContract.DataKey.PropertyId != 1)
                 throw new InvalidOperationException($"The provider's native recursive column contract was unexpected: key={providerColumnContract.DataKey.FormatId:B}:{providerColumnContract.DataKey.PropertyId}, compare={providerColumnContract.CompareResult}.");
@@ -153,10 +161,14 @@ internal static class ShellProviderLocationProbe
             var getCompareCountForColumn = GetExport<GetCounterForColumn>(adapter, "GetSyntheticSortCompareCountForColumn");
             var compareCountBeforeSort = getCompareCount();
             var columnCompareCountsBefore = Enumerable.Range(0, 8).Select(index => getCompareCountForColumn((uint)index)).ToArray();
-            var orderBeforeRefresh = ReadExportRows(capture.Invoke(host, null)!).Rows
-                .Select(row => Path.GetFileName(row[nameColumnIndex]) ?? row[nameColumnIndex]).ToArray();
-            if (!orderBeforeRefresh.SequenceEqual(["folder-large", "folder-small"], StringComparer.OrdinalIgnoreCase))
-                throw new InvalidOperationException($"The custom-provider initial-order baseline changed unexpectedly: [{string.Join('|', orderBeforeRefresh)}].");
+            var expectedInitialOrder = descending ? new[] { "folder-large", "folder-small" } : ["folder-small", "folder-large"];
+            var orderBeforeRefresh = Array.Empty<string>();
+            WaitUntil(() =>
+            {
+                orderBeforeRefresh = ReadExportRows(capture.Invoke(host, null)!).Rows
+                    .Select(row => Path.GetFileName(row[nameColumnIndex]) ?? row[nameColumnIndex]).ToArray();
+                return orderBeforeRefresh.SequenceEqual(expectedInitialOrder, StringComparer.OrdinalIgnoreCase);
+            }, TimeSpan.FromSeconds(15), "the product host did not apply the restored custom sort before a full view refresh");
             var refreshCompareCountBefore = getCompareCount();
             // In the registered provider host, restored sort state may precede the first actual row reorder.
             var shellRefreshResult = RefreshCurrentShellView(hostType, host);
@@ -165,7 +177,7 @@ internal static class ShellProviderLocationProbe
             var orderAfterRefresh = ReadExportRows(capture.Invoke(host, null)!).Rows
                 .Select(row => Path.GetFileName(row[nameColumnIndex]) ?? row[nameColumnIndex]).ToArray();
             var refreshCompareCountAfter = getCompareCount();
-            if (!orderAfterRefresh.SequenceEqual(["folder-small", "folder-large"], StringComparer.OrdinalIgnoreCase))
+            if (!orderAfterRefresh.SequenceEqual(expectedInitialOrder, StringComparer.OrdinalIgnoreCase))
                 throw new InvalidOperationException($"A full Shell view refresh did not apply the recursive-size order: [{string.Join('|', orderAfterRefresh)}].");
             var ascendingCommandCompareCountBefore = getCompareCount();
             var sortCommandResult = InvokeBackgroundShellVerb(hostType, host, "sortascending");

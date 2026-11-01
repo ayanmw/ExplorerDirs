@@ -11,6 +11,7 @@ internal sealed class NativeShellCommandMenu : IShellCommandMenu
     private readonly nint _ownerWindow;
     private nint _menu;
     private readonly Dictionary<string, uint> _enabled = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, uint> _canonicalOffsets = new(StringComparer.OrdinalIgnoreCase);
 
     internal NativeShellCommandMenu(object context, nint ownerWindow)
     {
@@ -36,12 +37,16 @@ internal sealed class NativeShellCommandMenu : IShellCommandMenu
             try
             {
                 var verbs = ShellFileCommands.All.Select(info => info.Verb).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                // Initial custom-column ordering can need one opposite→saved Shell sort
+                // transition after ExplorerBrowser has populated the virtual view.
+                verbs.UnionWith(["sortascending", "sortdescending"]);
                 var getVerb = Method<CommandString>(5);
                 var newFolderAllowed = InitializeNewSubmenu(count, buffer, getVerb);
                 for (uint offset = 0; offset < count; offset++)
                 {
                     var verb = ReadVerb(offset, buffer, getVerb);
                     if (verb is null || !verbs.Contains(verb)) continue;
+                    _canonicalOffsets.TryAdd(verb, offset);
                     if (!newFolderAllowed && verb.Equals("NewFolder", StringComparison.OrdinalIgnoreCase)) continue;
                     var state = GetMenuState(_menu, offset + 1, 0); // MF_BYCOMMAND
                     if (state != uint.MaxValue && (state & 3) == 0) // MF_GRAYED | MF_DISABLED
@@ -108,6 +113,19 @@ internal sealed class NativeShellCommandMenu : IShellCommandMenu
     {
         if (_ownerObject is null || !_enabled.TryGetValue(verb, out var offset))
             throw new InvalidOperationException("当前 Shell 命令不可用。");
+        return InvokeOffset(offset);
+    }
+
+    internal int? InvokeCanonicalVerb(string verb)
+    {
+        // Some Shell views mark the currently sorted direction disabled in the menu,
+        // but still require its canonical verb to be invoked after the opposite sort.
+        if (_ownerObject is null || !_canonicalOffsets.TryGetValue(verb, out var offset)) return null;
+        return InvokeOffset(offset);
+    }
+
+    private int InvokeOffset(uint offset)
+    {
         var command = new InvokeInfo
         {
             Size = (uint)Marshal.SizeOf<InvokeInfo>(),

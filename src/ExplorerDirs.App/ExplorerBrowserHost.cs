@@ -1971,9 +1971,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         _createdFileSelectionAttempts = 0;
     }
 
-    private IShellCommandMenu? OpenFileCommandMenu(bool background)
+    private IShellCommandMenu? OpenFileCommandMenu(bool background) =>
+        OpenFileCommandMenu(background, allowHidden: false);
+
+    private IShellCommandMenu? OpenFileCommandMenu(bool background, bool allowHidden)
     {
-        if (!IsVisible || _viewReadiness.Pending || _browser is null || _viewWindow == 0)
+        if ((!allowHidden && !IsVisible) || _viewReadiness.Pending || _browser is null || _viewWindow == 0)
             return null;
         // Menu availability needs a selection count, not aggregated file metadata.
         // Keep selection-size property queries on the status-bar read path.
@@ -1989,7 +1992,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 if (context is not null) Marshal.ReleaseComObject(context);
                 return null;
             }
-            return new NativeShellCommandMenu(context,
+            return new NativeShellCommandMenu(context, allowHidden ? IntPtr.Zero :
                 Window.GetWindow(this) is { } window ? new WindowInteropHelper(window).Handle : _hostWindow);
         }
         finally { Marshal.ReleaseComObject(viewObject); }
@@ -2699,9 +2702,61 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             {
                 _viewRestoreFailed = !restored;
                 if (restored) _quickFilterGroupToRestore = null;
+                if (restored && !_location.IsFileSystemLocation && saved.GroupKey is null &&
+                    saved.SortColumns.Count == 1 &&
+                    ShellFileViewExportCapture.HasVisibleUnresolvedColumn(view, saved.SortColumns[0].Key))
+                    ScheduleInitialVirtualSort(saved.SortColumns[0], Current);
             }
         }
         finally { Marshal.Release(view); }
+    }
+
+    private void ScheduleInitialVirtualSort(SortColumnState sort, Func<bool> isCurrent)
+    {
+        var attempts = 0;
+        var oppositeApplied = false;
+        var expectedInputVersion = Interlocked.Read(ref _nativeUserInputVersion);
+        bool IsCurrent() => isCurrent() &&
+            expectedInputVersion == Interlocked.Read(ref _nativeUserInputVersion);
+        var timer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(100)
+        };
+        timer.Tick += (_, _) =>
+        {
+            if (!IsCurrent() || ++attempts > 120)
+            {
+                timer.Stop();
+                return;
+            }
+            var itemCount = ReadDirectoryMonitorItemCount();
+            if (_viewReadiness.Pending || itemCount is not > 0) return;
+            // SetSortColumns restores state but does not always execute a provider's
+            // comparator on the first view fill. A direction transition asks Shell to
+            // run its own sort callback without a full IShellView.Refresh. Separate the
+            // two native commands across dispatcher turns so Shell can finish each one.
+            var oppositeVerb = sort.Direction > 0 ? "sortdescending" : "sortascending";
+            var savedVerb = sort.Direction > 0 ? "sortascending" : "sortdescending";
+            if (!oppositeApplied)
+            {
+                oppositeApplied = InvokeVirtualSortVerb(oppositeVerb, IsCurrent);
+                if (!oppositeApplied) timer.Stop();
+                else expectedInputVersion = Interlocked.Read(ref _nativeUserInputVersion);
+                return;
+            }
+
+            timer.Stop();
+            _ = InvokeVirtualSortVerb(savedVerb, IsCurrent);
+        };
+        timer.Start();
+    }
+
+    private bool InvokeVirtualSortVerb(string verb, Func<bool> isCurrent)
+    {
+        if (!isCurrent()) return false;
+        using var menu = OpenFileCommandMenu(background: true, allowHidden: true) as NativeShellCommandMenu;
+        if (menu?.InvokeCanonicalVerb(verb) is not { } result) return false;
+        return result >= 0;
     }
 
     private sealed class NativeViewStateTarget(nint view, Func<bool> isCurrent) : IShellViewStateTarget

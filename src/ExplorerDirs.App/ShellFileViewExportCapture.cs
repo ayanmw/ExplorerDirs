@@ -67,6 +67,13 @@ internal static class ShellFileViewExportCapture
         return new FileViewExportSnapshot(snapshot.Columns, snapshot.Rows);
     }
 
+    internal static bool HasVisibleUnresolvedColumn(nint folderView, PropertyKeyState key)
+    {
+        if (ShellColumnManager.CaptureForExport(folderView, out var columns) != 0 || columns is null) return false;
+        return columns.Any(column => column.Key == key && column.Name.StartsWith('{') &&
+            column.Name.Contains("}:", StringComparison.Ordinal));
+    }
+
     private static FileViewPrintSnapshot? CaptureFromShellDetails(nint folderView, nint viewWindow,
         IReadOnlyList<ShellExportColumn> visibleColumns,
         IReadOnlyList<(ShellExportColumn column, int index)> unresolvedColumns)
