@@ -1,5 +1,11 @@
 # 逐行文件夹大小与子项计数列调查
 
+## 2026-11-01：同路径目录替换时拒绝旧扫描结果
+
+双 `IShellView` 递归列原型先缓存 `nested` 子目录 4 B；`HandleBoundRecursiveDirectoryScanner` 完成旧目录枚举后，在仍持有旧根目录句柄时暂停返回。`IFileOperation.DeleteItem` 删除该目录后，旧子目录缓存代次递增，父级重新扫描为 20 B。接着在相同路径用 `IFileOperation.NewItem` 创建新目录并写入 6 B 文件，系统自然发送 `SHCNE_MKDIR`；新子目录文件 ID 与旧目录不同，两个视图共享新路径 6 B 缓存，父级共享扫描为 26 B。最后释放旧扫描：它带着旧身份和 4 B 摘要返回，但旧代次不匹配，发布被拒绝，新目录的 6 B 与父级 26 B 缓存都保持不变。
+
+Release NativeProbe build 0 警告/错误；三轮 Private Desktop watchdog exit 0，删除/重建事件、缓存代次、身份差异、双视图共享和选区/焦点断言均通过。日志：`20261101-203102-c6fcdcff`、`20261101-203113-cd6c727a`、`20261101-203120-937c6e3a`。新增的扫描后暂停回调仅供 NativeProbe 竞态控制；缓存发布代次仍是探针模型，产品递归列未接入，也未覆盖通知丢失或网络存储。
+
 ## 2026-11-01：自然目录创建与删除失效
 
 在双视图夹具的 `size-10-renamed` 内，通过 `IFileOperation.NewItem` 新建子目录并加入 4 B 文件；探针自然收到 `SHCNE_MKDIR (0x8)`，使已缓存的递归父目录摘要失效，两视图共享新摘要 24 B。随后用 `IFileOperation.DeleteItem` 删除该非空子目录。实际系统事件为两条 `SHCNE_DELETE (0x4)`（其中一条的路径是被删目录本身），没有发出 `SHCNE_RMDIR`；失效逻辑据目录路径退休递归父项缓存，两视图共享重扫回到 20 B。为覆盖 Shell/驱动可能发送的目录专用事件，失效归类同时识别 `SHCNE_MKDIR/RMDIR`。

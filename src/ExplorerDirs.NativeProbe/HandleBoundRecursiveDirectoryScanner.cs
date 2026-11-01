@@ -40,7 +40,8 @@ internal static class HandleBoundRecursiveDirectoryScanner
         IEnumerable<string> requestedPaths,
         CancellationToken cancellationToken,
         Action<string, ShellFileSystemIdentity>? afterRootOpened = null,
-        Action<string, string>? beforeChildOpen = null)
+        Action<string, string>? beforeChildOpen = null,
+        Action<string, ShellFileSystemIdentity, RecursiveDirectoryScanResult>? afterRootScannedBeforeReturn = null)
     {
         ArgumentNullException.ThrowIfNull(requestedPaths);
         cancellationToken.ThrowIfCancellationRequested();
@@ -64,11 +65,14 @@ internal static class HandleBoundRecursiveDirectoryScanner
                 afterRootOpened?.Invoke(path, root.Identity);
                 if ((root.Attributes & FileAttributeReparsePoint) != 0)
                 {
-                    results.Add(path, new(root.Identity, new(0, 0, 0, 1)));
+                    var skipped = new RecursiveDirectoryScanResult(0, 0, 0, 1);
+                    afterRootScannedBeforeReturn?.Invoke(path, root.Identity, skipped);
+                    results.Add(path, new(root.Identity, skipped));
                     continue;
                 }
 
                 var summary = ScanOpenedDirectory(root.Handle, root.Identity, path, cancellationToken, beforeChildOpen);
+                afterRootScannedBeforeReturn?.Invoke(path, root.Identity, summary);
                 results.Add(path, new(root.Identity, summary));
             }
         }

@@ -1906,6 +1906,41 @@ internal static class ShellViewHostFilterProbe
             VerifySortedSelection(firstList, firstProjection.Rows, firstBytesById, firstIds, firstSelected.Id);
             VerifySortedSelection(secondList, secondProjection.Rows, secondBytesById, secondIds, secondSelected.Id);
 
+            var nestedCachedFirst = Request(nestedDirectory);
+            var nestedCachedSecond = Request(nestedDirectory);
+            if (!ReferenceEquals(nestedCachedFirst.Result, nestedCachedSecond.Result) || nestedCachedFirst.Result.Bytes != 4 || scanStarts != 12)
+                throw new InvalidOperationException($"The original nested directory did not have one cached 4 B result: scans={scanStarts}; bytes={nestedCachedFirst.Result.Bytes}; shared={ReferenceEquals(nestedCachedFirst.Result, nestedCachedSecond.Result)}.");
+            var nestedGenerationBeforeReplacement = cacheGenerations.GetOrAdd(nestedDirectory, 0);
+            using var oldNestedScanComputed = new ManualResetEventSlim();
+            using var releaseOldNestedScan = new ManualResetEventSlim();
+            using var oldNestedScanCancellation = new CancellationTokenSource();
+            ShellFileSystemIdentity oldNestedIdentity = default;
+            RecursiveDirectoryScanResult? oldNestedSummary = null;
+            var oldNestedScan = Task.Run(() =>
+            {
+                Interlocked.Increment(ref scanStarts);
+                return HandleBoundRecursiveDirectoryScanner.Scan([nestedDirectory], oldNestedScanCancellation.Token,
+                    afterRootScannedBeforeReturn: (path, identity, summary) =>
+                    {
+                        oldNestedIdentity = identity;
+                        oldNestedSummary = summary;
+                        oldNestedScanComputed.Set();
+                        if (!releaseOldNestedScan.Wait(TimeSpan.FromSeconds(10)))
+                            throw new TimeoutException("The old same-path result was not released after the directory replacement.");
+                    });
+            });
+            var oldNestedDeadline = Environment.TickCount64 + 5000;
+            while (!oldNestedScanComputed.IsSet && Environment.TickCount64 < oldNestedDeadline)
+            {
+                Application.DoEvents();
+                Thread.Sleep(10);
+            }
+            if (!oldNestedScanComputed.IsSet || oldNestedSummary?.Bytes != 4 || scanStarts != 13)
+            {
+                releaseOldNestedScan.Set();
+                throw new TimeoutException($"The original nested scan did not capture its 4 B result before replacement: opened={oldNestedScanComputed.IsSet}; bytes={oldNestedSummary?.Bytes}; scans={scanStarts}.");
+            }
+
             var nestedDeleteEventIndex = watcher.Events.Count;
             var nestedShellItem = GetShellItem(nestedDirectory);
             try
@@ -1921,11 +1956,12 @@ internal static class ShellViewHostFilterProbe
             if (Directory.Exists(nestedDirectory) || !nestedDeleteNotified || !nestedDirectoryDeleteEvent)
                 throw new TimeoutException($"The Shell folder-delete operation did not produce a directory removal event: directory-exists={Directory.Exists(nestedDirectory)}; matching-directory-event={nestedDirectoryDeleteEvent}; events=[{string.Join('|', watcher.ChangeEvents.Skip(nestedDeleteEventIndex).Select(change => $"0x{change.EventId:X8}:{change.FirstPath}->{change.SecondPath}"))}].");
             var nestedDeleteInvalidated = InvalidateFromShellChanges(nestedDeleteEventIndex);
-            if (nestedDeleteInvalidated.Length != 1 || !string.Equals(nestedDeleteInvalidated[0], renamedDirectory, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException($"The nested-folder removal event did not invalidate only its recursive parent: [{string.Join('|', nestedDeleteInvalidated)}].");
+            if (!nestedDeleteInvalidated.ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals([renamedDirectory, nestedDirectory]) ||
+                cacheGenerations[nestedDirectory] == nestedGenerationBeforeReplacement)
+                throw new InvalidOperationException($"The nested-folder removal event did not retire both cached recursive roots and advance the old path ticket: roots=[{string.Join('|', nestedDeleteInvalidated)}].");
             var nestedDeleteFirst = Request(renamedDirectory);
             var nestedDeleteSecond = Request(renamedDirectory);
-            if (!Task.WaitAll([nestedDeleteFirst, nestedDeleteSecond], TimeSpan.FromSeconds(10)) || scanStarts != 12 ||
+            if (!Task.WaitAll([nestedDeleteFirst, nestedDeleteSecond], TimeSpan.FromSeconds(10)) || scanStarts != 14 ||
                 nestedDeleteFirst.Result.Bytes != 20 || !ReferenceEquals(nestedDeleteFirst.Result, nestedDeleteSecond.Result))
                 throw new InvalidOperationException($"The nested-folder deletion did not share one fresh 20 B scan: scans={scanStarts}; bytes={nestedDeleteFirst.Result.Bytes}; shared={ReferenceEquals(nestedDeleteFirst.Result, nestedDeleteSecond.Result)}.");
             firstResults[renamedDirectory] = nestedDeleteFirst.Result;
@@ -1936,14 +1972,60 @@ internal static class ShellViewHostFilterProbe
             SortPeerListByRecursiveSize(secondList, secondBytesById);
             VerifySortedSelection(firstList, firstProjection.Rows, firstBytesById, firstIds, firstSelected.Id);
             VerifySortedSelection(secondList, secondProjection.Rows, secondBytesById, secondIds, secondSelected.Id);
+
+            var nestedReplacementCreateEventIndex = watcher.Events.Count;
+            var replacementParentItem = GetShellItem(renamedDirectory);
+            try
+            {
+                PerformShellFileOperation(operation => Marshal.ThrowExceptionForHR(At<NewItem>(operation, 20)(operation,
+                    replacementParentItem, 0x00000010, "nested", null, 0)));
+            }
+            finally { Marshal.Release(replacementParentItem); }
+            if (!Directory.Exists(nestedDirectory) ||
+                !watcher.WaitForAnySince(nestedReplacementCreateEventIndex, [ShellChangeMakeDirectory], TimeSpan.FromSeconds(5)))
+                throw new TimeoutException("The replacement directory was not created with a natural SHCNE_MKDIR event.");
+            File.WriteAllBytes(Path.Combine(nestedDirectory, "replacement.bin"), new byte[6]);
+            var nestedReplacementInvalidated = InvalidateFromShellChanges(nestedReplacementCreateEventIndex);
+            if (nestedReplacementInvalidated.Length != 1 || !string.Equals(nestedReplacementInvalidated[0], renamedDirectory, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"Creating the same-path replacement did not invalidate its recursive parent: [{string.Join('|', nestedReplacementInvalidated)}].");
+            var replacementRootFirst = Request(renamedDirectory);
+            var replacementRootSecond = Request(renamedDirectory);
+            var replacementNestedFirst = Request(nestedDirectory);
+            var replacementNestedSecond = Request(nestedDirectory);
+            if (!Task.WaitAll([replacementRootFirst, replacementRootSecond, replacementNestedFirst, replacementNestedSecond], TimeSpan.FromSeconds(10)) ||
+                scanStarts != 16 || replacementRootFirst.Result.Bytes != 26 || replacementNestedFirst.Result.Bytes != 6 ||
+                !ReferenceEquals(replacementRootFirst.Result, replacementRootSecond.Result) ||
+                !ReferenceEquals(replacementNestedFirst.Result, replacementNestedSecond.Result))
+                throw new InvalidOperationException($"The replacement directory did not publish shared 26/6 B scans: scans={scanStarts}; root={replacementRootFirst.Result.Bytes}; nested={replacementNestedFirst.Result.Bytes}.");
+            var replacementIdentity = ShellListViewRowIdentity.GetFileSystemIdentity(nestedDirectory);
+            if (replacementIdentity is null || replacementIdentity == oldNestedIdentity)
+                throw new InvalidOperationException("The replacement directory did not expose a new filesystem identity at the reused path.");
+            releaseOldNestedScan.Set();
+            if (!oldNestedScan.Wait(TimeSpan.FromSeconds(10)))
+                throw new TimeoutException("The old same-path scan did not finish after releasing its result.");
+            var oldNestedResult = oldNestedScan.GetAwaiter().GetResult();
+            if (!oldNestedResult.TryGetValue(nestedDirectory, out var oldNestedScanValue) ||
+                oldNestedScanValue.Identity != oldNestedIdentity || oldNestedScanValue.Summary.Bytes != 4 ||
+                TryPublish(nestedDirectory, nestedGenerationBeforeReplacement, oldNestedScanValue.Summary) ||
+                !ReferenceEquals(Request(nestedDirectory).Result, replacementNestedFirst.Result) ||
+                !ReferenceEquals(Request(renamedDirectory).Result, replacementRootFirst.Result))
+                throw new InvalidOperationException("The stale result from the deleted directory was published over its same-path replacement.");
+            firstResults[renamedDirectory] = replacementRootFirst.Result;
+            secondResults[renamedDirectory] = replacementRootSecond.Result;
+            firstBytesById = ApplyRecursiveValues(firstList, firstProjection.Rows, firstResults);
+            secondBytesById = ApplyRecursiveValues(secondList, secondProjection.Rows, secondResults);
+            SortPeerListByRecursiveSize(firstList, firstBytesById);
+            SortPeerListByRecursiveSize(secondList, secondBytesById);
+            VerifySortedSelection(firstList, firstProjection.Rows, firstBytesById, firstIds, firstSelected.Id);
+            VerifySortedSelection(secondList, secondProjection.Rows, secondBytesById, secondIds, secondSelected.Id);
             var observedDirectoryDeleteEvent = watcher.ChangeEvents.Skip(nestedDeleteEventIndex)
                 .First(change => (change.EventId is ShellChangeRemoveDirectory or ShellChangeDeleted) &&
                     string.Equals(change.FirstPath, nestedDirectory, StringComparison.OrdinalIgnoreCase)).EventId;
-            Console.WriteLine($"ishellview-peer-recursive-size-change: kind=nested-folder-create-delete; create-event=SHCNE_MKDIR; delete-event=0x{observedDirectoryDeleteEvent:X8}; invalidated-roots={nestedCreateInvalidated.Length + nestedDeleteInvalidated.Length}; bytes=[created:{nestedCreateFirst.Result.Bytes},deleted:{nestedDeleteFirst.Result.Bytes}]; shared-scans=True; selection-focus-preserved=True");
+            Console.WriteLine($"ishellview-peer-recursive-size-change: kind=nested-folder-replace-same-path; create-event=SHCNE_MKDIR; delete-event=0x{observedDirectoryDeleteEvent:X8}; invalidated-roots={nestedCreateInvalidated.Length + nestedDeleteInvalidated.Length + nestedReplacementInvalidated.Length}; old-bytes={oldNestedScanValue.Summary.Bytes}; replacement-bytes={replacementNestedFirst.Result.Bytes}; old-identity-retired=True; stale-publish-rejected=True; parent-bytes=[deleted:{nestedDeleteFirst.Result.Bytes},replacement:{replacementRootFirst.Result.Bytes}]; both-views-shared=True; selection-focus-preserved=True");
 
             if (GetForegroundWindow() != foreground || IsWindowVisible(parent))
                 throw new InvalidOperationException("The multi-view Shell probe changed foreground ownership or exposed its hidden parent.");
-            Console.WriteLine($"ishellview-peer-recursive-size-multiview: real-shell-views=2; shared-root=True; unique-directories={firstPaths.Length}; shared-scan-starts-initial=4; shell-notification-invalidated-roots={invalidatedRoots.Length}; shared-scan-starts-after-all-changes={scanStarts}; update/create/delete/rename/folder-rename/nested-folder-create-delete=True; stale-old-path-result-rejected=True; peer-row-ids-stable=True; numeric-sort=True; selection-focus-preserved=True; production-scanner=True; product-integration=False; foreground-unchanged=True; parent-visible=False");
+            Console.WriteLine($"ishellview-peer-recursive-size-multiview: real-shell-views=2; shared-root=True; unique-directories={firstPaths.Length}; shared-scan-starts-initial=4; shell-notification-invalidated-roots={invalidatedRoots.Length}; shared-scan-starts-after-all-changes={scanStarts}; update/create/delete/rename/folder-rename/nested-folder-replace=True; stale-old-path-result-rejected=True; stale-replaced-directory-result-rejected=True; peer-row-ids-stable=True; numeric-sort=True; selection-focus-preserved=True; production-scanner=True; product-integration=False; foreground-unchanged=True; parent-visible=False");
         }
         finally
         {
