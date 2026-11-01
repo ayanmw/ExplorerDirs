@@ -2411,3 +2411,9 @@ HostProbe Release 构建通过，四种隐藏合成视图场景（正常/忽略�
 重新构建 NativeProbe 时，首次编译发现它链接了应用 `QdrExporter.cs`，却漏掉该文件的 `QdrShellPathCodec.cs` 依赖；SettingsSmoke 已包含同一依赖。补齐 NativeProbe 项目源码链接后，Release 构建通过（0 警告、0 错误）。无窗口 synthetic-folder 探针复验：枚举不启动递归扫描，首次读取列值才扫描，重复读取命中缓存，`CompareIDs` 不触发额外扫描；异步探针的首次列读取立即返回，后台完成后发布 10 B/2 文件/1 子目录摘要，最多两个 worker，view 退役会取消 8 个排队请求。`--recursive-directory-scanner-smoke` 通过。
 
 这只是扫描器、provider 与异步快照的无窗口合同复验，没有启动 ExplorerBrowser/IShellView，也没有验证滚动进入新视口时的可见行覆盖、绘制稳定性、真实慢盘表现或产品接线。此前隔离宿主测得列开启后 Shell 会请求几乎所有可见文件夹，因此按需主要避免未启用列/未请求行的工作，并不能保证启用列后只扫描屏幕上的单行；该限制仍是进入产品评审前的关键验收项。
+
+### 2026-11-02：按需递归值的双 Shell view 更新与竞态复验
+
+通过 Private Desktop watchdog 运行 `host-multiview-recursive-size-projection`，两个真实 Shell view 浏览同一个临时根目录。四个递归目录的初始扫描由两个 view 共享；真实 `IFileOperation` 的文件创建、删除、文件改名、目录改名与同路径目录替换通知均使正确的根缓存失效。目录改名和同路径替换期间暂停的旧扫描在释放后被身份/代次检查拒绝；两个 view 收敛到新值，递归数值顺序、稳定行 ID、选择与焦点保持。watchdog exit 0，父窗口不可见，前台 HWND 与 last-input tick 未改变，临时夹具清理完成。日志：`src/.state/native-probe-watchdog/20261102-031423-2aa0e979.stdout.log` 与 `.stderr.log`。
+
+这是隐藏的自有行投影配合真实 Shell view/通知的原型，不是产品 ExplorerBrowser 接线或可见 UI。它验证的是共享根目录的双 view；不同 pane 各自浏览不同物理根目录的视图隔离、滚动时可见行更新和实际绘制仍未覆盖。
