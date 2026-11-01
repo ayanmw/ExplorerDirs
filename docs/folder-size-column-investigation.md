@@ -1176,3 +1176,9 @@ NativeProbe Release 构建 0 警告/错误；`--shell-change-reconciliation` 退
 ### 2026-11-01：无窗口递归大小合同扩展到 4 GiB 以上
 
 将自有行模型/原生 provider 的无窗口投影 fixture 改为稀疏文件：同级目录初始递归大小为 `5,368,709,130` 与 `5,368,709,129` 字节，更新后变为 `5,368,709,127` 与 `5,368,709,129` 字节。生产 `RecursiveDirectoryScanner` 与句柄绑定扫描器逐项汇总一致；native `IShellFolder2` provider 通过 `VT_UI8`、十进制文本读取、数值比较和扫描值更新后的排序翻转合同。根文件也使用稀疏长度，令排序断言仍覆盖更新后跨过同一参考值的情况，而不实际分配数 GiB 磁盘空间。`--static-shell-column-folder-smoke` Release 运行通过并明确输出 `window-created=False`；SettingsSmoke 增加大于 4 GiB 的递归大小显示合同，全量通过。这里证明的是当前隔离数据/adapter 64 位值链路，不是 IShellView/ExplorerBrowser 可见列、实际 UI 列排序或产品接线。
+
+### 2026-11-01：同路径身份变化时清除过期递归大小快照
+
+同一 Shell parsing name 被新的目录对象复用时，原 provider 已通过卷序列号与文件 ID 拒绝旧扫描值，但仍把不再匹配的 map 项保留到 DLL store 释放。为避免反复替换同一路径留下失效条目，`TryGet` 在确认身份不匹配时于锁内删除该项，再按原有 Shell 大小回退。静态合同新增缓存项数断言：在原始目录快照和另一目录快照共 2 项的场景中，同路径替换后读取新目录值 17 B、拒绝旧值，并确认缓存降为 1 项。该合同在旧 adapter 上按预期失败（`stale-snapshot-retained`），修复后通过；原生 adapter `/W4 /WX` 构建通过，NativeProbe 的 `--static-shell-column-folder-smoke` exit 0、输出 `replacement-cache-invalidation-and-pruning-passed`，且 `window-created=False`。
+
+这只回收“同一个 parsing name 被新身份取代”的条目。纯目录重命名会产生新 parsing name，旧键在没有显式失效通知/所有者生命周期前仍可能保留；缓存没有全局容量上限。该实验属于 NativeProbe 隔离原型，未修改产品 Shell view、ExplorerBrowser 或发布包，也未测量进程级内存收益。

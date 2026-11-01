@@ -1407,14 +1407,24 @@ namespace
             const auto found = _sizes.find(parsingName);
             if (found == _sizes.end()) return false;
             const SyntheticFileIdentityLess less{};
-            if (less(found->second.identity, identity) || less(identity, found->second.identity)) return false;
+            if (less(found->second.identity, identity) || less(identity, found->second.identity))
+            {
+                // A reused parsing name now identifies another directory; discard the unreachable old snapshot.
+                _sizes.erase(found);
+                return false;
+            }
             *bytes = found->second.bytes;
             return true;
+        }
+        size_t Count() const
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            return _sizes.size();
         }
     private:
         volatile LONG _references = 1;
         mutable std::mutex _mutex;
-        std::map<std::wstring, SyntheticRecursiveSizeSnapshot, ShellParsingNameLess> _sizes;
+        mutable std::map<std::wstring, SyntheticRecursiveSizeSnapshot, ShellParsingNameLess> _sizes;
     };
 
     constexpr SyntheticChild kSyntheticChildren[] =
@@ -2025,6 +2035,10 @@ namespace
             if (FAILED(result)) return result;
             if (CompareStringOrdinal(shellParsingName.c_str(), -1, parsingName, -1, TRUE) != CSTR_EQUAL) return E_INVALIDARG;
             return _recursiveSizeStore->Set(parsingName, child->identity, bytes);
+        }
+        size_t RecursiveSizeSnapshotCountForProbe() const
+        {
+            return _recursiveSizeStore ? _recursiveSizeStore->Count() : 0;
         }
         HRESULT PublishRecursiveSizeSnapshotForChildProbe(PCWSTR childName, ULONGLONG bytes)
         {
@@ -4197,8 +4211,14 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeI
                 details.str.pOleStr && wcscmp(details.str.pOleStr, L"17") == 0;
             if (details.str.uType == STRRET_WSTR && details.str.pOleStr) CoTaskMemFree(details.str.pOleStr);
             if (!textMatches) { TraceSyntheticSortStage("recursive-size: replacement-cache-invalidation-failed"); result = E_FAIL; goto cleanup_recursive_size_update; }
+            if (static_cast<SyntheticSortFolder*>(factoryRecreatedFolder)->RecursiveSizeSnapshotCountForProbe() != 1)
+            {
+                TraceSyntheticSortStage("recursive-size: stale-snapshot-retained");
+                result = E_FAIL;
+                goto cleanup_recursive_size_update;
+            }
         }
-        TraceSyntheticSortStage("recursive-size: replacement-cache-invalidation-passed");
+        TraceSyntheticSortStage("recursive-size: replacement-cache-invalidation-and-pruning-passed");
     }
     result = S_OK;
 
