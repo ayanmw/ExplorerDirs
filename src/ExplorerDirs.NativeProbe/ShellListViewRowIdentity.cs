@@ -8,6 +8,7 @@ internal sealed record ShellListViewRowIdentity(
     string ParsingName,
     string? FileSystemPath,
     uint Attributes,
+    string TypeName,
     int SystemImageIndex)
 {
     private const uint ShellFileSystem = 0x40000000;
@@ -16,6 +17,7 @@ internal sealed record ShellListViewRowIdentity(
     private const uint ShgfiSysIconIndex = 0x00004000;
     private const uint ShgfiSmallIcon = 0x00000001;
     private const uint ShgfiPidl = 0x00000008;
+    private const uint ShgfiTypeName = 0x00000400;
     private const uint FileReadAttributes = 0x00000080;
     private const uint FileShareAll = 0x00000007;
     private const uint OpenExisting = 3;
@@ -44,14 +46,15 @@ internal sealed record ShellListViewRowIdentity(
             fileSystemPath = ReadName(absolutePidl, SigDnFileSystemPath);
 
         var imageList = SHGetFileInfo(absolutePidl, 0, out var fileInfo,
-            (uint)Marshal.SizeOf<ShellFileInfo>(), ShgfiPidl | ShgfiSysIconIndex | ShgfiSmallIcon);
+            (uint)Marshal.SizeOf<ShellFileInfo>(), ShgfiPidl | ShgfiSysIconIndex | ShgfiSmallIcon | ShgfiTypeName);
         if (imageList == 0 || fileInfo.ImageIndex < 0)
             throw new InvalidOperationException("Shell did not return a system icon for this row PIDL.");
         if (systemImageList == 0) systemImageList = imageList;
         else if (systemImageList != imageList)
             throw new InvalidOperationException("Shell returned different shared image lists for one view.");
 
-        return new ShellListViewRowIdentity(displayName, parsingName, fileSystemPath, attributes, fileInfo.ImageIndex);
+        return new ShellListViewRowIdentity(displayName, parsingName, fileSystemPath, attributes,
+            fileInfo.TypeName ?? string.Empty, fileInfo.ImageIndex);
     }
 
     internal static string GetAbsoluteParsingName(nint pidl) => ReadName(pidl, SigDnDesktopAbsoluteParsing);

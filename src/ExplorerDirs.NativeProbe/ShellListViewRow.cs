@@ -17,6 +17,7 @@ internal sealed record ShellListViewRow(
 {
     internal RecursiveDirectoryScanResult? RecursiveSummary { get; init; }
     internal ShellFileSystemIdentity? FileSystemIdentity { get; init; }
+    internal string TypeName { get; init; } = string.Empty;
 }
 
 internal readonly record struct ShellFileSystemIdentity(

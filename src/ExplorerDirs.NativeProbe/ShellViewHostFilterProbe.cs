@@ -27,6 +27,13 @@ internal static class ShellViewHostFilterProbe
     private const uint LvmInsertItemW = 0x104D;
     private const uint LvmGetItemCount = 0x1004;
     private const uint LvmGetItemTextW = 0x1073;
+    private const uint LvmGetItemW = 0x104B;
+    private const uint LvmSetImageList = 0x1003;
+    private const uint LvmInsertGroup = 0x1091;
+    private const uint LvmGetGroupCount = 0x1098;
+    private const uint LvmEnableGroupView = 0x109D;
+    private const uint LvmRemoveAllGroups = 0x10A0;
+    private const uint LvmIsGroupViewEnabled = 0x10AF;
 
     internal static int Run() => Run(stopAfterGroupedExport: false, leaveParentForThreadExit: false);
 
@@ -180,7 +187,7 @@ internal static class ShellViewHostFilterProbe
             }
             if (menuCommandsOnly)
             {
-                VerifyNativeMenuCommands(view, folderView, parent, foreground);
+                VerifyNativeMenuCommands(view, folderView, parent, foreground, folderPidl);
                 return 0;
             }
             if (newFolderOnly)
@@ -1105,7 +1112,7 @@ internal static class ShellViewHostFilterProbe
         return results;
     }
 
-    private static void VerifyNativeMenuCommands(nint view, nint folderView, nint owner, nint foreground)
+    private static void VerifyNativeMenuCommands(nint view, nint folderView, nint owner, nint foreground, nint folderPidl)
     {
         var getMode = At<GetViewModeAndIconSize>(folderView, 36);
         Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, 1, 48));
@@ -1127,11 +1134,20 @@ internal static class ShellViewHostFilterProbe
         if (listView == 0) throw new Exception("The menu-command fixture has no native file list window.");
         if (At<ItemCount>(folderView, 7)(folderView, 2, out var initialCount) < 0 || initialCount == 0)
             throw new Exception("The menu-command fixture has no visible item to focus.");
-        var peerList = CreatePeerListView(owner);
-        PopulatePeerList(peerList, ReadVisibleItemNames(folderView, initialCount));
+        var folderId = ShellFolderId;
+        Check(SHBindToObject(0, folderPidl, 0, in folderId, out var shellFolder));
+        var nextPeerRowId = 0;
+        List<PeerShellRow> peerRows = [];
+        var initialProjection = CapturePeerShellRows(folderView, folderPidl, shellFolder, [], ref nextPeerRowId);
+        peerRows = initialProjection.Rows;
+        var peerList = CreatePeerListView(owner, initialProjection.SystemImageList);
+        PopulatePeerList(peerList, peerRows);
         var peerRowsBeforeRefresh = ReadPeerListNames(peerList);
         if (peerRowsBeforeRefresh.Length != initialCount)
             throw new Exception("The independent ListView projection did not receive the initial Shell rows.");
+        var peerIdsBeforeRefresh = ReadPeerListRowIds(peerList);
+        if (!peerIdsBeforeRefresh.SequenceEqual(peerRows.Select(row => row.Id)))
+            throw new Exception("The peer ListView did not preserve stable row IDs as its item data.");
         Check(At<GetItem>(folderView, 6)(folderView, 0, out var expectedFocusedPidl));
         var expectedFocusedName = ReadVisibleItemNames(folderView, initialCount)[0];
         List<string> menuCommandFocusRecovery = [];
@@ -1254,7 +1270,11 @@ internal static class ShellViewHostFilterProbe
             } while (stableRefreshSamples < 3 && DateTime.UtcNow < deadline);
             if (visibleCount != initialCount || IsWindowVisible(owner) || GetForegroundWindow() != foreground)
                 throw new Exception($"The Shell background Refresh command changed the fixture or desktop boundary: items={visibleCount}, parent-visible={IsWindowVisible(owner)}, foreground-unchanged={GetForegroundWindow() == foreground}.");
-            ProjectPeerShellOrder(peerList, folderView, visibleCount);
+            var refreshProjection = ProjectPeerShellOrder(peerList, folderView, folderPidl, shellFolder,
+                peerRows, ref nextPeerRowId, visibleCount);
+            peerRows = refreshProjection.Rows;
+            if (!refreshProjection.ExistingIdentitiesPreserved)
+                throw new Exception("A Shell item changed identity during a refresh without a fixture mutation.");
             rawRefreshPreservedItem &= stableRefreshSamples == 3;
             (bool SelectionRestored, bool FocusRestored) recovery = default;
             var recoveryDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
@@ -1286,7 +1306,11 @@ internal static class ShellViewHostFilterProbe
             Check(At<SetSortColumns>(view2, 27)(view2, [sort], 1));
             InvokeBackgroundVerb(view, owner, "sortdescending");
             RestoreFocusedSelectionAfterMenuCommand("sortdescending");
-            ProjectPeerShellOrder(peerList, folderView, initialCount);
+            var descendingProjection = ProjectPeerShellOrder(peerList, folderView, folderPidl, shellFolder,
+                peerRows, ref nextPeerRowId, initialCount);
+            peerRows = descendingProjection.Rows;
+            if (!descendingProjection.ExistingIdentitiesPreserved)
+                throw new Exception("The Shell descending sort changed a row's PIDL identity.");
             Check(At<GetSortColumnCount>(view2, 26)(view2, out var sortCount));
             if (sortCount != 1) throw new Exception($"The Shell Sort menu changed the column count unexpectedly: {sortCount}.");
             var sorts = new NativeSortColumn[sortCount];
@@ -1296,7 +1320,11 @@ internal static class ShellViewHostFilterProbe
             VerifyFolderSortOrder(ascending: false, "sortdescending");
             InvokeBackgroundVerb(view, owner, "sortascending");
             RestoreFocusedSelectionAfterMenuCommand("sortascending");
-            ProjectPeerShellOrder(peerList, folderView, initialCount);
+            var ascendingProjection = ProjectPeerShellOrder(peerList, folderView, folderPidl, shellFolder,
+                peerRows, ref nextPeerRowId, initialCount);
+            peerRows = ascendingProjection.Rows;
+            if (!ascendingProjection.ExistingIdentitiesPreserved)
+                throw new Exception("The Shell ascending sort changed a row's PIDL identity.");
             Check(At<GetSortColumns>(view2, 28)(view2, sorts, sortCount));
             if (sorts[0].Direction != 1) throw new Exception($"The Shell Sort Ascending command did not restore ascending order: direction={sorts[0].Direction}.");
             VerifyFolderSortOrder(ascending: true, "sortascending");
@@ -1305,11 +1333,23 @@ internal static class ShellViewHostFilterProbe
             Check(At<SetGroupBy>(view2, 17)(view2, ref typeKey, 1));
             InvokeBackgroundVerb(view, owner, "groupdescending");
             RestoreFocusedSelectionAfterMenuCommand("groupdescending");
+            var groupDescendingProjection = ProjectPeerShellOrder(peerList, folderView, folderPidl, shellFolder,
+                peerRows, ref nextPeerRowId, initialCount, groupByType: true);
+            peerRows = groupDescendingProjection.Rows;
+            if (!groupDescendingProjection.ExistingIdentitiesPreserved)
+                throw new Exception("Grouping changed a Shell row's PIDL identity.");
+            VerifyPeerListGrouping(peerList, peerRows);
             var groupResult = At<GetGroupBy>(view2, 18)(view2, out var groupKey, out var groupAscending);
             if (groupResult != 0 || groupKey.FormatId != typeKey.FormatId || groupKey.PropertyId != typeKey.PropertyId || groupAscending != 0)
                 throw new Exception($"The Shell Group Descending command did not update the active grouping state: hr=0x{groupResult:X8}, key={groupKey.FormatId:B}/{groupKey.PropertyId}, ascending={groupAscending}.");
             InvokeBackgroundVerb(view, owner, "groupascending");
             RestoreFocusedSelectionAfterMenuCommand("groupascending");
+            var groupAscendingProjection = ProjectPeerShellOrder(peerList, folderView, folderPidl, shellFolder,
+                peerRows, ref nextPeerRowId, initialCount, groupByType: true);
+            peerRows = groupAscendingProjection.Rows;
+            if (!groupAscendingProjection.ExistingIdentitiesPreserved)
+                throw new Exception("Changing group direction changed a Shell row's PIDL identity.");
+            VerifyPeerListGrouping(peerList, peerRows);
             groupResult = At<GetGroupBy>(view2, 18)(view2, out groupKey, out groupAscending);
             if (groupResult != 0 || groupKey.FormatId != typeKey.FormatId || groupKey.PropertyId != typeKey.PropertyId || groupAscending != 1)
                 throw new Exception($"The Shell Group Ascending command did not restore ascending order: hr=0x{groupResult:X8}, ascending={groupAscending}.");
@@ -1325,15 +1365,18 @@ internal static class ShellViewHostFilterProbe
             Marshal.Release(view2);
         }
 
-        Console.WriteLine($"ishellview-menu-command: viewlogicaldetails=True; peer-view-mode=details; peer-rows-stable-during-refresh=True; peer-refresh-projection=True; peer-sort-projection=True; mode={modeAfterMenu}/{iconSizeAfterMenu}; refresh=True; sortdescending=True; sortascending=True; native-sort-order=[{string.Join(';', nativeSortOrders)}]; groupdescending=True; groupascending=True; focus-recovery=[{string.Join(',', menuCommandFocusRecovery)}]; visible-items={visibleCount}; parent-visible=False; foreground-unchanged=True");
+        FreePeerShellRows(peerRows);
+        Marshal.Release(shellFolder);
+        Console.WriteLine($"ishellview-menu-command: viewlogicaldetails=True; peer-view-mode=details; peer-stable-pidl-identity=True; peer-shell-icon-projection=True; peer-rows-stable-during-refresh=True; peer-refresh-projection=True; peer-sort-projection=True; peer-listview-groups=True; peer-group-headings=[{string.Join('|', peerRows.Select(row => row.TypeName).Distinct(StringComparer.OrdinalIgnoreCase))}]; mode={modeAfterMenu}/{iconSizeAfterMenu}; refresh=True; sortdescending=True; sortascending=True; native-sort-order=[{string.Join(';', nativeSortOrders)}]; groupdescending=True; groupascending=True; focus-recovery=[{string.Join(',', menuCommandFocusRecovery)}]; visible-items={visibleCount}; parent-visible=False; foreground-unchanged=True");
     }
 
-    private static nint CreatePeerListView(nint parent)
+    private static nint CreatePeerListView(nint parent, nint systemImageList)
     {
         var listView = CreateWindowExW(0, "SysListView32", "",
             0x40000000u | 0x00000001u | 0x00000008u, 0, 0, 320, 240, parent, 0, 0, 0);
         if (listView == 0)
             throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create the independent peer ListView.");
+        _ = SendMessageW(listView, LvmSetImageList, 1, systemImageList); // LVSIL_SMALL; Shell-owned system image list.
         var title = Marshal.StringToHGlobalUni("Name");
         var columnPointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeListViewColumn>());
         try
@@ -1353,16 +1396,52 @@ internal static class ShellViewHostFilterProbe
         _ = SetWindowLongPtrW(listView, GwlStyle, (nint)((style & ~LvsTypeMask) | mode));
     }
 
-    private static void PopulatePeerList(nint listView, IReadOnlyList<string> names)
+    private static void PopulatePeerList(nint listView, IReadOnlyList<PeerShellRow> rows, bool groupByType = false)
     {
         _ = SendMessageW(listView, LvmDeleteAllItems, 0, 0);
-        for (var index = 0; index < names.Count; index++)
+        _ = SendMessageW(listView, LvmEnableGroupView, 0, 0);
+        _ = SendMessageW(listView, LvmRemoveAllGroups, 0, 0);
+        var groupIds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var groupInsertResults = new List<int>();
+        if (groupByType)
         {
-            var text = Marshal.StringToHGlobalUni(names[index]);
+            foreach (var title in rows.Select(row => row.TypeName).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrWhiteSpace(title)) throw new InvalidOperationException("The Shell did not provide a type label for grouping.");
+                var header = Marshal.StringToHGlobalUni(title);
+                var groupPointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeListViewGroup>());
+                try
+                {
+                    var groupId = groupIds.Count + 1;
+                    var group = new NativeListViewGroup
+                    {
+                        Size = (uint)Marshal.SizeOf<NativeListViewGroup>(), Mask = 0x0001 | 0x0010,
+                        Header = header, HeaderCapacity = title.Length, GroupId = groupId
+                    };
+                    Marshal.StructureToPtr(group, groupPointer, false);
+                    var insertResult = SendMessageW(listView, LvmInsertGroup, groupIds.Count, groupPointer).ToInt32();
+                    groupInsertResults.Add(insertResult);
+                    if (insertResult < 0)
+                        throw new InvalidOperationException($"Could not insert the Shell type group '{title}'.");
+                    groupIds.Add(title, groupId);
+                }
+                finally { Marshal.FreeHGlobal(groupPointer); Marshal.FreeHGlobal(header); }
+            }
+            var enableResult = SendMessageW(listView, LvmEnableGroupView, 1, 0).ToInt32();
+            Console.WriteLine($"peer-list-groups: inserted=[{string.Join(',', groupInsertResults)}]; enable-result={enableResult}; count-after-enable={SendMessageW(listView, LvmGetGroupCount, 0, 0)}; enabled-after-enable={SendMessageW(listView, LvmIsGroupViewEnabled, 0, 0)}");
+            if (enableResult < 0)
+                throw new InvalidOperationException("The peer ListView rejected group view mode.");
+        }
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var row = rows[index];
+            var text = Marshal.StringToHGlobalUni(row.Name);
             var itemPointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeListViewItem>());
             try
             {
-                var item = new NativeListViewItem { Mask = 0x0001 | 0x0004, Item = index, SubItem = 0, Text = text, TextCapacity = names[index].Length + 1, Parameter = index + 1 };
+                var item = new NativeListViewItem { Mask = 0x0001 | 0x0002 | 0x0004 | (groupByType ? 0x0100u : 0), Item = index, SubItem = 0, Text = text,
+                    TextCapacity = row.Name.Length + 1, Image = row.SystemImageIndex, Parameter = row.Id,
+                    GroupId = groupByType ? groupIds[row.TypeName] : 0 };
                 Marshal.StructureToPtr(item, itemPointer, false);
                 if (SendMessageW(listView, LvmInsertItemW, 0, itemPointer).ToInt32() != index)
                     throw new InvalidOperationException($"Could not populate peer ListView row {index}.");
@@ -1391,12 +1470,122 @@ internal static class ShellViewHostFilterProbe
         finally { Marshal.FreeHGlobal(itemPointer); Marshal.FreeHGlobal(buffer); }
     }
 
-    private static void ProjectPeerShellOrder(nint listView, nint folderView, int expectedCount)
+    private static int[] ReadPeerListRowIds(nint listView)
     {
-        var names = ReadVisibleItemNames(folderView, expectedCount);
-        PopulatePeerList(listView, names);
-        if (!ReadPeerListNames(listView).SequenceEqual(names, StringComparer.OrdinalIgnoreCase))
-            throw new Exception("The independent ListView did not match the Shell's projected row order after a batched row-model update.");
+        var count = SendMessageW(listView, LvmGetItemCount, 0, 0).ToInt32();
+        var ids = new int[count];
+        var itemPointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeListViewItem>());
+        try
+        {
+            for (var index = 0; index < count; index++)
+            {
+                Marshal.StructureToPtr(new NativeListViewItem { Mask = 0x0004, Item = index }, itemPointer, false);
+                if (SendMessageW(listView, LvmGetItemW, 0, itemPointer) == 0)
+                    throw new InvalidOperationException($"Could not read peer ListView row identity {index}.");
+                ids[index] = Marshal.PtrToStructure<NativeListViewItem>(itemPointer).Parameter.ToInt32();
+            }
+            return ids;
+        }
+        finally { Marshal.FreeHGlobal(itemPointer); }
+    }
+
+    private static (List<PeerShellRow> Rows, nint SystemImageList) CapturePeerShellRows(nint folderView,
+        nint folderPidl, nint shellFolder, IReadOnlyList<PeerShellRow> previous, ref int nextId)
+    {
+        Check(At<ItemCount>(folderView, 7)(folderView, 2, out var count));
+        var enumeration = ShellListViewEnumerator.Enumerate(folderPidl, shellFolder);
+        try
+        {
+            var byIdentity = enumeration.Rows.ToDictionary(row => GetPidlIdentity(row.AbsolutePidl), StringComparer.Ordinal);
+            var current = new List<PeerShellRow>(count);
+            for (var index = 0; index < count; index++)
+            {
+                Check(At<GetItem>(folderView, 6)(folderView, index, out var childPidl));
+                nint absolutePidl = 0;
+                try
+                {
+                    absolutePidl = ILCombine(folderPidl, childPidl);
+                    if (absolutePidl == 0) throw new InvalidOperationException("Could not combine the view item with its parent PIDL.");
+                    var identity = GetPidlIdentity(absolutePidl);
+                    if (!byIdentity.TryGetValue(identity, out var row))
+                        throw new InvalidOperationException($"The Shell view row identity was absent from folder enumeration: {identity}.");
+                    var retainedPidl = ILClone(row.AbsolutePidl);
+                    if (retainedPidl == 0) throw new InvalidOperationException("Could not retain a projected Shell row PIDL.");
+                    var groupTitle = !string.IsNullOrWhiteSpace(row.TypeName)
+                        ? row.TypeName
+                        : (row.Attributes & 0x20000000u) != 0
+                            ? "File folder"
+                            : string.IsNullOrWhiteSpace(row.FileSystemPath) || string.IsNullOrWhiteSpace(Path.GetExtension(row.FileSystemPath))
+                                ? "File"
+                                : Path.GetExtension(row.FileSystemPath).TrimStart('.').ToUpperInvariant() + " file";
+                    current.Add(new PeerShellRow(0, retainedPidl, row.DisplayName, groupTitle, row.SystemImageIndex));
+                }
+                finally
+                {
+                    if (absolutePidl != 0) ILFree(absolutePidl);
+                    Marshal.FreeCoTaskMem(childPidl);
+                }
+            }
+
+            var assigned = new List<PeerShellRow>(current.Count);
+            var usedPreviousIds = new HashSet<int>();
+            foreach (var row in current)
+            {
+                var old = previous.FirstOrDefault(candidate => ILIsEqual(candidate.AbsolutePidl, row.AbsolutePidl));
+                if (old is null)
+                    assigned.Add(row with { Id = ++nextId });
+                else
+                {
+                    usedPreviousIds.Add(old.Id);
+                    ILFree(row.AbsolutePidl);
+                    assigned.Add(row with { Id = old.Id, AbsolutePidl = old.AbsolutePidl });
+                }
+            }
+            foreach (var old in previous)
+                if (!usedPreviousIds.Contains(old.Id)) ILFree(old.AbsolutePidl);
+            return (assigned, enumeration.SystemImageList);
+        }
+        finally { ShellListViewEnumerator.FreeRows(enumeration.Rows); }
+    }
+
+    private static (List<PeerShellRow> Rows, bool ExistingIdentitiesPreserved) ProjectPeerShellOrder(nint listView,
+        nint folderView, nint folderPidl, nint shellFolder, IReadOnlyList<PeerShellRow> previous,
+        ref int nextId, int expectedCount, bool groupByType = false)
+    {
+        var projection = CapturePeerShellRows(folderView, folderPidl, shellFolder, previous, ref nextId);
+        if (projection.Rows.Count != expectedCount)
+            throw new Exception($"The Shell row projection count differs: expected={expectedCount}, actual={projection.Rows.Count}.");
+        var idsPreserved = projection.Rows.Count == previous.Count &&
+            projection.Rows.Select(row => row.Id).ToHashSet().SetEquals(previous.Select(row => row.Id));
+        PopulatePeerList(listView, projection.Rows, groupByType);
+        if (!ReadPeerListNames(listView).SequenceEqual(projection.Rows.Select(row => row.Name), StringComparer.OrdinalIgnoreCase) ||
+            !ReadPeerListRowIds(listView).SequenceEqual(projection.Rows.Select(row => row.Id)))
+            throw new Exception("The independent ListView did not match Shell row order and stable PIDL identities after projection.");
+        return (projection.Rows, idsPreserved);
+    }
+
+    private static void VerifyPeerListGrouping(nint listView, IReadOnlyList<PeerShellRow> rows)
+    {
+        var expected = rows.Select(row => row.TypeName).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        var enabled = SendMessageW(listView, LvmIsGroupViewEnabled, 0, 0).ToInt32() != 0;
+        var actual = SendMessageW(listView, LvmGetGroupCount, 0, 0).ToInt32();
+        if (!enabled || actual != expected)
+            throw new InvalidOperationException($"Peer ListView group projection mismatch: enabled={enabled}, groups={actual}, expected={expected}.");
+    }
+
+    private static string GetPidlIdentity(nint pidl)
+    {
+        var size = ILGetSize(pidl);
+        if (size == 0 || size > 65_536) throw new InvalidOperationException($"Invalid Shell PIDL byte count: {size}.");
+        var bytes = new byte[(int)size];
+        Marshal.Copy(pidl, bytes, 0, bytes.Length);
+        return Convert.ToHexString(bytes);
+    }
+
+    private static void FreePeerShellRows(IEnumerable<PeerShellRow> rows)
+    {
+        foreach (var row in rows)
+            if (row.AbsolutePidl != 0) ILFree(row.AbsolutePidl);
     }
 
     private static bool FocusedItemMatches(nint folderView, nint expectedPidl)
@@ -1988,7 +2177,37 @@ internal static class ShellViewHostFilterProbe
         public int IdealWidth;
     }
 
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct NativeListViewGroup
+    {
+        public uint Size;
+        public uint Mask;
+        public nint Header;
+        public int HeaderCapacity;
+        public nint Footer;
+        public int FooterCapacity;
+        public int GroupId;
+        public uint StateMask;
+        public uint State;
+        public uint Align;
+        public nint Subtitle;
+        public uint SubtitleCapacity;
+        public nint Task;
+        public uint TaskCapacity;
+        public nint DescriptionTop;
+        public uint DescriptionTopCapacity;
+        public nint DescriptionBottom;
+        public uint DescriptionBottomCapacity;
+        public int TitleImage;
+        public int ExtendedImage;
+        public int FirstItem;
+        public uint ItemCount;
+        public nint SubsetTitle;
+        public uint SubsetTitleCapacity;
+    }
+
     private sealed record NativeMenuCommandDescriptor(int Id, string Verb, string Caption);
+    private sealed record PeerShellRow(int Id, nint AbsolutePidl, string Name, string TypeName, int SystemImageIndex);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeRect { public int Left, Top, Right, Bottom; }
@@ -2155,6 +2374,8 @@ internal static class ShellViewHostFilterProbe
     [DllImport("shell32.dll")] private static extern nint ILCombine(nint first, nint second);
     [DllImport("shell32.dll")] private static extern nint ILClone(nint pidl);
     [DllImport("shell32.dll")] private static extern bool ILRemoveLastID(nint pidl);
+    [DllImport("shell32.dll")] private static extern uint ILGetSize(nint pidl);
+    [DllImport("shell32.dll")] private static extern void ILFree(nint pidl);
 
     private static nint TryGetParentPidl(nint absolutePidl)
     {
@@ -2163,7 +2384,6 @@ internal static class ShellViewHostFilterProbe
         Marshal.FreeCoTaskMem(parentPidl);
         return 0;
     }
-    [DllImport("shell32.dll")] private static extern uint ILGetSize(nint pidl);
     [DllImport("shell32.dll")] private static extern bool ILIsEqual(nint first, nint second);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint CreateWindowExW(uint ex,
         string cls, string name, uint style, int x, int y, int width, int height,

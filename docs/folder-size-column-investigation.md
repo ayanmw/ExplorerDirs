@@ -1752,3 +1752,9 @@ NativeProbe Release 构建（0 警告/错误）、`--common-listview-navigation-
 在同一个隔离 Private Desktop 夹具旁新增独立隐藏 `SysListView32`：初始从 Shell 行模型投影 3 个条目；执行原生 Details 命令后将其样式切为 Report 且行不变；执行刷新时，Shell 视图自身在 0/50/100 ms 采样为空、约 150 ms 恢复 3 行，而并行 ListView 在等待期间始终保有旧 3 行；待 Shell 行模型稳定后再投影新顺序。Shell 升降序菜单命令后，独立列表批量重建为与 Shell 完全相同的行顺序。探针 exit 0，NativeProbe Release 构建 0 警告/错误；Private Desktop 前台 HWND、last-input tick 与隔离清理守卫通过。
 
 这证明受控列表可以将 Shell 原生命令作为状态来源，并把旧行保留到刷新行模型就绪后再同步；不证明画面无闪、稳定 PIDL 的跨刷新更新、图标/列/选择完整投影或分组视觉行为。分组命令仍仅验证 Shell `IFolderView2` 状态读回，没有投影到 SysListView 分组。该夹具只是 3 行隐藏样本，产品 ExplorerBrowser、可见 UI、真实大目录及交互验收均未涉及。下一步应验证稳定 Shell item 身份和元数据如何在原生列表中增量更新，再单独完成列表分组与多列投影门槛；尚不足以批准架构迁移或接入产品。
+
+### 2026-11-01：Shell PIDL 稳定身份、系统图标与原生分组桥接
+
+并行受控 SysListView32 的行现在使用 Shell ILIsEqual PIDL 身份映射稳定行 ID；刷新、升降序及分组命令后，3 个 fixture 项仍映射到原有 ID。通过 ShellListViewEnumerator 绑定共享系统小图标列表及每行图标索引。执行 Shell 按类型分组后，将当前 view 顺序投影到启用 Common Controls 6 的原生 ListView group rows，读回分组视图开启且组数为 2。此验证须运行 NativeProbe apphost EXE，因为 dotnet <dll> 使用 dotnet 宿主的 activation manifest，仍加载不支持该 ListView 分组 API 的控件版本。
+
+本夹具上 SHGetFileInfo 没提供可用类型标题，因此探针标题采用扩展名/文件夹回退（TXT file、File folder）；没有证明 Explorer 本地化 System.ItemTypeText 标题映射、视觉布局、折叠/展开、跨分组排序或用户交互。所有 view 都隐藏；未接产品 ExplorerBrowser 或 release。下一步应取得 Shell 的正式类型文本并扩充多列映射，再对行增删/重命名通知做稳定 PIDL reconciliation。

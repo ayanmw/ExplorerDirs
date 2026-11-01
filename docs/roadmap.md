@@ -5760,3 +5760,9 @@ NativeProbe 已完成受控精确失效合同：四个不同根的异步 Shell �
 ### 2026-11-01：并行受控列表保持刷新旧行并投影 Shell 排序
 
 在隔离菜单命令探针旁创建隐藏标准 `SysListView32`：Details 命令映射为 Report 模式且不清空行；Shell 刷新约 150 ms 的空行阶段，受控列表仍持有原 3 行，Shell 行恢复后再批量同步；升降序结果也能投影到一致的受控列表顺序。Private Desktop 探针 exit 0，Release 构建无警告/错误，前台与输入守卫通过。分组只验证了 Shell 状态，未进入受控 ListView；也未验证绘制时是否闪烁、稳定 PIDL 更新、选区焦点投影或真实用户目录负载。继续留在 NativeProbe；产品未接入。后续验证原生行身份、分组和列投影，再评估是否值得推进完整视图宿主迁移。详见[调查记录](folder-size-column-investigation.md#2026-11-01受控-listview-的-shell-状态投影切片)。
+
+### 2026-11-01：按 Shell PIDL 身份同步受控行、图标与原生分组
+
+Private Desktop 隔离探针现用 PIDL 相等判断维持刷新/排序/分组前后的行 ID，并把系统图标索引和共享 image list 映射到 peer SysListView32。Shell 详情模式、刷新稳定旧行、升降序及原生 ListView group API 均通过；3 行样本分为 2 组，前台、last-input 和清理守卫通过。NativeProbe Release 0 警告/错误；导航、数据/文件操作、相对大小和菜单桥接合同均使用 apphost EXE 通过。
+
+此 NativeProbe apphost 使用 Common Controls 6 activation manifest；经 dotnet <dll> 启动会使用 dotnet.exe 的清单，group API 不可用，因此要用该 NativeProbe EXE 运行此探针。样本的类型标题回退到扩展名/文件夹，非 Explorer 正式本地化类型文本；没有可见 UI、折叠展开、交互、增删通知或多列投影证据。继续在 NativeProbe 验证 Shell 类型文本、多列和 PIDL reconcile 边界；不接入产品或 release。详见[调查记录](folder-size-column-investigation.md#2026-11-01shell-pidl-稳定身份系统图标与原生分组桥接)。

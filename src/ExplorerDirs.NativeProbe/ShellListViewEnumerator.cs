@@ -51,7 +51,8 @@ internal static class ShellListViewEnumerator
                         identity.DisplayName, identity.ParsingName, identity.FileSystemPath, identity.Attributes,
                         recursiveSize, FromShellEnumeration: true, SystemImageIndex: identity.SystemImageIndex)
                     {
-                        FileSystemIdentity = fileSystemIdentity
+                        FileSystemIdentity = fileSystemIdentity,
+                        TypeName = identity.TypeName
                     });
                     retainedAbsolutePidl = 0;
                     retainedRelativePidl = 0;
