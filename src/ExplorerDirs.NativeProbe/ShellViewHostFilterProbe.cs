@@ -44,6 +44,8 @@ internal static class ShellViewHostFilterProbe
         string? zipPath = null;
         nint parent = 0, folderPidl = 0, childFolderPidl = 0, grandchildFolderPidl = 0, alternateFolderPidl = 0, volumeRootPidl = 0, virtualFolderPidl = 0, filePidl = 0, folder = 0, view = 0, viewPointer = 0, viewWindow = 0, folderView = 0;
         bool created = false;
+        var failAfterCreateViewWindow = false;
+        nint failedNavigationWindow = 0;
         var itemCountLastHResult = 0;
         FilteredHost? host = null;
         Exception? navigationError = null;
@@ -62,6 +64,13 @@ internal static class ShellViewHostFilterProbe
                 var bounds = new StreamProbeRect { Right = 640, Bottom = 480 };
                 var hr = At<CreateViewWindow>(childView, 9)(childView, previousView, ref settings, viewPointer, ref bounds, out childWindow);
                 if (hr < 0) Marshal.ThrowExceptionForHR(hr);
+                if (failAfterCreateViewWindow)
+                {
+                    // Exercise rollback after the replacement HWND exists but before ownership transfers to the host.
+                    failAfterCreateViewWindow = false;
+                    failedNavigationWindow = childWindow;
+                    Marshal.ThrowExceptionForHR(unchecked((int)0x80004005));
+                }
                 host.SetPendingView(childFolder, childView, childWindow);
                 return 0;
             }
@@ -525,6 +534,21 @@ internal static class ShellViewHostFilterProbe
                         host.HistoryIndex != historyIndexBeforeInvalidTarget || !ILIsEqual(host.CurrentPidl, virtualFolderPidl))
                         throw new Exception($"Rejecting a file target after {label} navigation changed the active virtual view or history.");
                     Console.WriteLine($"ishellview-host-filter: virtual-nonfolder-target-rejected=True; target={label}; hr=0x{invalidTargetHr:X8}; active-view-preserved=True; history-index={host.HistoryIndex}; pidl-identity-preserved=True");
+
+                    var retainedViewBeforeInjectedFailure = host.View;
+                    var retainedWindowBeforeInjectedFailure = viewWindow;
+                    var historyCountBeforeInjectedFailure = host.NavigationHistory!.Count;
+                    failAfterCreateViewWindow = true;
+                    var injectedFailureHr = host.BrowseObject(virtualFolderPidl, 0);
+                    if (injectedFailureHr >= 0 || failAfterCreateViewWindow || failedNavigationWindow == 0 ||
+                        IsWindow(failedNavigationWindow) || !IsWindow(retainedWindowBeforeInjectedFailure) ||
+                        host.PendingView != 0 || host.View != retainedViewBeforeInjectedFailure ||
+                        host.HistoryIndex != historyIndexBeforeInvalidTarget ||
+                        host.NavigationHistory.Count != historyCountBeforeInjectedFailure ||
+                        !ILIsEqual(host.CurrentPidl, virtualFolderPidl))
+                        throw new Exception($"Injected CreateViewWindow handoff failure for {label} did not destroy its new window and preserve the old view/history.");
+                    Console.WriteLine($"ishellview-host-filter: view-window-handoff-failure-rollback=True; target={label}; hr=0x{injectedFailureHr:X8}; failed-window-destroyed=True; previous-view-valid=True; history-unchanged=True");
+                    failedNavigationWindow = 0;
 
                     var historyCountBeforeSamePath = host.NavigationHistory!.Count;
                     Check(host.BrowseObject(virtualFolderPidl, 0));
