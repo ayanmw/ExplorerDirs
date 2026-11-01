@@ -22,14 +22,16 @@ internal static class ShellProviderLocationProbe
         var smallFolder = Path.Combine(viewRoot, "folder-small");
         var largeFolder = Path.Combine(viewRoot, "folder-large");
         var notificationBurst = sortStrategy.StartsWith("notification-burst", StringComparison.Ordinal);
-        var notificationDirectory = sortStrategy == "notification-updatedir";
+        var notificationDirectoryLarge = sortStrategy == "notification-updatedir-large";
+        var notificationDirectory = sortStrategy is "notification-updatedir" or "notification-updatedir-large";
         var notificationItems = sortStrategy == "notification-items-flush";
         var flushNotifications = sortStrategy is "notification-burst-flush" or "notification-items-flush";
         var notificationDelayMilliseconds = sortStrategy == "notification-burst-spaced" ? 150 :
             notificationDirectory || notificationItems ? 5000 : 0;
-        var expectedFolderCount = notificationBurst ? 16 : 2;
-        var expectedRecursiveValues = notificationBurst
-            ? Enumerable.Range(101, 14).Select(value => (ulong)value).Append(5UL).Append(29UL).Order().ToArray()
+        var extraFolderCount = notificationBurst ? 14 : notificationDirectoryLarge ? 100 : 0;
+        var expectedFolderCount = 2 + extraFolderCount;
+        var expectedRecursiveValues = extraFolderCount > 0
+            ? Enumerable.Range(101, extraFolderCount).Select(value => (ulong)value).Append(5UL).Append(29UL).Order().ToArray()
             : new[] { 5UL, 29UL };
         var expectedItemPaths = new HashSet<string>([smallFolder, largeFolder], StringComparer.OrdinalIgnoreCase);
         var classId = Guid.NewGuid();
@@ -53,9 +55,9 @@ internal static class ShellProviderLocationProbe
             Directory.CreateDirectory(largeFolder);
             File.WriteAllBytes(Path.Combine(smallFolder, "payload.bin"), new byte[5]);
             File.WriteAllBytes(Path.Combine(largeFolder, "payload.bin"), new byte[29]);
-            if (notificationBurst)
+            if (extraFolderCount > 0)
             {
-                for (var index = 0; index < 14; index++)
+                for (var index = 0; index < extraFolderCount; index++)
                 {
                     var path = Path.Combine(viewRoot, $"folder-extra-{index:D2}");
                     Directory.CreateDirectory(path);
@@ -150,6 +152,23 @@ internal static class ShellProviderLocationProbe
             catch (TimeoutException exception)
             {
                 throw new TimeoutException($"{exception.Message}; native-listview-item-counts=[{string.Join('|', initialListViewCounts.Order())}]", exception);
+            }
+
+            string[] selectedBeforeNotification = [];
+            string? focusedRowBeforeNotification = null;
+            string? shellFocusedRowBeforeNotification = null;
+            if (notificationDirectory)
+            {
+                var selectionTargetName = notificationDirectoryLarge ? "folder-extra-00" : "folder-small";
+                SelectShellViewItemByPath(hostType, host, Path.Combine(viewRoot, selectionTargetName));
+                var selectionStateBefore = ReadNativeListViewSelectionState((nint)viewWindowField.GetValue(host)!);
+                selectedBeforeNotification = selectionStateBefore.Selected;
+                focusedRowBeforeNotification = selectionStateBefore.Focused;
+                shellFocusedRowBeforeNotification = ReadShellFocusedRow(hostType, host);
+                if (!selectedBeforeNotification.SequenceEqual([selectionTargetName], StringComparer.OrdinalIgnoreCase) ||
+                    !string.Equals(focusedRowBeforeNotification, selectionTargetName, StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(shellFocusedRowBeforeNotification, selectionTargetName, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"Could not establish the notification probe selection/focus: selected=[{string.Join('|', selectedBeforeNotification)}]; listview-focused-row={focusedRowBeforeNotification}; shell-focused-row={shellFocusedRowBeforeNotification}.");
             }
 
             stage = "async-values";
@@ -273,11 +292,21 @@ internal static class ShellProviderLocationProbe
                 {
                     var rowObservation = ObserveProductRowCounts(hostType, host, TimeSpan.FromSeconds(2));
                     var nativeCellsAfterDirectoryNotify = ReadNativeListViewCells((nint)viewWindowField.GetValue(host)!, 3);
+                    var viewStateAfterNotification = notificationDirectory
+                        ? ReadNativeListViewSelectionState((nint)viewWindowField.GetValue(host)!)
+                        : (Selected: [], Focused: (string?)null);
+                    var selectedAfterNotification = viewStateAfterNotification.Selected;
+                    var focusedRowAfterNotification = viewStateAfterNotification.Focused;
+                    var shellFocusedRowAfterNotification = notificationDirectory ? ReadShellFocusedRow(hostType, host) : null;
                     var notificationTransitions = notificationStateSamples.OrderBy(pair => pair.Key)
                         .Select(pair => $"{pair.Key}:[{string.Join(',', pair.Value.Order(StringComparer.Ordinal))}]");
-                    Console.WriteLine($"shell-provider-product-async-view-after-{(notificationDirectory ? "updatedir" : "item-update")}: samples-by-send-attempts=[{string.Join('|', notificationTransitions)}]; during-shell-item-counts=[{string.Join('|', notificationShellItemCounts.Order())}]; during-native-listview-counts=[{string.Join('|', notificationNativeListViewCounts.Order())}]; shell-item-counts-after=[{string.Join('|', rowObservation.ShellItemCounts)}]; export-row-counts-after=[{string.Join('|', rowObservation.ExportRowCounts)}]; final-shell-items={rowObservation.FinalShellItems}; final-export-rows={rowObservation.FinalExportRows}; native-cells-before=[{string.Join(" || ", nativeCellsBeforeNotification.Select(row => string.Join('|', row)))}]; native-cells-after=[{string.Join(" || ", nativeCellsAfterDirectoryNotify.Select(row => string.Join('|', row)))}]; view-callback-count={ReadProductDiagnosticCounter(adapter, "GetProductViewItemNotificationCallbackCount")}; desktop-events=[{desktopUpdateObserver.EventSummary}]");
+                    Console.WriteLine($"shell-provider-product-async-view-after-{(notificationDirectory ? "updatedir" : "item-update")}: samples-by-send-attempts=[{string.Join('|', notificationTransitions)}]; during-shell-item-counts=[{string.Join('|', notificationShellItemCounts.Order())}]; during-native-listview-counts=[{string.Join('|', notificationNativeListViewCounts.Order())}]; shell-item-counts-after=[{string.Join('|', rowObservation.ShellItemCounts)}]; export-row-counts-after=[{string.Join('|', rowObservation.ExportRowCounts)}]; final-shell-items={rowObservation.FinalShellItems}; final-export-rows={rowObservation.FinalExportRows}; native-cells-before=[{string.Join(" || ", nativeCellsBeforeNotification.Select(row => string.Join('|', row)))}]; native-cells-after=[{string.Join(" || ", nativeCellsAfterDirectoryNotify.Select(row => string.Join('|', row)))}]; selected-before=[{string.Join('|', selectedBeforeNotification)}]; selected-after=[{string.Join('|', selectedAfterNotification)}]; listview-focused-row-before={focusedRowBeforeNotification}; listview-focused-row-after={focusedRowAfterNotification}; shell-focused-row-before={shellFocusedRowBeforeNotification}; shell-focused-row-after={shellFocusedRowAfterNotification}; view-callback-count={ReadProductDiagnosticCounter(adapter, "GetProductViewItemNotificationCallbackCount")}; desktop-events=[{desktopUpdateObserver.EventSummary}]");
                     if (rowObservation.FinalShellItems != expectedFolderCount || rowObservation.FinalExportRows != expectedFolderCount)
                         throw new InvalidOperationException($"The Shell view did not retain its {expectedFolderCount} rows after SHCNE_UPDATEDIR.");
+                    if (notificationDirectory && (!selectedBeforeNotification.SequenceEqual(selectedAfterNotification, StringComparer.OrdinalIgnoreCase) ||
+                        !string.Equals(focusedRowBeforeNotification, focusedRowAfterNotification, StringComparison.OrdinalIgnoreCase) ||
+                        !string.Equals(shellFocusedRowBeforeNotification, shellFocusedRowAfterNotification, StringComparison.OrdinalIgnoreCase)))
+                        throw new InvalidOperationException($"SHCNE_UPDATEDIR changed selection/focus: selected=[{string.Join('|', selectedBeforeNotification)}]=>[{string.Join('|', selectedAfterNotification)}]; listview-focused-row={focusedRowBeforeNotification}=>{focusedRowAfterNotification}; shell-focused-row={shellFocusedRowBeforeNotification}=>{shellFocusedRowAfterNotification}.");
                     return 0;
                 }
             }
@@ -1893,6 +1922,71 @@ internal static class ShellProviderLocationProbe
         }
     }
 
+    private static (string[] Selected, string? Focused) ReadNativeListViewSelectionState(nint viewWindow)
+    {
+        var listView = FindNativeListView(viewWindow);
+        var rows = ReadNativeListViewCells(viewWindow, 1);
+        var selected = new List<string>();
+        string? focused = null;
+        for (var index = 0; index < rows.Length; index++)
+        {
+            const int selectedAndFocused = 0x0001 | 0x0002;
+            var state = (int)SendMessageW(listView, 0x102C, index, selectedAndFocused); // LVM_GETITEMSTATE.
+            if ((state & 0x0002) != 0) selected.Add(rows[index][0]);
+            if ((state & 0x0001) != 0) focused = rows[index][0];
+        }
+        return (selected.ToArray(), focused);
+    }
+
+    private static string? ReadShellFocusedRow(Type hostType, HwndHost host)
+    {
+        var view = (nint)hostType.GetMethod("GetFolderView2Pointer", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(host, null)!;
+        if (view == 0) throw new InvalidOperationException("The product host returned no IFolderView2 for focused-row readback.");
+        try
+        {
+            var result = GetMethod<GetFocusedFolderViewItem>(view, 10)(view, out var index);
+            Check(result);
+            var rows = ReadNativeListViewCells((nint)hostType.GetField("_viewWindow", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)!, 1);
+            return (uint)index < (uint)rows.Length ? rows[index][0] : null;
+        }
+        finally { Marshal.Release(view); }
+    }
+
+    private static void SelectShellViewItemByPath(Type hostType, HwndHost host, string itemPath)
+    {
+        var view = (nint)hostType.GetMethod("GetFolderView2Pointer", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(host, null)!;
+        if (view == 0) throw new InvalidOperationException("The product host returned no IFolderView2 for selection setup.");
+        try
+        {
+            var rows = ReadNativeListViewCells((nint)hostType.GetField("_viewWindow", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)!, 1);
+            var itemName = Path.GetFileName(itemPath);
+            var itemIndex = Array.FindIndex(rows, row => row[0].Equals(itemName, StringComparison.OrdinalIgnoreCase));
+            if (itemIndex < 0) throw new InvalidOperationException($"Could not find '{itemPath}' in the native view rows.");
+            Check(GetMethod<SelectFolderViewItem>(view, 15)(view, itemIndex, 0x1fu));
+        }
+        finally { Marshal.Release(view); }
+        SetNativeListViewFocus((nint)hostType.GetField("_viewWindow", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)!,
+            Path.GetFileName(itemPath));
+    }
+
+    private static void SetNativeListViewFocus(nint viewWindow, string itemName)
+    {
+        var listView = FindNativeListView(viewWindow);
+        var rows = ReadNativeListViewCells(viewWindow, 1);
+        var itemIndex = Array.FindIndex(rows, row => row[0].Equals(itemName, StringComparison.OrdinalIgnoreCase));
+        if (itemIndex < 0) throw new InvalidOperationException($"Could not find native ListView row '{itemName}' to focus.");
+        var itemPointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeListViewItem>());
+        try
+        {
+            var item = new NativeListViewItem { Mask = 0x0008, State = 0x0001, StateMask = 0x0001 }; // LVIF_STATE / LVIS_FOCUSED.
+            Marshal.StructureToPtr(item, itemPointer, false);
+            _ = SendMessageW(listView, 0x102B, itemIndex, itemPointer); // LVM_SETITEMSTATE.
+        }
+        finally { Marshal.FreeHGlobal(itemPointer); }
+    }
+
     private static void ClickHeaderColumn(nint header, int columnIndex)
     {
         var rectanglePointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeRect>());
@@ -1979,6 +2073,8 @@ internal static class ShellProviderLocationProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetClassId(ref Guid classId);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetFlag(int enabled);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCounter();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SelectFolderViewItem(nint self, int index, uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFocusedFolderViewItem(nint self, out int index);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)]
     private delegate int GetDiagnosticString([MarshalAs(UnmanagedType.LPWStr)] StringBuilder buffer, uint capacity);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void SetProductViewNotificationsUseSyntheticRoot(int enabled);

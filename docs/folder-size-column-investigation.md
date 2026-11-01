@@ -2673,3 +2673,9 @@ HostProbe 的 Desktop 通知观察器现使用独立、不可见的 `HwndSource`
 16 项场景中，adapter 记录的 16 个 PIDL 名称解码后正好对应夹具的 16 个不同目录，没有重复或缺失；独立 HWND 的 Desktop 观察器在 30 秒内仍只收到 `folder-extra-00` 至 `folder-extra-10` 共 11 个事件。将隐藏视图高度从 360 增至 1000 像素也没有改变这个子集。由此排除了同一 HWND 的 hook 截断、视图高度不足和明显的 provider parsing-name 重复这几项解释；它还不能证明 Shell 全局投递层丢弃事件，因为 Desktop 范围观察器不等同于当前 ExplorerBrowser 视图的内部通知接收器。下一步应对照独立 Desktop HWND 与 ExplorerBrowser 内部 `SFVM_FSNOTIFY`/视图回调的收件情况，并进一步比对发送与接收 PIDL 的二进制身份。
 
 HostProbe Release build 0 警告/错误；2 项场景通过，16 项差异场景按门槛退出失败。没有可见窗口、产品功能改动或 release 更新。
+
+### 2026-11-02：UPDATEDIR 后的焦点与选区保持（2 / 102 项）
+
+HostProbe 在发送 `SHCNE_UPDATEDIR` 前，先通过生产 ExplorerBrowser 的 `IFolderView.SelectItem` 设置唯一选中项；同时读取原生 ListView 的 `LVIS_FOCUSED` 与 Shell `IFolderView.GetFocusedItem`，确保更新前选中身份和两层焦点读回都指向目标行。更新后再次用相同接口检查。2 项夹具共 3 轮、102 项夹具共 2 轮：每轮通知前后 Shell ItemCount 与 ListView 行数均保持完整；选中项、ListView focused row、Shell focused row 均保持同一目录身份。102 项结果只代表这一固定规模夹具，不是大型真实目录的性能结论。
+
+该对照补上了先前 UPDATEDIR 样本未测焦点/选区的缺口，但仍是不可见 ExplorerBrowser 宿主状态，不证明屏幕绘制、键盘连续操作或真实用户目录行为。此次 2 项观测中，递归大小仍按 `folder-large (29 B)`、`folder-small (5 B)` 原顺序显示；因此行状态稳定不能推导自动排序已可靠。继续将异步值后的自动重排视作未解决，不接入产品完成回调；后续优先寻找一次性重排且不清空行列表的方案。

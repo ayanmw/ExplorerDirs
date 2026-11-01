@@ -52,6 +52,8 @@ internal static class Program
             return ShellProviderLocationProbe.RunProductAdapterOnDemandAsync("notification-burst-spaced");
         if (args is ["--shell-provider-product-async-notification-updatedir"])
             return ShellProviderLocationProbe.RunProductAdapterOnDemandAsync("notification-updatedir");
+        if (args is ["--shell-provider-product-async-notification-updatedir-large"])
+            return ShellProviderLocationProbe.RunProductAdapterOnDemandAsync("notification-updatedir-large");
         if (args is ["--shell-provider-product-async-notification-items-flush"])
             return ShellProviderLocationProbe.RunProductAdapterOnDemandAsync("notification-items-flush");
         if (args is ["--shell-provider-location-no-desktop-namespace"])
