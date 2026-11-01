@@ -1659,6 +1659,7 @@ namespace
     volatile LONG g_syntheticAsyncRecursiveSizeScanDelayMsForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeScanCompletedForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeScanFinishedForProbe = 0;
+    volatile LONG g_syntheticAsyncRecursiveSizeScanStartedForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeActiveWorkersForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizePeakWorkersForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeNotificationsSentForProbe = 0;
@@ -3520,6 +3521,7 @@ namespace
                     LARGE_INTEGER frequency{}, start{}, end{};
                     QueryPerformanceFrequency(&frequency);
                     QueryPerformanceCounter(&start);
+                    InterlockedIncrement(&g_syntheticAsyncRecursiveSizeScanStartedForProbe);
                     const auto scanDelayMs = InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanDelayMsForProbe, 0, 0);
                     if (scanDelayMs > 0) Sleep(static_cast<DWORD>(scanDelayMs));
                     itemResult = GetSyntheticDirectoryMetrics(entry.path, &metrics);
@@ -6292,6 +6294,7 @@ extern "C" __declspec(dllexport) void WINAPI ResetSyntheticOnDemandSizeMetricsFo
     InterlockedExchange(&g_syntheticOnDemandSizeScanCount, 0);
     InterlockedExchange64(&g_syntheticOnDemandSizeScanMicroseconds, 0);
     InterlockedExchange(&g_syntheticAsyncRecursiveSizeNotificationsSentForProbe, 0);
+    InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanStartedForProbe, 0);
     InterlockedExchange(&g_syntheticAsyncRecursiveSizePeakWorkersForProbe, 0);
     InterlockedExchange(&g_syntheticAsyncRecursiveSizeQueueRejectedScanCountForProbe, 0);
     InterlockedExchange(&g_syntheticAsyncRecursiveSizeBatchRequestedEntriesForProbe, 0);
@@ -6323,6 +6326,12 @@ extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizeBatch
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizeScanFinishedCountForProbe()
 { return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizeScanStartedCountForProbe()
+{ return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanStartedForProbe, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizeScanCompletedCountForProbe()
+{ return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanCompletedForProbe, 0, 0); }
 
 extern "C" __declspec(dllexport) HRESULT WINAPI BeginSyntheticAsyncRecursiveSizeQueueGateForProbe()
 {

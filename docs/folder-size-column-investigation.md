@@ -1647,4 +1647,6 @@ NativeProbe Release 构建通过，子进程均退出码 0；Private Desktop 探
 
 两次 Private Desktop watchdog 均 exit 0，前台与最后输入守卫不变，测试夹具及隔离窗口清理通过。结果只覆盖 NativeProbe 隐藏 DefView、按 view 批次与这两种受控关闭时序；不代表产品 ExplorerBrowser、逐项模式、慢磁盘/网络取消延迟或可见窗口交互。日志：`src/.state/native-probe-watchdog/20261101-161401-54f597cb.stdout.log`（四个不同根全部关闭）、`src/.state/native-probe-watchdog/20261101-161429-cc2804f3.stdout.log`（单 view 退休、同根接管）。
 
-源码边界复核：`ProcessRecursiveSizeBatchChunk` 在每个目录扫描开始前检查 view 取消标记，并在递归扫描完成后再次检查，取消后不会将该次扫描发布到共享缓存，也不会因此发送 Shell 更新；但 `GetSyntheticDirectoryMetrics` 的递归遍历内部没有取消检查。故本轮只证明队列等待批次的取消/接管，未证明正在遍历大型目录时可及时中止；当前实现会让已开始的目录递归遍历运行至结束，再抑制结果发布。下一步应在隔离 view 中令扫描进入后关闭 owner，核对结果不发布、无通知以及剩余批次停止；若单个目录的关闭延迟仍不可接受，再单独评估递归遍历中的取消点。
+源码边界复核：`ProcessRecursiveSizeBatchChunk` 在每个目录扫描开始前检查 view 取消标记，并在递归扫描完成后再次检查，取消后不会将该次扫描发布到共享缓存，也不会因此发送 Shell 更新；但 `GetSyntheticDirectoryMetrics` 的递归遍历内部没有取消检查。故关闭 view 不会中断已经开始的目录递归遍历；它会运行至该目录完成，再抑制结果发布。
+
+在途退休探针使用四个独立根、每根 500 个目录、750 ms 延迟；连续两轮都等到两项扫描开始后销毁四个 view。两项扫描均实际完成，但成功发布数为 0、Shell 通知为 0、取消后没有启动额外扫描，4 个批次全部结束。Private Desktop 前台/输入守卫、夹具及隔离清理通过。日志：`src/.state/native-probe-watchdog/20261101-162044-a01ade83.stdout.log`、`src/.state/native-probe-watchdog/20261101-162117-8b8c7753.stdout.log` 与最终加强断言后的 `src/.state/native-probe-watchdog/20261101-162228-d9ef6759.stdout.log`。NativeProbe Release 0 警告/错误；无窗口异步按需列、Shell 文件夹合同及缓存失效 smoke 通过。这证明取消会阻止在途结果发布并停止后续扫描，但不证明递归中的单目录任务可中断；若实际关闭延迟不可接受，再评估递归遍历中的取消点。
