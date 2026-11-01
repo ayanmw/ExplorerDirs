@@ -5801,3 +5801,5 @@ peer SysListView32 现读取 Shell 文件夹的名称、大小、项目类型、
 2026-11-01 递归大小 peer 视图多选复制切片：真实隐藏 Shell 行的两项选择经 `IShellFolder.GetUIObjectOf(IDataObject)` 接入 `IFileOperation.CopyItems`；复制内容与源逐项核对，peer 行 ID、多选、焦点保持且剪贴板未触碰。NativeProbe Release 和 Private Desktop 探针 exit 0，前台/输入/临时夹具清理守卫通过。仅隐藏原型；菜单动词、粘贴、撤销、拖放、可见 UI 与产品接线仍未验证。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01-peer-多选-shell-idataobject-复制集成)。
 
 2026-11-01 递归大小 peer 行 Shell 拖放目标切片：将两项真实选中行 IDataObject 交给临时 Shell 文件夹 IDropTarget，直接 DragEnter/Drop 以 COPY effect 复制；Shell 返回 S_OK、两项目标内容与源一致，源 peer 行、多选与焦点保持。Private Desktop 前台/输入/清理守卫与 NativeProbe Release 通过。未调用 OLE DoDragDrop、未注入鼠标、未覆盖可见命中/滚动/移动，也未接产品；真实拖放验收仍开放。详见[调查记录](folder-size-column-investigation.md#2026-11-01-peer-多选-shell-拖放目标回调)。
+
+2026-11-01 Shell 多选拖放目标补充枚举：`IDropTarget.Drop` 复制后，目标 `IShellFolder.EnumObjects` 返回与源选择一致的两个目录 PIDL/路径；Private Desktop watchdog 与 NativeProbe Release 通过，前台/输入/清理守卫保持。没有创建目标 Shell view/peer row model，不证明目标窗格行身份/焦点恢复、延迟通知、移动或真实 UI 拖动。详见[调查记录](folder-size-column-investigation.md#2026-11-01-shell-拖放后的目标目录原生枚举)。

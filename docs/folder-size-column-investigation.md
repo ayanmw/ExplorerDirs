@@ -1856,3 +1856,9 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 沿用前一切片由真实 peer 选中行取得的多项 `IDataObject`，将它交给独立临时目标文件夹的 Shell `IDropTarget`，直接调用 `DragEnter` 与 `Drop`，以 `DROPEFFECT_COPY` 完成两个目录复制。两项目标 payload 均与源逐字节相同，源目录保留；前述 `IFileOperation.CopyItems`、源 peer 行 ID/多选/焦点断言继续通过。NativeProbe Release build 0 警告/错误，Private Desktop 探针 exit 0，前台、last-input 与清理守卫通过；没有使用系统剪贴板或输入。
 
 这是 Shell 目标的直接回调测试，没有运行 OLE `DoDragDrop`，也没有模拟鼠标拖动、拖动源完成回调、屏幕命中测试、滚动/自动激活、Move effect、可见光标/提示或 ExplorerBrowser 产品接线。此前 `DoDragDrop` 在无输入环境无法及时返回，因此不能把本结果写作真实拖放验收；产品与 release 未修改。
+
+### 2026-11-01：Shell 拖放后的目标目录原生枚举
+
+在上述直接 `IDropTarget.Drop` 完成多选目录复制后，探针对目标文件夹调用 `IShellFolder.EnumObjects`，读取返回的子 PIDL 并以完整文件系统 parsing name 解析。Shell 枚举结果精确为 `size-10` 与 `size-2`，与目标目录磁盘内容及源选中集合一致。重复 Private Desktop 探针 exit 0，NativeProbe Release build 0 警告/错误，前台、last-input 与清理守卫通过。
+
+这增加了“目标 `IDropTarget` 接受 → 目标 Shell folder 重新枚举”的后台一致性证据；没有创建目标 `IShellView` 或 peer ListView，也没有行 ID/焦点恢复、延迟通知、真实拖动时序、Move effect、可见刷新或产品接线证据。不能视为目标窗格的完整刷新验收。

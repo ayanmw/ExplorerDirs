@@ -2012,7 +2012,7 @@ internal static class ShellViewHostFilterProbe
         var targetPath = Path.Combine(fixtureRoot, "peer-copy-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(targetPath);
         nint children = 0, dataObject = 0, operation = 0, destinationItem = 0;
-        nint dropTargetPidl = 0, dropTargetFolder = 0, dropTarget = 0;
+        nint dropTargetPidl = 0, dropTargetFolder = 0, dropTarget = 0, dropEnumerator = 0;
         try
         {
             children = Marshal.AllocHGlobal(IntPtr.Size * relativePidls.Count);
@@ -2074,6 +2074,47 @@ internal static class ShellViewHostFilterProbe
                     throw new IOException($"The Shell drop target did not copy the selected directory '{name}' intact.");
             }
 
+            Check(At<EnumObjects>(dropTargetFolder, 4)(dropTargetFolder, owner, 0x20 | 0x40, out dropEnumerator));
+            if (dropEnumerator == 0) throw new InvalidOperationException("The destination Shell folder returned no enumerator.");
+            var droppedShellPaths = new List<string>();
+            try
+            {
+                while (true)
+                {
+                    var nextHr = At<NextShellIdList>(dropEnumerator, 3)(dropEnumerator, 1, out var childPidl, 0);
+                    if (nextHr == 1) break; // S_FALSE: the target's native folder enumeration is complete.
+                    Marshal.ThrowExceptionForHR(nextHr);
+                    var absoluteChild = ILCombine(dropTargetPidl, childPidl);
+                    if (absoluteChild == 0)
+                    {
+                        ILFree(childPidl);
+                        throw new InvalidOperationException("Could not combine a dropped child PIDL with its destination folder.");
+                    }
+                    try
+                    {
+                        Marshal.ThrowExceptionForHR(SHGetNameFromIDList(absoluteChild, SigDnFileSystemPath, out var childPathPointer));
+                        try { droppedShellPaths.Add(Marshal.PtrToStringUni(childPathPointer) ?? string.Empty); }
+                        finally { Marshal.FreeCoTaskMem(childPathPointer); }
+                    }
+                    finally
+                    {
+                        ILFree(absoluteChild);
+                        ILFree(childPidl);
+                    }
+                }
+            }
+            finally
+            {
+                Marshal.Release(dropEnumerator);
+                dropEnumerator = 0;
+            }
+            var droppedShellNames = droppedShellPaths.Select(Path.GetFileName)
+                .Order(StringComparer.OrdinalIgnoreCase).ToArray();
+            var expectedDroppedNames = sourcePaths.Select(Path.GetFileName)
+                .Order(StringComparer.OrdinalIgnoreCase).ToArray();
+            if (!droppedShellNames.SequenceEqual(expectedDroppedNames, StringComparer.OrdinalIgnoreCase))
+                throw new IOException($"The destination Shell folder did not enumerate the dropped rows: [{string.Join(',', droppedShellNames)}].");
+
             Application.DoEvents();
             var selectedIndex = Array.IndexOf(initialIds.ToArray(), selectedRowId);
             var secondaryIndex = Array.IndexOf(initialIds.ToArray(), secondarySelectedRowId);
@@ -2083,11 +2124,12 @@ internal static class ShellViewHostFilterProbe
             if (!ReadPeerListRowIds(listView).SequenceEqual(initialIds) || !selectionFocusPreserved)
                 throw new InvalidOperationException("The peer copy changed source row identities, multi-selection, or the independent focus anchor.");
             Console.WriteLine($"ishellview-peer-selected-copy: selected-count={relativePidls.Count}; source=selected-peer-row-IDataObject; operation=IFileOperation.CopyItems; copied-directories=[{string.Join(',', sourcePaths.Select(Path.GetFileName))}]; sources-retained=True; source-row-ids-retained=True; selection-focus-preserved={selectionFocusPreserved}; clipboard-touched=False; aborted=False");
-            Console.WriteLine($"ishellview-peer-selected-drop: selected-count={relativePidls.Count}; target=Shell-folder-IDropTarget; drag-enter-hr=0x{enterHr:X8}; drop-hr=0x{dropHr:X8}; effect={dropEffect}; copied-directories=[{string.Join(',', sourcePaths.Select(Path.GetFileName))}]; sources-retained=True; clipboard-touched=False; DoDragDrop=False");
+            Console.WriteLine($"ishellview-peer-selected-drop: selected-count={relativePidls.Count}; target=Shell-folder-IDropTarget; drag-enter-hr=0x{enterHr:X8}; drop-hr=0x{dropHr:X8}; effect={dropEffect}; copied-directories=[{string.Join(',', droppedShellNames)}]; native-enumeration=True; sources-retained=True; clipboard-touched=False; DoDragDrop=False");
         }
         finally
         {
             if (dropTarget != 0) Marshal.Release(dropTarget);
+            if (dropEnumerator != 0) Marshal.Release(dropEnumerator);
             if (dropTargetFolder != 0) Marshal.Release(dropTargetFolder);
             if (dropTargetPidl != 0) ILFree(dropTargetPidl);
             if (destinationItem != 0) Marshal.Release(destinationItem);
@@ -3066,6 +3108,8 @@ internal static class ShellViewHostFilterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CopyItems(nint self, nint dataObject, nint destination);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumObjects(nint self, nint owner, uint flags, out nint enumerator);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int NextShellIdList(nint self, uint count, out nint element, nint fetched);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DropTargetDragEnter(nint self, nint dataObject, uint keyState, NativePoint point, ref uint effect);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DropTargetDragLeave(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DropTargetDrop(nint self, nint dataObject, uint keyState, NativePoint point, ref uint effect);
