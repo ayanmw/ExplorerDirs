@@ -5940,3 +5940,4 @@ peer SysListView32 现读取 Shell 文件夹的名称、大小、项目类型、
 
 2026-11-02 产品变体按需异步默认：避免目录枚举阶段递归走盘；纯诊断计数在 product build 编译为空操作，NativeProbe 指标不变。product build smoke 未创建 Shell view，异步回填仍待 HostProbe 验证；App/release 未接入。详见 folder-size-column-investigation.md。
 2026-11-02 产品 adapter 隐藏 ExplorerBrowser view：HostProbe 直接加载产品 DLL，经 volatile CLSID 与 NameSpace 注册使用生产 ExplorerBrowserHost 浏览两个临时目录，递归值 5/29 B 正确，宿主不可见且 foreground 不变，注册与夹具清理。产品变体发送目标行 SHCNE_UPDATEITEM；六轮中 1 轮自动按大小排序，5 轮仍按名称序。重新应用 sortdescending/sortascending 可在原视图恢复大小顺序，无需调用会清空列表的 IShellView.Refresh。可靠自动重排、焦点保持和可见像素行为待验证。App/release 未接入。详见 folder-size-column-investigation.md。
+2026-11-02 产品递归大小排序原型：HostProbe 隐藏宿主直接调用 ExplorerBrowserHost 的生产延迟排序调度器，六次均恢复 5→29 B 升序；其中三次 Shell ItemCount 与导出快照同时短暂为 0，随后恢复 2 行。可能产生短暂空列表，故不接入异步完成回调；继续寻找不清空行列表的原生重排方式。仅隐藏 HostProbe，产品/release 未接入。详见 [递归大小列调查](folder-size-column-investigation.md#2026-11-02产品延迟排序调度器对异步递归值的隐藏验证)。

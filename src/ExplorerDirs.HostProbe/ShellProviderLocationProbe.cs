@@ -110,6 +110,7 @@ internal static class ShellProviderLocationProbe
             stage = "capture-sort";
             var capture = hostType.GetMethod("CaptureFileViewExportSnapshot", BindingFlags.Instance | BindingFlags.NonPublic)!;
             var readRows = typeof(ShellProviderLocationProbe).GetMethod("ReadExportRows", BindingFlags.Static | BindingFlags.NonPublic)!;
+            var readItemCounts = hostType.GetMethod("ReadItemCounts", BindingFlags.Instance | BindingFlags.NonPublic)!;
             var snapshot = capture.Invoke(host, null)!;
             var rows = readRows.Invoke(null, [snapshot])!;
             var orderedRows = (string[][])rows.GetType().GetField("Item2")!.GetValue(rows)!;
@@ -119,24 +120,30 @@ internal static class ShellProviderLocationProbe
             var names = orderedRows.Select(row => Path.GetFileName(row[nameColumn]) ?? row[nameColumn]).ToArray();
             var orderAfterAsyncFill = names;
             var autoResorted = names.SequenceEqual(["folder-small", "folder-large"], StringComparer.OrdinalIgnoreCase);
-            if (!autoResorted)
-            {
-                var sortCommand = typeof(ShellProviderLocationProbe).GetMethod("InvokeBackgroundShellVerb",
-                    BindingFlags.Static | BindingFlags.NonPublic)!;
-                Check((int)sortCommand.Invoke(null, [hostType, host, "sortdescending"])!);
-                PumpDispatcher(TimeSpan.FromMilliseconds(100));
-                Check((int)sortCommand.Invoke(null, [hostType, host, "sortascending"])!);
-            }
+            stage = "production-delayed-sort";
+            var scheduleSort = hostType.GetMethod("ScheduleInitialVirtualSort", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var restoredSort = sorts.GetValue(0)!;
+            scheduleSort.Invoke(host, [restoredSort, new Func<bool>(() => true)]);
+            var scheduledSortRowCounts = new HashSet<int>();
+            var scheduledSortShellItemCounts = new HashSet<int>();
+            var scheduledSortStarted = Stopwatch.GetTimestamp();
             WaitUntil(() =>
             {
+                var liveCounts = readItemCounts.Invoke(host, [false, false]);
+                if (liveCounts is not null)
+                    scheduledSortShellItemCounts.Add((int)liveCounts.GetType().GetProperty("Total")!.GetValue(liveCounts)!);
                 snapshot = capture.Invoke(host, null)!;
                 rows = readRows.Invoke(null, [snapshot])!;
                 orderedRows = (string[][])rows.GetType().GetField("Item2")!.GetValue(rows)!;
                 names = orderedRows.Select(row => Path.GetFileName(row[nameColumn]) ?? row[nameColumn]).ToArray();
+                scheduledSortRowCounts.Add(names.Length);
                 return names.SequenceEqual(["folder-small", "folder-large"], StringComparer.OrdinalIgnoreCase);
-            }, TimeSpan.FromSeconds(10), "reapplying the recursive-size Shell sort did not order the populated values");
+            }, TimeSpan.FromSeconds(10), "the production delayed virtual-sort scheduler did not restore ascending recursive-size order");
+            var scheduledSortElapsedMs = Stopwatch.GetElapsedTime(scheduledSortStarted).TotalMilliseconds;
+            var transientEmptySnapshot = scheduledSortRowCounts.Contains(0);
+            var transientEmptyShellView = scheduledSortShellItemCounts.Contains(0);
 
-            Console.WriteLine($"shell-provider-product-async: product-dll=True; volatile-registration=True; hidden-shell-view=True; rows=2; recursive-values=[{string.Join('|', values)}]; order-after-async-fill=[{string.Join('|', orderAfterAsyncFill)}]; auto-resorted={autoResorted}; ascending-sort-after-reapply=[{string.Join('|', names)}]; class={classId:D}; foreground-unchanged=True");
+            Console.WriteLine($"shell-provider-product-async: product-dll=True; volatile-registration=True; hidden-shell-view=True; rows=2; recursive-values=[{string.Join('|', values)}]; order-after-async-fill=[{string.Join('|', orderAfterAsyncFill)}]; shell-auto-resorted={autoResorted}; production-delayed-sort=passed; production-sort-ms={scheduledSortElapsedMs:F0}; export-row-counts-during-sort=[{string.Join('|', scheduledSortRowCounts)}]; shell-item-counts-during-sort=[{string.Join('|', scheduledSortShellItemCounts)}]; transient-empty-export-snapshot={transientEmptySnapshot}; transient-empty-shell-view={transientEmptyShellView}; ascending-size-order=[{string.Join('|', names)}]; class={classId:D}; foreground-unchanged=True");
             return 0;
         }
         catch (Exception exception)

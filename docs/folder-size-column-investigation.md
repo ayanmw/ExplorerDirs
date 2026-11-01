@@ -2560,3 +2560,9 @@ App 生命周期接线位置仍是：在 `FolderOpenRouter.TryStart` 成功后�
 产品变体改为对已完成的目录行发送 SHCNE_UPDATEITEM。HostProbe 连续六轮检查，递归值均正确；异步填值后只有 1 轮自动按大小排序，另 5 轮仍按名称排序。当自动排序未发生时，重新应用 Shell 的 sortdescending 和 sortascending 命令可在同一视图中恢复正确顺序，无需调用会短暂清空列表的 IShellView.Refresh。因此逐行通知不能保证异步排序状态自动更新；通知粒度是否减少行重枚举尚未由本 HostProbe 测量。六轮的 foreground 守卫均通过，volatile 注册和目录均清理；未验证可见像素、焦点/选区及真实目录大负载。产品 DLL 仍未接入 App 或 release。
 
 下一步评估在异步值完成后复用 ExplorerBrowserHost 的延迟虚拟排序策略，并用同一 HostProbe 检查重排时的行枚举、焦点和选区保持。
+
+### 2026-11-02：产品延迟排序调度器对异步递归值的隐藏验证
+
+将产品 adapter 的隐藏 ExplorerBrowser HostProbe 改为直接调用 `ExplorerBrowserHost.ScheduleInitialVirtualSort`，而不是手动发出两条排序命令。六次运行中，生产调度器均在约 161–768 ms 内把两行恢复为 5→29 B 的大小升序，隐藏父窗口未显示，foreground 未变化，临时注册与目录均由探针清理。为区分行快照采样和 Shell 实际行数，同时轮询 `CaptureFileViewExportSnapshot` 与 `IFolderView.ItemCount`：三次运行二者都观察到 2→0→2 行，另三次一直为 2 行。
+
+因此生产调度器可在同一 Shell view 最终恢复顺序，但排序方向来回切换会间歇性地令 Shell 暂时报出零行。当前仅为隐藏视图证据，不能断定可见窗口一定出现黑屏；不过这条路径有潜在空列表窗口，不应直接接到产品异步完成回调上。逐行 SHCNE_UPDATEITEM 仍只在此前六次运行中的一次自然触发大小排序。下一步应寻找单次原生重排或排序状态重申方案，并在无需 `IShellView.Refresh` 的前提下同时证明行数稳定、焦点/选区保持；没有满足这些条件前，产品/release 不接线。
