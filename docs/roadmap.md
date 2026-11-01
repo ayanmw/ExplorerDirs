@@ -5774,3 +5774,7 @@ Private Desktop 隔离探针现用 PIDL 相等判断维持刷新/排序/分组�
 ### 2026-11-01：通过 IShellFolder2 投影标准详情字段
 
 peer SysListView32 现读取 Shell 文件夹的名称、大小、项目类型、修改日期四个 `GetDetailsOf` 字段，并在刷新、升降序及分组投影后逐行逐列读回验证。PIDL 行身份、系统图标和原生分组合同仍通过；Release 构建 0 警告/错误，Private Desktop 前台、输入及清理守卫通过。当前读取 Shell 文件夹前四个标准字段，不保留 DefView 自定义列顺序/宽度/隐藏状态，也未实现 peer 列头排序或递归大小；无可见 UI、通知或产品接线。下一步验证行变更通知下的 PIDL 与列值 reconciliation，再推进按需递归值排序。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01通过-ishellfolder2-投影标准详情字段)。
+
+### 2026-11-01：Shell 创建与删除通知同步 peer 详情列
+
+同一隔离 `IShellView` 合同在真实 filesystem fixture 上显式广播 `SHCNE_CREATE`/`SHCNE_DELETE`，等待 Shell 行模型稳定后重投影 peer 详情列。新增行获得唯一 PIDL 行 ID，原有三行 ID 保留；删除后新增行 ID 退役，存活行详情仍逐列对齐。NativeProbe Release 0 警告/错误，Private Desktop 探针 exit 0，前台、输入与清理守卫通过。此证据仅覆盖显式广播的创建/删除，未覆盖重命名身份映射、跨目录移动、通知风暴、可见更新、产品 ExplorerBrowser 或递归列；仍留在 NativeProbe。详见[调查记录](folder-size-column-investigation.md#2026-11-01shell-创建与删除通知同步-peer-详情列)。

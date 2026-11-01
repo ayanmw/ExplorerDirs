@@ -36,6 +36,10 @@ internal static class ShellViewHostFilterProbe
     private const uint LvmEnableGroupView = 0x109D;
     private const uint LvmRemoveAllGroups = 0x10A0;
     private const uint LvmIsGroupViewEnabled = 0x10AF;
+    private const uint ShellChangeCreated = 0x00000002;
+    private const uint ShellChangeDeleted = 0x00000004;
+    private const uint ShellChangePathUnicode = 0x00000005;
+    private const uint SigDnFileSystemPath = 0x80058000;
 
     internal static int Run() => Run(stopAfterGroupedExport: false, leaveParentForThreadExit: false);
 
@@ -1356,6 +1360,44 @@ internal static class ShellViewHostFilterProbe
             if (groupResult != 0 || groupKey.FormatId != typeKey.FormatId || groupKey.PropertyId != typeKey.PropertyId || groupAscending != 1)
                 throw new Exception($"The Shell Group Ascending command did not restore ascending order: hr=0x{groupResult:X8}, ascending={groupAscending}.");
 
+            var originalPeerIds = peerRows.Select(row => row.Id).ToHashSet();
+            Marshal.ThrowExceptionForHR(SHGetNameFromIDList(folderPidl, SigDnFileSystemPath, out var peerFixturePathPointer));
+            var peerFixturePath = Marshal.PtrToStringUni(peerFixturePathPointer)
+                ?? throw new InvalidOperationException("Could not resolve the native Shell fixture folder path.");
+            Marshal.FreeCoTaskMem(peerFixturePathPointer);
+            var createdPeerPath = Path.Combine(peerFixturePath, "ExplorerDirs-peer-change-" + Guid.NewGuid().ToString("N") + ".txt");
+            try
+            {
+                File.WriteAllText(createdPeerPath, "peer-shell-change");
+                SHChangeNotify(ShellChangeCreated, ShellChangePathUnicode, createdPeerPath, 0);
+                WaitForPeerShellItem(folderView, createdPeerPath, shouldExist: true, initialCount + 1);
+                var addedProjection = ProjectPeerShellOrder(peerList, folderView, folderPidl, shellFolder,
+                    peerRows, ref nextPeerRowId, initialCount + 1, groupByType: true);
+                peerRows = addedProjection.Rows;
+                var addedPeerRow = peerRows.Single(row => string.Equals(row.Name, Path.GetFileName(createdPeerPath), StringComparison.OrdinalIgnoreCase));
+                var originalRowsRetained = originalPeerIds.All(id => peerRows.Any(row => row.Id == id));
+                var newRowIdentityAssigned = !originalPeerIds.Contains(addedPeerRow.Id) && peerRows.Select(row => row.Id).Distinct().Count() == peerRows.Count;
+                var detailsAfterCreateAligned = originalRowsRetained && newRowIdentityAssigned;
+                if (!detailsAfterCreateAligned)
+                    throw new Exception("Shell create notification did not preserve existing peer PIDL rows and assign the new row a distinct identity.");
+
+                File.Delete(createdPeerPath);
+                SHChangeNotify(ShellChangeDeleted, ShellChangePathUnicode, createdPeerPath, 0);
+                WaitForPeerShellItem(folderView, createdPeerPath, shouldExist: false, initialCount);
+                var deletedProjection = ProjectPeerShellOrder(peerList, folderView, folderPidl, shellFolder,
+                    peerRows, ref nextPeerRowId, initialCount, groupByType: true);
+                peerRows = deletedProjection.Rows;
+                var deletedIdentityRetired = peerRows.All(row => row.Id != addedPeerRow.Id) &&
+                    originalPeerIds.All(id => peerRows.Any(row => row.Id == id));
+                if (!deletedIdentityRetired)
+                    throw new Exception("Shell delete notification did not retire the removed peer row while preserving surviving PIDL identities.");
+                Console.WriteLine($"ishellview-peer-shell-change: create=True;delete=True;existing-pidl-ids-retained={originalRowsRetained};new-row-id-assigned={newRowIdentityAssigned};deleted-row-id-retired={deletedIdentityRetired};details-reconciled=True");
+            }
+            finally
+            {
+                if (File.Exists(createdPeerPath)) File.Delete(createdPeerPath);
+            }
+
             // This intentionally changes sort state only after the menu-command focus matrix;
             // the Shell view uses a disposable fixture and is torn down immediately afterward.
             VerifyColumnHeaderContextMenu(view, owner);
@@ -1648,6 +1690,24 @@ internal static class ShellViewHostFilterProbe
             if (hr < 0) Marshal.ThrowExceptionForHR(hr);
         }
         return values;
+    }
+
+    private static void WaitForPeerShellItem(nint folderView, string path, bool shouldExist, int expectedCount)
+    {
+        var itemName = Path.GetFileName(path);
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        var stableSamples = 0;
+        while (DateTime.UtcNow < deadline && stableSamples < 3)
+        {
+            Application.DoEvents();
+            Check(At<ItemCount>(folderView, 7)(folderView, 2, out var count));
+            var names = count > 0 ? ReadVisibleItemNames(folderView, count) : [];
+            var itemPresent = names.Contains(itemName, StringComparer.OrdinalIgnoreCase);
+            stableSamples = count == expectedCount && itemPresent == shouldExist ? stableSamples + 1 : 0;
+            if (stableSamples < 3) Thread.Sleep(50);
+        }
+        if (stableSamples < 3)
+            throw new TimeoutException($"The Shell view did not settle to {expectedCount} rows with '{itemName}' present={shouldExist}.");
     }
 
     private static int ReadShellDetail(nint shellFolder2, nint item, uint column, out string text)
@@ -2528,6 +2588,8 @@ internal static class ShellViewHostFilterProbe
         return 0;
     }
     [DllImport("shell32.dll")] private static extern bool ILIsEqual(nint first, nint second);
+    [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern void SHChangeNotify(uint eventId, uint flags, string path1, nint path2);
     [DllImport("shlwapi.dll", CharSet = CharSet.Unicode)] private static extern int StrRetToBufW(nint strret, nint pidl, System.Text.StringBuilder buffer, uint capacity);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint CreateWindowExW(uint ex,
         string cls, string name, uint style, int x, int y, int width, int height,
