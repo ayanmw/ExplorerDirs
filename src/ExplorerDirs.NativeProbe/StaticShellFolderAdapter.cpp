@@ -1457,6 +1457,7 @@ namespace
     class SyntheticRecursiveSizeSnapshotStore final
     {
     public:
+        using SnapshotMap = std::map<std::wstring, SyntheticRecursiveSizeSnapshot, ShellParsingNameLess>;
         enum class ScanReservation { Cached, Acquired, InProgress, Failed };
 
         explicit SyntheticRecursiveSizeSnapshotStore(size_t maximumSnapshots = 256) noexcept
@@ -1704,34 +1705,66 @@ namespace
             _lookupHits = 0;
             _lookupMisses = 0;
             _evictions = 0;
+            _evictionSearchSteps = 0;
+            _evictionSearchTicks = 0;
         }
         ULONGLONG LookupHits() const { std::lock_guard<std::mutex> lock(_mutex); return _lookupHits; }
         ULONGLONG LookupMisses() const { std::lock_guard<std::mutex> lock(_mutex); return _lookupMisses; }
         ULONGLONG Evictions() const { std::lock_guard<std::mutex> lock(_mutex); return _evictions; }
+        ULONGLONG EvictionSearchSteps() const { std::lock_guard<std::mutex> lock(_mutex); return _evictionSearchSteps; }
+        ULONGLONG EvictionSearchMicroseconds() const
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            return static_cast<ULONGLONG>(_evictionSearchTicks) * 1000000ULL /
+                static_cast<ULONGLONG>(PerformanceFrequency());
+        }
+        size_t IndexedHeapAuxiliaryBytesEstimate() const noexcept
+        {
+            return _maximumSnapshots * (sizeof(size_t) + sizeof(SnapshotMap::iterator));
+        }
     private:
+        static LONGLONG PerformanceFrequency() noexcept
+        {
+            static const LONGLONG frequency = []() noexcept
+            {
+                LARGE_INTEGER value{};
+                return QueryPerformanceFrequency(&value) ? value.QuadPart : 1;
+            }();
+            return frequency;
+        }
         ULONGLONG NextAccessSequence() const noexcept { return ++_accessSequence; }
         void TrimToCapacity() const noexcept
         {
+            if (_sizes.size() <= _maximumSnapshots) return;
+            LARGE_INTEGER started{};
+            QueryPerformanceCounter(&started);
             while (_sizes.size() > _maximumSnapshots)
             {
                 auto oldest = _sizes.begin();
+                ++_evictionSearchSteps;
                 for (auto entry = std::next(oldest); entry != _sizes.end(); ++entry)
                 {
+                    ++_evictionSearchSteps;
                     if (entry->second.lastAccess < oldest->second.lastAccess) oldest = entry;
                 }
                 _sizes.erase(oldest);
                 ++_evictions;
             }
+            LARGE_INTEGER finished{};
+            QueryPerformanceCounter(&finished);
+            _evictionSearchTicks += finished.QuadPart - started.QuadPart;
         }
         volatile LONG _references = 1;
         const size_t _maximumSnapshots;
         mutable std::mutex _mutex;
-        mutable std::map<std::wstring, SyntheticRecursiveSizeSnapshot, ShellParsingNameLess> _sizes;
+        mutable SnapshotMap _sizes;
         std::map<std::wstring, bool, ShellParsingNameLess> _scansInProgress;
         mutable ULONGLONG _accessSequence = 0;
         mutable ULONGLONG _lookupHits = 0;
         mutable ULONGLONG _lookupMisses = 0;
         mutable ULONGLONG _evictions = 0;
+        mutable ULONGLONG _evictionSearchSteps = 0;
+        mutable LONGLONG _evictionSearchTicks = 0;
     };
 
     constexpr SyntheticChild kSyntheticChildren[] =
@@ -7385,6 +7418,42 @@ extern "C" __declspec(dllexport) LONG64 WINAPI GetSyntheticRecursiveSizeCacheEvi
     const auto count = store->Evictions();
     store->Release();
     return static_cast<LONG64>(count);
+}
+
+extern "C" __declspec(dllexport) LONG64 WINAPI GetSyntheticRecursiveSizeCacheEvictionSearchStepsForProbe()
+{
+    AcquireSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
+    auto* store = g_sharedRecursiveSizeStore;
+    if (store) store->AddRef();
+    ReleaseSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
+    if (!store) return 0;
+    const auto count = store->EvictionSearchSteps();
+    store->Release();
+    return static_cast<LONG64>(count);
+}
+
+extern "C" __declspec(dllexport) LONG64 WINAPI GetSyntheticRecursiveSizeCacheEvictionSearchMicrosecondsForProbe()
+{
+    AcquireSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
+    auto* store = g_sharedRecursiveSizeStore;
+    if (store) store->AddRef();
+    ReleaseSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
+    if (!store) return 0;
+    const auto elapsed = store->EvictionSearchMicroseconds();
+    store->Release();
+    return static_cast<LONG64>(elapsed);
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticRecursiveSizeCacheIndexedHeapAuxiliaryBytesEstimateForProbe()
+{
+    AcquireSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
+    auto* store = g_sharedRecursiveSizeStore;
+    if (store) store->AddRef();
+    ReleaseSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
+    if (!store) return 0;
+    const auto bytes = store->IndexedHeapAuxiliaryBytesEstimate();
+    store->Release();
+    return static_cast<LONG>(bytes);
 }
 
 extern "C" __declspec(dllexport) void WINAPI ResetSyntheticOnDemandSizeMetricsForProbe()

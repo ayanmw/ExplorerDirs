@@ -2466,6 +2466,12 @@ NativeProbe Release 构建 0 警告/错误；Private Desktop watchdog exit 0，�
 
 这组使用相同最小夹具的配对结果确认，超额淘汰会触发 Shell 行重查和重复扫描，适度加大隔离缓存可以避免该特定负载中的抖动；它仍不等于产品容量决策。约 94.9 MiB Private Bytes 是探针进程总值，不是缓存增量；未接入产品 Shell view，且没有测量真实慢盘、运行多小时后的增长或屏幕绘制。
 
+### 2026-11-02：LRU 淘汰查找成本与索引载荷估算
+
+给 NativeProbe 专用快照 store 增加淘汰扫描步数及高精度计时。4×1,100 最小夹具、容量 4,096 的一次样本发生 4,962 次淘汰，逐项 LRU 搜索检查 20,329,314 个 map 项，累计约 392,483 μs；同一运行记录 9,058 次目录扫描、全部行值就绪后因额外扫描合同 exit 1，Private Desktop 守卫通过。先前相同负载、相同缓存容量的样本是 5,790 次扫描，说明隐藏 Shell 重查/通知次数有时序波动，重复扫描数量不是稳定基准。配对 8,192 容量样本 exit 0：4,404 次唯一扫描、零淘汰，搜索计时/步数均为 0，选区焦点保持；Private Bytes 100,065,280 B。静态递归大小 store 合同 smoke 通过且无窗口。
+
+同时按 x64 `size_t` 与 map iterator 的实际编译尺寸估算 indexed-heap 所需的每项堆索引和快照反向索引：4,096 容量约增加 65,536 B（64 KiB），约为该组 1,352,250 B 缓存载荷的 4.8%；8,192 容量估计 131,072 B。该估计不包含 allocator 取整，但两项是按结构尺寸推导的额外载荷，不是进程 Private Bytes 差值。该压力样本中线性淘汰查找累计约 0.39 秒，低于反复递归扫描的成本；因此不为 NativeProbe LRU 增加额外索引，以免常驻载荷换取有限收益。新增计时只在隔离 NativeProbe，应用和发布版不变；下一步继续测不同目录数/窗格数及慢速目录扫描时的内存、重扫和延迟，产品接线仍需独立架构/可见验收。
+
 ### 2026-11-02：profile Shell namespace 注册 owner 并行与重启原型
 
 此前的 owner-only 探针验证了 B 在 A 注销后重新解析仍读到专属文件/29 B；本次把 profile B 的首个真实 ExplorerBrowser 留在 B owner 子进程中。A 注销后，B 通过已打开 view 的 `IFolderView2` 重新读取行数和 provider 内容；A 使用原 INI 中的 CLSID 重建注册并打开自己的 view 后，B 再复验一次；最后 B owner 退出，A 的 view 仍读到 13 B。A、B 各自的两棵 volatile key 在协调进程中清理并验证。

@@ -1529,12 +1529,15 @@ public static class SyntheticShellSortProbe
                     var recursiveSizeCacheHits = ReadCounter64(module, "GetSyntheticRecursiveSizeCacheLookupHitsForProbe");
                     var recursiveSizeCacheMisses = ReadCounter64(module, "GetSyntheticRecursiveSizeCacheLookupMissesForProbe");
                     var recursiveSizeCacheEvictions = ReadCounter64(module, "GetSyntheticRecursiveSizeCacheEvictionsForProbe");
+                    var recursiveSizeCacheEvictionSearchSteps = ReadCounter64(module, "GetSyntheticRecursiveSizeCacheEvictionSearchStepsForProbe");
+                    var recursiveSizeCacheEvictionSearchMicroseconds = ReadCounter64(module, "GetSyntheticRecursiveSizeCacheEvictionSearchMicrosecondsForProbe");
+                    var recursiveSizeCacheIndexedHeapAuxiliaryBytes = ReadCounter(module, "GetSyntheticRecursiveSizeCacheIndexedHeapAuxiliaryBytesEstimateForProbe");
                     var asyncSharedColumnSummaries = asyncSharedViewProbe
                         ? string.Join('/', new[] { AsyncColumnSummary(sharedInitialNames, sharedInitialSizes) }
                             .Concat(additionalInitialNames.Select((names, index) => AsyncColumnSummary(names, additionalInitialSizes[index]))))
                         : "none";
                     Console.WriteLine($"synthetic-async-recursive-size-shell-view: shell-notification-requery={asyncViewRequeryObserved}; all-column-values-ready={allAsyncColumnValuesReady}; child-size={(childIndexForAsync >= 0 ? initialSizes[childIndexForAsync] : "<missing>")}; shared-columns=[{asyncSharedColumnSummaries}]; folders={onDemandFolderCount}; scans={asyncScans}; scan-delay-ms={asyncScanDelayMs}; queue-rejected-scans={asyncQueueRejectedScans}; notifications={asyncNotificationCount}; peak-workers={asyncPeakWorkers}; enum-delta={asyncEnumDelta}; details-of-size={ReadCounter(module, "GetSyntheticSizeDetailsOfItemCount")}");
-                    Console.WriteLine($"synthetic-recursive-size-cache-lookups: hits={recursiveSizeCacheHits}; misses={recursiveSizeCacheMisses}; capacity-evictions={recursiveSizeCacheEvictions}; snapshots={ReadCounter(module, "GetSyntheticRecursiveSizeCacheSnapshotCountForProbe")}; payload-bytes={ReadCounter(module, "GetSyntheticRecursiveSizeCachePayloadBytesForProbe")}; capacity={GetRecursiveSizeCacheCapacity()}");
+                    Console.WriteLine($"synthetic-recursive-size-cache-lookups: hits={recursiveSizeCacheHits}; misses={recursiveSizeCacheMisses}; capacity-evictions={recursiveSizeCacheEvictions}; eviction-search-steps={recursiveSizeCacheEvictionSearchSteps}; eviction-search-us={recursiveSizeCacheEvictionSearchMicroseconds}; indexed-heap-auxiliary-estimate-bytes={recursiveSizeCacheIndexedHeapAuxiliaryBytes}; snapshots={ReadCounter(module, "GetSyntheticRecursiveSizeCacheSnapshotCountForProbe")}; payload-bytes={ReadCounter(module, "GetSyntheticRecursiveSizeCachePayloadBytesForProbe")}; capacity={GetRecursiveSizeCacheCapacity()}");
                     var scanCountMatchesScenario = asyncExactInvalidationProbe || asyncShellNotificationInvalidationProbe
                         ? asyncScans > expectedAsyncScanCount
                         : asyncScans == expectedAsyncScanCount;
