@@ -246,6 +246,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunNetworkPlacesChildDropTargets();
         if (args.Length == 1 && args[0] == "--explorerbrowser-color-notifications-private-desktop")
             return PrivateDesktopShellProbe.RunExplorerBrowserColorNotifications();
+        if (args.Length == 1 && args[0] == "--explorerbrowser-wrapper-object-private-desktop")
+            return PrivateDesktopShellProbe.RunExplorerBrowserWrapperObject();
         if (args.Length == 1 && args[0] == "--column-filter-capability-private-desktop")
             return PrivateDesktopShellProbe.RunColumnFilterCapability();
         if (args.Length == 1 && args[0] == "--ishellview-menu-activation-private-desktop")

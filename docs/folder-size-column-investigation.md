@@ -1554,3 +1554,11 @@ Q-Dir 官方 FAQ 提供“排序时忽略文件夹大小”的选项，并说明
 `--static-shell-column-folder-smoke` 先以红测确认此前忽略开关不起作用；实现后通过无窗口对照：夹具中的 10 B 文件夹默认排在 4 B 文件之后，启用忽略后该文件夹按 0 B 排到文件之前。两次比较都没有增加目录指标调用或遍历条目数，证明排序比较不会触发递归扫描。原生 adapter `/W4 /WX` 构建、NativeProbe Release 构建（0 警告/错误）、静态 folder contract 及按需异步计数 smoke 均通过；Shell view 窗口未创建。
 
 边界：这是 NativeProbe 内部排序合同，不是产品设置，也未验证 Q-Dir 忽略模式的精确文件/文件夹相对次序或可见 Shell 排序体验；需后续与 Q-Dir 实际行为对照。ExplorerBrowser 产品、用户配置与 release 均未修改。
+
+### 2026-11-01：ExplorerBrowser 直接浏览 adapter 对象的身份保留检查
+
+为缩小包装真实目录迁移门槛，新增隔离 NativeProbe：把真实临时文件夹绑定为 filesystem `IShellFolder2`，由 `CreateStrictShellFolderAdapter` 包装后直接传给 `IExplorerBrowser.BrowseToObject`，再从 Browser 当前 `IShellView` 的 `IFolderView2.GetFolder` 读回 folder COM identity 与路径。`BrowseToObject` 返回 `S_OK`，当前路径仍是目标物理目录，但活动 view 的 folder identity 与传入 adapter 不同；因此 ExplorerBrowser 会沿 adapter 暴露的 PIDL 重新绑定为普通 filesystem folder，直接传对象不足以保留自定义列 provider。
+
+NativeProbe Release 构建 0 警告/错误，隔离 Private Desktop 探针退出码 0，前台与 last-input tick 均未变化。首次尝试暴露父 STATIC 窗口同步销毁会在 Shell/COM 路径挂起；按既有 Private Desktop 生命周期处理改为让隔离进程退出回收父 HWND 后复跑通过。窗口只在单独 Desktop 创建，对用户不可见。
+
+该结果只排除“直接 BrowseToObject 传 adapter”这一捷径，不验证注册 namespace PIDL、包装子 PIDL 的真实物理操作转发或递归大小列在 ExplorerBrowser 中的显示/排序；后续接线原型必须让 Shell 通过可解析的包装 namespace PIDL 重新进入 adapter。产品及 release 未修改。

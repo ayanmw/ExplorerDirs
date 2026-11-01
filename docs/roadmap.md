@@ -5682,3 +5682,9 @@ Q-Dir 对照确认 Type 列的递归 counts 也需要复用后台扫描值。Nat
 按 Q-Dir 官方提供的“忽略文件夹大小排序”性能选项，在 NativeProbe 中验证开关合同：默认 10 B 递归文件夹排在 4 B 文件之后；启用忽略时文件夹按 0 B 比较并排在该文件之前，文件仍按实际字节数比较。两种排序比较均未触发额外递归目录扫描。原生 adapter `/W4 /WX`、NativeProbe Release（0 警告/错误）、静态 folder contract 和按需异步计数 smoke 通过，均为无窗口验证。
 
 该选项的精确排序语义尚未与 Q-Dir 可见行为核对；代码仅在 NativeProbe，ExplorerBrowser 产品及 release 未变。详情见[递归大小列调查](folder-size-column-investigation.md#2026-11-01递归文件夹大小忽略排序合同)。
+
+### 2026-11-01：ExplorerBrowser 直接浏览 adapter 身份检查
+
+隔离 NativeProbe 将真实临时目录绑定的 `IShellFolder2` 包装为 adapter 后传入 `IExplorerBrowser.BrowseToObject`。调用返回 `S_OK`，但从活动 `IFolderView2.GetFolder` 读回的 folder identity 不等于 adapter，当前路径仍为物理目录；因此 ExplorerBrowser 重新绑定了 adapter 暴露的 PIDL，直接传对象不能保留自定义列 provider。NativeProbe Release 构建 0 警告/错误，Private Desktop watchdog 退出码 0，前台/输入守卫通过。
+
+这排除了直接传 adapter 的捷径，不证明注册 namespace PIDL 与真实物理 Shell 操作可用；下一步仍需在隔离注册/退出清理下验证包装 namespace PIDL 的 ExplorerBrowser 导航。产品和 release 未改。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01-explorerbrowser-直接浏览-adapter-对象的身份保留检查)。
