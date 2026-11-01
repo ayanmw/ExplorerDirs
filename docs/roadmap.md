@@ -5963,3 +5963,5 @@ peer SysListView32 现读取 Shell 文件夹的名称、大小、项目类型、
 2026-11-02 隐藏 HostProbe 排序重绘对照：Shell 相反方向/目标方向成对排序在未抑制 redraw 时最终方向不稳定；ListView redraw 抑制并插入 100 ms dispatcher 间隔的最近 3 轮保持数值顺序、方向、选区和焦点，但内部行数仍短暂 0→2，隐藏宿主没有可用绘制证据。仅研究探针，不接产品。按用户确认，下一阶段推进显式按需递归大小列原型。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-02-隐藏视图成对排序与-redraw-对照)。
 
 2026-11-02 按需递归列惰性扫描复验：列关闭时宽/多行/深层三个 synthetic enumeration 均未递归遍历；列启用时 100 个直接行请求遍历 1,000 个夹具子项约 20 ms。异步值请求首读先返回、最多 2 workers、重复读命中缓存、关闭 view 可取消 8 个排队项。该 smoke 不创建 Shell view，规模仅为合成夹具；不能外推真实大型/网络目录。按需原型仍隔离在独立标签，普通目录不自动扫描。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-02按需递归列的惰性与异步扫描合同复核)。
+
+2026-11-02 生产 ExplorerBrowserHost 按需列复验：产品 adapter 的隐藏宿主读到 5/29 B、排序键升序且前台不变，但异步值到达后没有自动重排；显式 Shell 排序后顺序正确，同时 Shell/ListView/export 发生 0→2。可见原型验收前仍需解决异步排序触发与空列表帧问题；隐藏宿主不能证明像素闪烁。

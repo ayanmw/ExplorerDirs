@@ -2707,3 +2707,7 @@ HostProbe 在同一 STA 调度流程内先发相反方向 Shell 排序，再发�
 用户确认按需推进递归大小列原型。本轮复跑底层 synthetic provider 合同：关闭递归列时，宽目录 1 行、100 行、深层 2 行三类枚举的递归指标调用和子树遍历均为 0；打开列后，100 个直接行触发 100 次递归指标计算并遍历 1,000 个夹具子项，测得约 20.3 ms。此为小型本机合成夹具，不代表大型、慢盘或网络目录成本。
 
 异步按需 smoke 确认首次列值读取在扫描完成前返回，8 个请求进入后台队列，最多 2 个 worker 并发；后台发布精确 10 B / 2 files / 1 directory，重复值读取命中缓存，视图释放时取消 8 个未完成请求。该 smoke 没创建 Shell view；它只验证合成 adapter 的扫描/排队/缓存生命周期。产品 ExplorerBrowser 隐藏闭环另有既有证据，但可见列渲染、超大目录进度/取消反馈、重复标签共享扫描、导航与标签关闭竞争，以及慢速/断连网络位置仍未通过验收。原型继续保持独立标签入口，普通 Explorer 文件夹不触发递归扫描。
+
+### 2026-11-02：生产 ExplorerBrowserHost 按需列排序复验
+
+重新运行产品 adapter + 生产 `ExplorerBrowserHost` 隐藏 HostProbe：volatile profile namespace 注册和跨进程 provider 枚举成功，真实 Shell view 读取到 `folder-small=5 B`、`folder-large=29 B`，递归列排序键保持升序，前台 HWND 未变化。异步值到达后 Shell 没有自动重排，实际初始顺序仍为 `29→5 B`；手动 Shell `sortascending` 后顺序变为 `5→29 B`，但 Shell `IFolderView`、原生 ListView 与导出观察均出现 `0→2` 暂时空列表。该运行确认底层扫描值链已进入产品宿主，但异步排序刷新仍是原型启用前的阻断项；隐藏窗口无绘制证据，不据此断言用户可见闪烁时长或可由 redraw suppression 消除。
