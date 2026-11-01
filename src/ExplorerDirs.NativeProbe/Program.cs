@@ -28,6 +28,10 @@ internal static class Program
             return RegisteredMultiRootPidlProbe.Run(volatileRegistration: true);
         if (args.Length == 1 && args[0] == "--shell-namespace-profile-owners-private-desktop")
             return PrivateDesktopShellProbe.RunShellNamespaceProfileOwners();
+        if (args.Length == 1 && args[0] == "--shell-link-profile-clone-private-desktop")
+            return PrivateDesktopShellProbe.RunShellLinkProfileClone();
+        if (args.Length == 4 && args[0] == "--shell-link-profile-clone-child")
+            return ShellLinkProfileCloneProbe.RunChild(args[1], args[2], args[3]);
         if (args.Length == 9 && args[0] == "--shell-namespace-owner-profile-child")
             return ShellNamespaceOwnerProbe.RunChild(args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8]);
         if (args.Length == 5 && args[0] == "--registered-path-pidl-child")

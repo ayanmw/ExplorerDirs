@@ -149,6 +149,10 @@ internal static class PrivateDesktopShellProbe
         Run("shell-namespace-profile-owners", ShellNamespaceOwnerProbe.Run,
             TimeSpan.FromSeconds(45), initializeOle: true);
 
+    internal static int RunShellLinkProfileClone() =>
+        Run("shell-link-profile-clone", ShellLinkProfileCloneProbe.Run,
+            TimeSpan.FromSeconds(30), initializeOle: true);
+
     internal static int RunColumnFilterCapability() =>
         Run("column-filter-capability", ColumnFilterCapabilityProbe.Run, TimeSpan.FromSeconds(35));
 

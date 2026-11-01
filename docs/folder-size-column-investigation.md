@@ -2519,4 +2519,10 @@ NativeProbe Release 构建 0 警告/错误；Private Desktop watchdog exit 0，�
 
 新增 `--shell-namespace-profile-clone-smoke`，用生产 `SessionStore.Render` 生成带 provider parsing name 的完整会话，将其中 CLSID 改为隔离副本身份后再经 `SessionStore.ParseComplete` 读回，并核对新路径、视图模式和排序方向。定向 smoke 通过；`scripts/publish-smoke.ps1` 也再次通过。首次构建发现新用例漏传 `ViewState.GroupKey` 且 CLI 分支使用了未限定命名空间，修正后 Release `dotnet run` exit 0。
 
-这补上了此前发布 smoke 的会话格式缺口，仍只验证有效会话文本重映射；未验证 QuickLinks `.lnk` 内 Shell PIDL 在换注册 CLSID 后是否可重用、实际克隆 profile 启动或注册 owner 生命周期。没有启动 GUI、修改产品运行配置或触碰 release。下一步创建临时 Shell Link 保存 provider 根 PIDL，切换到另一 CLSID 注册后分别测试 Shell parsing name、folder bind 和链接目标解析；只有全链路通过，才决定隔离发布是否可以原样复制 PIDL，否则设计可恢复的 profile 内链接身份存储。逐行递归大小列仍未接入产品。
+这补上了此前发布 smoke 的会话格式缺口，仍只验证有效会话文本重映射；尚未验证 QuickLinks `.lnk` 内 Shell PIDL 在换注册 CLSID 后是否可重用、实际克隆 profile 启动或注册 owner 生命周期。没有启动 GUI、修改产品运行配置或触碰 release。
+
+### 2026-11-02：不同 profile CLSID 下 Shell Link PIDL 复用探针
+
+新增 Private Desktop NativeProbe，创建 A/B 两个 volatile provider CLSID 指向同一个临时目录，用 A 的绝对 PIDL 写入 `.lnk`，移除 A 的 CLSID 与 Desktop NameSpace 注册，再从独立子进程仅保留 B 注册后读取链接。NativeProbe Release 构建 0 警告/错误，watchdog exit 0：链接可读回 PIDL，但 A/B 同路径的绝对 PIDL 字节不同；B 自身根目录能解析和绑定，A 保存的链接在 B-only 子进程中 `SHGetNameFromIDList` 不可用、Shell folder bind 的目标内容检查失败；`IShellLink.GetPath` 返回空。四个临时 volatile 注册键均确认清理，Private Desktop 前台与 last-input 未变。日志：`src/.state/native-probe-watchdog/20261102-043319-0cfd660e.stdout.log`。
+
+因此隔离发布原样复制 `.lnk` 无法保留未来 provider 快速链接；Shell Link 不提供可改写的路径字符串，必须为 app-owned 快速链接另存可迁移的 Shell parsing identity，并在目标 profile 注册后用新 CLSID 重建 PIDL。当前 provider 尚未接入产品，用户现有快速链接还不会指向它。下一步评估最小 companion metadata 格式并为 `QuickLinkStore` 增加读写与隔离发布重映射 smoke，再推进 App 注册 owner 生命周期。逐行递归大小列仍未接入产品或 release。
