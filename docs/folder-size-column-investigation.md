@@ -1462,3 +1462,9 @@ Native adapter `/W4 /WX` 与 NativeProbe Release 均构建成功，0 警告/错�
 再用 `large-view-sort-refresh` 场景检查 500 项列头排序：扫描仍为 501 次、队列拒绝 0，批次完成后离屏的 folder-401 排在 folder-400 前，folder-400 排在大小为 30 的 child 前，选中/焦点状态保留；比较阶段没有触发目录指标扫描。日志：`src/.state/native-probe-watchdog/20261101-async-single-view-500-sort.stdout.log`。NativeProbe Release build 通过，0 警告/错误。此结果仍来自隐藏 synthetic Shell view；ExplorerBrowser 产品没有递归大小列接线，也未做可见列表体验验收。
 
 为后续慢存储压力对照，在 NativeProbe 原生 adapter 中加入默认关闭的扫描延迟注入，环境变量 `EXPLORER_DIRS_NATIVEPROBE_ASYNC_SCAN_DELAY_MS` 可设置 0–1000 ms，并被计入单项扫描耗时；产品源码没有该开关。NativeProbe Release 与原生 adapter 构建通过，`git diff --check` 通过。当前未执行 `IShellView` 压力探针：仓库规则要求先有明确的空闲桌面授权，隐藏 Shell 宿主也可能影响前台。故尚无慢扫描下逐项队列与按 view 批次的完成率、队列拒绝或消息泵实测数据。
+
+### 2026-11-01：无窗口慢扫描队列验证
+
+将相同延迟开关接入不创建 Shell view 的 `--synthetic-async-on-demand-recursive-size-column-smoke`，用 8 个目录任务核对后台逐项队列。0 ms 基线累计扫描 9.472 ms（平均 1.184 ms）；50 ms 注入累计 413.776 ms（平均 51.722 ms）；200 ms 注入累计 1,616.081 ms（平均 202.010 ms）。三轮均使用 2 个 worker 完成 8/8 个快照，首次列值回调保持立即返回空值、之后读到 10 B，重复读取命中缓存；关闭 provider 后剩余 8 个排队请求均被取消，fixture 无 Shell view 创建。日志分别为 `src/.state/native-probe-watchdog/20261101-async-latency-smoke-0ms.stdout.log`、`...-50ms.stdout.log`、`...-200ms.stdout.log`。
+
+这只验证队列任务层面对人为延迟的处理与取消，不包含 `IShellView` 里的 DefView 行请求、菜单/排序消息泵、队列背压或 view 批次策略；不能据此判定慢磁盘/网络上的可见体验。下一步仍需在授权隔离桌面上对 500 项单 view 的逐行与按 view 批次做延迟对照，比较队列拒绝、值最终就绪、通知数、选区/焦点及消息泵响应，再决定是否继续产品架构评审。

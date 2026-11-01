@@ -104,6 +104,11 @@ public static class SyntheticShellSortProbe
     internal static int RunAsyncOnDemandRecursiveSizeColumnSmoke()
     {
         var fixture = Path.Combine(Path.GetTempPath(), $"ExplorerDirs-AsyncOnDemandRecursiveSize-{Guid.NewGuid():N}");
+        var delayText = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_SCAN_DELAY_MS");
+        var delayMilliseconds = string.IsNullOrWhiteSpace(delayText) ? 0 :
+            int.TryParse(delayText, out var parsedDelayMilliseconds) ? parsedDelayMilliseconds : -1;
+        if (delayMilliseconds is < 0 or > 1000)
+            throw new ArgumentOutOfRangeException(nameof(delayText), "Async scan latency injection must be between 0 and 1000 milliseconds.");
         try
         {
             for (var index = 0; index < 16; index++)
@@ -116,6 +121,8 @@ public static class SyntheticShellSortProbe
             var module = NativeLibrary.Load(FindAdapterLibrary());
             try
             {
+                Check(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
+                    "SetSyntheticAsyncRecursiveSizeScanDelayForProbe"))(delayMilliseconds));
                 var check = Marshal.GetDelegateForFunctionPointer<FolderTreeContractSmoke>(
                     NativeLibrary.GetExport(module, "RunSyntheticAsyncOnDemandRecursiveSizeColumnSmoke"));
                 Check(check(fixture));
@@ -123,9 +130,16 @@ public static class SyntheticShellSortProbe
                     NativeLibrary.GetExport(module, "GetSyntheticAsyncRecursiveSizePeakWorkerCountForProbe"))();
                 if (peakWorkers != 2)
                     throw new InvalidOperationException($"Expected the bounded async scanner to use its two worker slots, got {peakWorkers}.");
+                var scanElapsedMicroseconds = ReadCounter64(module, "GetSyntheticOnDemandSizeScanMicroseconds");
+                Console.WriteLine($"synthetic-async-recursive-size-latency: completed-scan-count=8; accumulated-scan-ms={scanElapsedMicroseconds / 1000.0:F3}; average-scan-ms={scanElapsedMicroseconds / 8000.0:F3}");
             }
-            finally { NativeLibrary.Free(module); }
-            Console.WriteLine("synthetic-async-on-demand-recursive-size-column-smoke: first-value-read-returns-before-scan=True; worker-publishes-10-bytes=True; repeated-value-read-uses-cache=True; peak-workers=2-of-2; shell-view-created=False");
+            finally
+            {
+                _ = Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
+                    "SetSyntheticAsyncRecursiveSizeScanDelayForProbe"))(0);
+                NativeLibrary.Free(module);
+            }
+            Console.WriteLine($"synthetic-async-on-demand-recursive-size-column-smoke: first-value-read-returns-before-scan=True; worker-publishes-10-bytes=True; repeated-value-read-uses-cache=True; peak-workers=2-of-2; scan-delay-ms={delayMilliseconds}; shell-view-created=False");
             return 0;
         }
         finally { Directory.Delete(fixture, recursive: true); }
