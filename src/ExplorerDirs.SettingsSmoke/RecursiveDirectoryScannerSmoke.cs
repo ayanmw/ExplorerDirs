@@ -3,6 +3,8 @@ using ExplorerDirs.NativeProbe;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
+using System.Security.AccessControl;
+using System.Security.Principal;
 
 namespace ExplorerDirs.SettingsSmoke;
 
@@ -660,9 +662,62 @@ internal static class RecursiveDirectoryScannerSmoke
             Directory.Delete(linkTarget, recursive: true);
         }
 
+        RunAccessDeniedRowProbe();
+
         static void Check(bool condition, string message)
         {
             if (!condition) throw new InvalidOperationException(message);
+        }
+
+        static void RunAccessDeniedRowProbe()
+        {
+            var deniedRoot = Path.Combine(Path.GetTempPath(), "ExplorerDirs-RecursiveDenied-" + Guid.NewGuid().ToString("N"));
+            var accessible = Path.Combine(deniedRoot, "accessible");
+            var denied = Path.Combine(deniedRoot, "denied");
+            Directory.CreateDirectory(deniedRoot);
+            DirectoryInfo? deniedInfo = null;
+            DirectorySecurity? originalSecurity = null;
+            FileSystemAccessRule? denyRule = null;
+            try
+            {
+                Directory.CreateDirectory(accessible);
+                Directory.CreateDirectory(denied);
+                deniedInfo = new DirectoryInfo(denied);
+                originalSecurity = deniedInfo.GetAccessControl(AccessControlSections.Access);
+                File.WriteAllBytes(Path.Combine(accessible, "payload.bin"), [1, 2, 3, 4, 5]);
+                File.WriteAllBytes(Path.Combine(denied, "payload.bin"), new byte[7]);
+                var currentUser = WindowsIdentity.GetCurrent().User ??
+                    throw new InvalidOperationException("The current Windows user has no security identifier.");
+                var deniedSecurity = deniedInfo.GetAccessControl(AccessControlSections.Access);
+                denyRule = new FileSystemAccessRule(currentUser,
+                    FileSystemRights.ListDirectory | FileSystemRights.ReadAttributes | FileSystemRights.Traverse,
+                    AccessControlType.Deny);
+                deniedSecurity.AddAccessRule(denyRule);
+                deniedInfo.SetAccessControl(deniedSecurity);
+
+                var results = HandleBoundRecursiveDirectoryScanner.ScanDirectoryTree(
+                    deniedRoot, [deniedRoot, accessible, denied], CancellationToken.None);
+                var rootResult = results[Path.GetFullPath(deniedRoot)].Summary;
+                var accessibleResult = results[Path.GetFullPath(accessible)].Summary;
+                var deniedResult = results[Path.GetFullPath(denied)].Summary;
+                if (rootResult != new RecursiveDirectoryScanResult(5, 1, 1, 1) ||
+                    accessibleResult != new RecursiveDirectoryScanResult(5, 1, 0, 0) ||
+                    deniedResult != new RecursiveDirectoryScanResult(0, 0, 0, 1))
+                    throw new InvalidOperationException($"A real access-denied child produced incomplete recursive-size rows: root={rootResult}; accessible={accessibleResult}; denied={deniedResult}.");
+                Console.WriteLine("PASS handle-bound recursive scan reports an ACL-denied child as unreadable while preserving accessible sibling totals");
+            }
+            finally
+            {
+                if (deniedInfo is not null && denyRule is not null)
+                {
+                    var security = deniedInfo.GetAccessControl(AccessControlSections.Access);
+                    security.RemoveAccessRuleSpecific(denyRule);
+                    deniedInfo.SetAccessControl(security);
+                }
+                if (deniedInfo is not null && originalSecurity is not null)
+                    deniedInfo.SetAccessControl(originalSecurity);
+                Directory.Delete(deniedRoot, recursive: true);
+            }
         }
     }
 }
