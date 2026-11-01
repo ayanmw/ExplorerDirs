@@ -2339,3 +2339,9 @@ HostProbe Release 构建通过，四种隐藏合成视图场景（正常/忽略�
 新增一次性 HostProbe 开关，在唯一随机 CLSID 下保留临时 `HKCU\Software\Classes\CLSID` COM 类注册，但跳过 `Explorer\Desktop\NameSpace` 注册。父进程写 INI 后启动独立子进程；子进程能加载 NativeAdapter 和 SessionStore，但生产 `ExplorerBrowserHost` 在 20 秒内未能恢复 `::{CLSID}\edpath:...` 路径，探针失败并由父进程清除临时 CLSID 与夹具。相同 Release 二进制以完整临时 CLSID + Desktop NameSpace 注册运行的正向对照退出码为 0。
 
 结论限定为：当前以 Shell parsing name 跨进程保存/恢复的原型需要 Desktop NameSpace 注册；单独的每用户 COM 类注册不足以恢复该路径。这并未证明任何无注册表方案都不可行。若继续追求绿色部署，需要另做宿主原型：应用进程直接实例化 provider 的 `IShellFolder` 并通过 ExplorerBrowser 对象导航接口挂载，同时设计应用自有的可持久化位置标识；该路径会改变 Host 的导航/恢复边界，需单独评审，当前不进入产品。逐行递归扫描仍必须按用户显式动作触发，不能在普通导航/刷新时自动扫描。
+
+### 2026-11-02：ExplorerBrowser 对象导航无法保留文件系统包装层
+
+运行现有 `ExplorerBrowserWrapperProbe` 的独立 Private Desktop 验证：`IExplorerBrowser::BrowseToObject` 对包装后的物理文件夹返回 `S_OK`，但 `IFolderView2.GetFolder` 返回的身份不是包装对象，当前路径已解析回原文件系统目录。Private Desktop 前台守卫、输入状态与隔离清理均通过。微软接口说明该方法会从传入对象取得 IDList 并按 PIDL 导航，因此 `BrowseToObject` 成功本身不能证明 Shell 保留了传入的 provider 对象。[IExplorerBrowser::BrowseToObject](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-iexplorerbrowser-browsetoobject)
+
+该结果排除了“把普通文件系统 `IShellFolder` 包一层后直接交给现有 ExplorerBrowser，即可在无注册情况下保留逐行派生列”的简单接法；不排除可解析的虚拟 CLSID namespace 对象导航，也不等同于完整测试自定义 provider。结合上节无 Desktop NameSpace 时应用 parsing name 恢复失败，若要在绿色部署中继续保留 ExplorerBrowser，仍需有 Shell 可解析的注册 namespace；免注册方案更适合转向应用直接承载 `IShellView`、由应用恢复自有位置身份的隔离迁移原型。产品 Host 尚未改变。
