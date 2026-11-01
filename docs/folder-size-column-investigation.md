@@ -2483,3 +2483,9 @@ NativeProbe Release 构建 0 警告/错误；Private Desktop watchdog exit 0，�
 此前的 owner-only 探针验证了 B 在 A 注销后重新解析仍读到专属文件/29 B；本次把 profile B 的首个真实 ExplorerBrowser 留在 B owner 子进程中。A 注销后，B 通过已打开 view 的 `IFolderView2` 重新读取行数和 provider 内容；A 使用原 INI 中的 CLSID 重建注册并打开自己的 view 后，B 再复验一次；最后 B owner 退出，A 的 view 仍读到 13 B。A、B 各自的两棵 volatile key 在协调进程中清理并验证。
 
 NativeProbe Release 构建 0 警告/错误；Private Desktop watchdog exit 0，前台与 last-input 未变。日志：`src/.state/native-probe-watchdog/20261102-035411-c1fdabb9.stdout.log` 与 `.stderr.log`。这证实两个不同 profile 的注册身份隔离、已打开 ExplorerBrowser view 在另一个 profile 正常注销/同 CLSID 重开期间保持 provider 读值，以及 owner 退出后协调者可清理 volatile keys。第二个同进程 ExplorerBrowser 的打开实验卡在 `BrowseToIDList`，不计通过；为把本次验证限定在 owner 存活期与注册隔离，测试子进程以进程退出释放 Shell 对象，正常 COM/view teardown 未纳入本次证据。仍未验证产品多窗口注册 owner、崩溃/强杀后的孤儿 key 清理、并发启动竞态、可见 Desktop DefView 或应用接线。volatile namespace 注册尚未接入产品；这不授权把 Shell namespace 路径列作为正式用户功能启用。
+
+### 2026-11-02：四根视图的慢速在途扫描退役
+
+复用四个不同根目录、每根四个目标目录的在途退役场景，把每个文件项的隔离延迟从 10 ms 提高到 50 ms。放行后等待两个 worker 已启动且累计访问 32 个条目，再同时销毁四个 view。Private Desktop watchdog exit 0；`initial-scans=2`、`scan-attempts=2`、`entries-before=32`、`entries-after=32`、发布结果 `0→0`、通知 `0→0`、四个 batch 均结束。相较 10 ms 场景额外完成 2 项，50 ms 场景在销毁时没有额外推进；没有在途目录结果写回或 Shell 更新通知。stderr 为 0 B，前台、输入及隔离清理守卫通过。日志：`src/.state/native-probe-watchdog/20261102-042047-7a1cf1b6.stdout.log`、`.stderr.log`。
+
+这个受控延迟只验证 NativeProbe 的取消检查点和退休后的发布抑制；它不是实际磁盘 I/O 时延，也未接入产品 ExplorerBrowser。结果支持把扫描留在后台并在 view 退役时取消，但对真实慢盘取消粒度、UI 更新、产品内存和视觉闪烁仍无结论。产品代码与发布版未改变。
