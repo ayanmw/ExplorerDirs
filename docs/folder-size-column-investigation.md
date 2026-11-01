@@ -1416,3 +1416,11 @@ Shell 通知现由有界队列合并：首个待发送更新后等待最多 200m
 四视图结果说明同进程 synthetic provider 的有界快照 store 能在四个共享根 view 之间避免重复扫描；五次合并变更通知使四个活动 view 各产生一次聚合重枚举。当前仍未覆盖四个不同/部分重叠根目录、真实磁盘和网络慢 I/O、取消/关闭竞争、ExplorerBrowser 产品接线或可见刷新。下一步验证四个不同根目录共享 worker 时的队列饱和、取消与逐 view 回填，再决定产品列集成门槛。
 
 日志：`src/.state/native-probe-watchdog/20261101-122747-98b51977.stdout.log`、`src/.state/native-probe-watchdog/20261101-122850-1e74e1e1.stdout.log`；100 目录对照：`src/.state/native-probe-watchdog/20261101-122817-16b85b79.stdout.log`；双视图兼容复测：`src/.state/native-probe-watchdog/20261101-122830-385bfe76.stdout.log`。
+
+### 2026-11-01：四个不同根目录的异步递归大小回填
+
+将四 view 隐藏 WPF `IShellView` 探针扩展为每个 view 绑定独立的 `Pane1`–`Pane4` 根目录，并记录队列拒绝计数。100 个目录/根、512 条缓存容量下，四个 view 完成 404 次唯一目录扫描，重复 0，拒绝 0，发送 9 次合并通知、聚合 `EnumObjects` 增量 4；四份 102 行值均正确，选区/焦点全部保留。500 个目录/根、2,048 条缓存容量下，四 view 完成 2,004 次唯一扫描，重复 0，拒绝 0，发送 27 次合并通知、聚合枚举增量 5；四份 502 行均读回正确值并保留各自状态。500 根场景创建约 20,000 个夹具文件。四个共享同根的 100 目录回归也通过：扫描 101 次、重复 0、拒绝 0、通知 2 次、枚举增量 4。Release NativeProbe 构建 0 警告/错误；各次 Private Desktop watchdog exit 0，前台、最后输入和清理守卫通过。
+
+首次把 `WaitForNames` 的稳定窗口设为 2.5 秒时，50–100 目录的不同根场景曾间歇超时并读到空列表；回看失败轮次的底层 `EnumObjects` 已成功枚举 102 项，但列表尚未稳定。将探针等待上限扩到 10 秒后，50、100、500 目录场景均通过。因此该现象属于探针等待门槛不足，不能归因于目录枚举失败或通知根路径错配。
+
+需要区分：500 目录四根场景总共提交 2,004 个独立扫描请求，但实际队列拒绝数为 0；这没有验证不同根目录下的队列饱和/拒绝后重试。既有单视图压力合同覆盖过 256 项队列拒绝与重试，不同根并发饱和仍待显式压测。本探针依旧只证明同进程 synthetic provider 和隐藏 DefView，不代表 ExplorerBrowser 产品、多进程、慢网络路径或可见刷新观感。日志：`src/.state/native-probe-watchdog/20261101-125102-354991af.stdout.log`、`src/.state/native-probe-watchdog/20261101-125131-94eec217.stdout.log`、`src/.state/native-probe-watchdog/20261101-125251-8ca33e73.stdout.log`。

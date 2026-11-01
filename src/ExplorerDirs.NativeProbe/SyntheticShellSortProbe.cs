@@ -312,8 +312,13 @@ public static class SyntheticShellSortProbe
              !string.IsNullOrWhiteSpace(asyncSharedViewCountText));
         var asyncSharedViewCount = string.IsNullOrWhiteSpace(asyncSharedViewCountText) ? 2 :
             int.TryParse(asyncSharedViewCountText, out var parsedAsyncSharedViewCount) ? parsedAsyncSharedViewCount : -1;
+        var asyncSharedViewRootMode = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_SHARED_VIEW_ROOTS") ?? "same";
+        var asyncSharedViewDistinctRoots = asyncSharedViewProbe && asyncSharedViewRootMode == "distinct";
         if (asyncSharedViewProbe && asyncSharedViewCount is not (2 or 4))
             throw new ArgumentOutOfRangeException(nameof(asyncSharedViewCountText), "The shared recursive-size view probe accepts two or four active views.");
+        if (asyncSharedViewRootMode is not ("same" or "distinct") ||
+            (asyncSharedViewRootMode == "distinct" && (!asyncSharedViewProbe || asyncSharedViewCount != 4)))
+            throw new ArgumentException("Distinct recursive-size roots require the four-view shared-store probe.", nameof(asyncSharedViewRootMode));
         if (asyncSharedViewProbe && (!recursiveDirectorySizeSortOnly || largeViewSortProbe || twoViewDistinctLocations || onDemandFolderCount < 2))
             throw new ArgumentException("The async shared-view probe requires the recursive-size view fixture, a single shared root, and no separate large-view sort strategy.");
         if (largeViewSortProbe && (!onDemandRecursiveSize || onDemandFolderCount == 0))
@@ -347,6 +352,11 @@ public static class SyntheticShellSortProbe
                 File.WriteAllText(Path.Combine(firstPaneFolder, "pane-1-original.txt"), "pane 1");
                 File.WriteAllText(Path.Combine(secondPaneFolder, "pane-2-original.txt"), "pane 2");
             }
+            else if (asyncSharedViewDistinctRoots)
+            {
+                for (var paneIndex = 1; paneIndex <= asyncSharedViewCount; paneIndex++)
+                    Directory.CreateDirectory(Path.Combine(backingFolder, $"Pane{paneIndex}"));
+            }
             if (recursiveDirectorySizeSortOnly)
             {
                 Directory.CreateDirectory(Path.Combine(backingFolder, "child", "nested"));
@@ -362,6 +372,24 @@ public static class SyntheticShellSortProbe
                         for (var fileIndex = 0; fileIndex < 10; fileIndex++)
                             File.WriteAllBytes(Path.Combine(loadProbeFolder, $"item-{fileIndex:D2}.bin"),
                                 largeViewSortProbe && (folderIndex == 0 || folderIndex == 400) && fileIndex == 0 ? new byte[11] : [0x01]);
+                    }
+                }
+                if (asyncSharedViewDistinctRoots)
+                {
+                    for (var paneIndex = 1; paneIndex <= asyncSharedViewCount; paneIndex++)
+                    {
+                        var panePath = Path.Combine(backingFolder, $"Pane{paneIndex}");
+                        Directory.CreateDirectory(Path.Combine(panePath, "child", "nested"));
+                        File.WriteAllBytes(Path.Combine(panePath, "child", "direct.bin"), new byte[6]);
+                        File.WriteAllBytes(Path.Combine(panePath, "child", "nested", "deep.bin"), new byte[4]);
+                        File.WriteAllBytes(Path.Combine(panePath, "small.bin"), new byte[4]);
+                        for (var folderIndex = 0; folderIndex < onDemandFolderCount; folderIndex++)
+                        {
+                            var loadProbeFolder = Path.Combine(panePath, $"folder-{folderIndex:D3}");
+                            Directory.CreateDirectory(loadProbeFolder);
+                            for (var fileIndex = 0; fileIndex < 10; fileIndex++)
+                                File.WriteAllBytes(Path.Combine(loadProbeFolder, $"item-{fileIndex:D2}.bin"), [0x01]);
+                        }
                     }
                 }
                 if (shellWindowScrollProbe)
@@ -427,6 +455,7 @@ public static class SyntheticShellSortProbe
         var additionalHostPointers = new nint[additionalParents.Length];
         var additionalHosts = new StreamViewHost?[additionalParents.Length];
         var additionalViewWindowsCreated = new bool[additionalParents.Length];
+        var additionalRootPidls = asyncSharedViewDistinctRoots ? new nint[asyncSharedViewCount - 2] : [];
         var classKeyPath = $@"Software\Classes\CLSID\{{{syntheticFolderClassId:D}}}";
         var namespaceKeyPath = $@"Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{{{syntheticFolderClassId:D}}}";
         Console.WriteLine($"synthetic-shell-size-sort: run-id={fixtureId}; clsid={syntheticFolderClassId:B}; backing-fixture={Path.GetFileName(backingFolder)}; copy-fixture={Path.GetFileName(copyDestination)}");
@@ -484,6 +513,13 @@ public static class SyntheticShellSortProbe
                 // Same-root twin views cannot prove per-pane notification routing; resolve two child Shell locations instead.
                 Check(SHParseDisplayName($"::{syntheticFolderClassId:B}\\Pane1", 0, out firstViewRootPidl, 0, out _));
                 Check(SHParseDisplayName($"::{syntheticFolderClassId:B}\\Pane2", 0, out secondViewRootPidl, 0, out _));
+            }
+            else if (asyncSharedViewDistinctRoots)
+            {
+                Check(SHParseDisplayName($"::{syntheticFolderClassId:B}\\Pane1", 0, out firstViewRootPidl, 0, out _));
+                Check(SHParseDisplayName($"::{syntheticFolderClassId:B}\\Pane2", 0, out secondViewRootPidl, 0, out _));
+                for (var index = 0; index < additionalRootPidls.Length; index++)
+                    Check(SHParseDisplayName($"::{syntheticFolderClassId:B}\\Pane{index + 3}", 0, out additionalRootPidls[index], 0, out _));
             }
             Console.WriteLine("synthetic-shell-size-sort: Shell parsing name resolved through temporary Desktop\\NameSpace registration");
             if (factorySnapshotCacheOnly)
@@ -548,7 +584,7 @@ public static class SyntheticShellSortProbe
                     0x80000000, 20, 20, 900, 600, 0, 0, 0, 0);
                 if (parent2 == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create the second async shared-view probe parent.");
                 Check(Marshal.GetDelegateForFunctionPointer<CreateSyntheticView>(NativeLibrary.GetExport(module, "CreateSyntheticSortShellView"))(
-                    firstViewRootPidl, out folder2, out view2));
+                    asyncSharedViewDistinctRoots ? secondViewRootPidl : firstViewRootPidl, out folder2, out view2));
                 host2 = new StreamViewHost(parent2, []) { View = view2, BrowserSite = new ShellBrowserSite() };
                 hostPointer2 = Marshal.GetComInterfaceForObject(host2, typeof(IStreamProbeBrowser));
                 Check(At<CreateViewWindow>(view2, 9)(view2, 0, ref settings, hostPointer2, ref bounds, out _));
@@ -564,7 +600,8 @@ public static class SyntheticShellSortProbe
                     if (additionalParents[index] == 0)
                         throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), $"Could not create shared-view probe parent {index + 3}.");
                     Check(Marshal.GetDelegateForFunctionPointer<CreateSyntheticView>(NativeLibrary.GetExport(module, "CreateSyntheticSortShellView"))(
-                        firstViewRootPidl, out additionalFolders[index], out additionalViews[index]));
+                        asyncSharedViewDistinctRoots ? additionalRootPidls[index] : firstViewRootPidl,
+                        out additionalFolders[index], out additionalViews[index]));
                     additionalHosts[index] = new StreamViewHost(additionalParents[index], [])
                     {
                         View = additionalViews[index],
@@ -735,10 +772,12 @@ public static class SyntheticShellSortProbe
                     var asyncEnumDelta = ReadCounter(module, "GetSyntheticEnumObjectsCount") - initialEnumerationCount;
                     var asyncScans = ReadCounter(module, "GetSyntheticOnDemandSizeScanCount");
                     var asyncNotificationCount = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeNotificationCountForProbe");
+                    var asyncQueueRejectedScans = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeQueueRejectedScanCountForProbe");
                     var asyncPeakWorkers = ReadCounter(module, "GetSyntheticAsyncRecursiveSizePeakWorkerCountForProbe");
-                    Console.WriteLine($"synthetic-async-recursive-size-shell-view: shell-notification-requery={asyncViewRequeryObserved}; all-column-values-ready={allAsyncColumnValuesReady}; child-size={(childIndexForAsync >= 0 ? initialSizes[childIndexForAsync] : "<missing>")}; folders={onDemandFolderCount}; scans={asyncScans}; notifications={asyncNotificationCount}; peak-workers={asyncPeakWorkers}; enum-delta={asyncEnumDelta}; details-of-size={ReadCounter(module, "GetSyntheticSizeDetailsOfItemCount")}");
-                    if (!asyncViewRequeryObserved || !allAsyncColumnValuesReady || asyncScans != onDemandFolderCount + 1 || asyncNotificationCount > (asyncSharedViewProbe ? 64 : 16) || asyncPeakWorkers > 2)
-                        throw new IOException($"The hidden Shell view did not converge bounded asynchronous size rows: all-values-ready={allAsyncColumnValuesReady}; shared-values-ready={allSharedAsyncColumnValuesReady}; scans={asyncScans}; notifications={asyncNotificationCount}; peak-workers={asyncPeakWorkers}; folders={onDemandFolderCount}.");
+                    var expectedAsyncScanCount = (onDemandFolderCount + 1) * (asyncSharedViewDistinctRoots ? asyncSharedViewCount : 1);
+                    Console.WriteLine($"synthetic-async-recursive-size-shell-view: shell-notification-requery={asyncViewRequeryObserved}; all-column-values-ready={allAsyncColumnValuesReady}; child-size={(childIndexForAsync >= 0 ? initialSizes[childIndexForAsync] : "<missing>")}; folders={onDemandFolderCount}; scans={asyncScans}; queue-rejected-scans={asyncQueueRejectedScans}; notifications={asyncNotificationCount}; peak-workers={asyncPeakWorkers}; enum-delta={asyncEnumDelta}; details-of-size={ReadCounter(module, "GetSyntheticSizeDetailsOfItemCount")}");
+                    if (!asyncViewRequeryObserved || !allAsyncColumnValuesReady || asyncScans != expectedAsyncScanCount || asyncNotificationCount > (asyncSharedViewProbe ? 64 : 16) || asyncPeakWorkers > 2)
+                        throw new IOException($"The hidden Shell view did not converge bounded asynchronous size rows: all-values-ready={allAsyncColumnValuesReady}; shared-values-ready={allSharedAsyncColumnValuesReady}; scans={asyncScans}/{expectedAsyncScanCount}; queue-rejected-scans={asyncQueueRejectedScans}; notifications={asyncNotificationCount}; peak-workers={asyncPeakWorkers}; folders={onDemandFolderCount}.");
                     if (asyncSharedViewProbe)
                     {
                         var sharedChildIndex = Array.FindIndex(sharedInitialNames, name => string.Equals(name, "child", StringComparison.OrdinalIgnoreCase));
@@ -751,9 +790,9 @@ public static class SyntheticShellSortProbe
                         for (var index = 0; index < sharedSelectionPreserved.Length; index++)
                             sharedSelectionPreserved[index] = HasSelectionAndFocus(sharedListViews[index], sharedNamesByView[index], $"folder-{index + 1:D3}");
                         var allSelectionsPreserved = firstSelectionPreserved && sharedSelectionPreserved.All(preserved => preserved);
-                        Console.WriteLine($"synthetic-async-recursive-size-shared-view: roots=same; views={asyncSharedViewCount}; all-values-ready={allAsyncColumnValuesReady && allSharedAsyncColumnValuesReady}; shared-child-size={(sharedChildIndex >= 0 ? sharedInitialSizes[sharedChildIndex] : "<missing>")}; scans={asyncScans}; duplicate-scans={Math.Max(0, asyncScans - (onDemandFolderCount + 1))}; notifications={asyncNotificationCount}; enum-delta={asyncEnumDelta}; selected-focused-preserved={string.Join('/', new[] { firstSelectionPreserved }.Concat(sharedSelectionPreserved))}; rows={initialNames.Length}/{string.Join('/', sharedNamesByView.Select(names => names.Length))}");
+                        Console.WriteLine($"synthetic-async-recursive-size-shared-view: roots={(asyncSharedViewDistinctRoots ? "distinct" : "same")}; views={asyncSharedViewCount}; all-values-ready={allAsyncColumnValuesReady && allSharedAsyncColumnValuesReady}; shared-child-size={(sharedChildIndex >= 0 ? sharedInitialSizes[sharedChildIndex] : "<missing>")}; scans={asyncScans}; expected-unique-scans={expectedAsyncScanCount}; duplicate-scans={Math.Max(0, asyncScans - expectedAsyncScanCount)}; queue-rejected-scans={asyncQueueRejectedScans}; notifications={asyncNotificationCount}; enum-delta={asyncEnumDelta}; selected-focused-preserved={string.Join('/', new[] { firstSelectionPreserved }.Concat(sharedSelectionPreserved))}; rows={initialNames.Length}/{string.Join('/', sharedNamesByView.Select(names => names.Length))}");
                         if (!allSharedAsyncColumnValuesReady || !sharedValuesCorrect || !allSelectionsPreserved || asyncEnumDelta == 0)
-                            throw new IOException($"The {asyncSharedViewCount} active shared-root Shell views did not all refresh recursive-size rows while preserving independent selection/focus.");
+                            throw new IOException($"The {asyncSharedViewCount} active {asyncSharedViewRootMode}-root Shell views did not all refresh recursive-size rows while preserving independent selection/focus.");
                         if (asyncSharedViewCount > 2) return 0;
                     }
                     if (asyncOnDemandRecursiveSize && largeViewSortProbe)
@@ -1660,6 +1699,8 @@ public static class SyntheticShellSortProbe
             if (classRegistrationCreated) Registry.CurrentUser.DeleteSubKeyTree(classKeyPath, throwOnMissingSubKey: false);
             if (firstViewRootPidl != 0 && firstViewRootPidl != rootPidl) Marshal.FreeCoTaskMem(firstViewRootPidl);
             if (secondViewRootPidl != 0 && secondViewRootPidl != rootPidl && secondViewRootPidl != firstViewRootPidl) Marshal.FreeCoTaskMem(secondViewRootPidl);
+            foreach (var additionalRootPidl in additionalRootPidls)
+                if (additionalRootPidl != 0) Marshal.FreeCoTaskMem(additionalRootPidl);
             if (rootPidl != 0) Marshal.FreeCoTaskMem(rootPidl);
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-check-native-library-unload");
             if (module != 0)
@@ -3639,7 +3680,7 @@ public static class SyntheticShellSortProbe
 
     private static string[] WaitForNames(nint listView, nint module, string expectedName, int expectedCount = 3)
     {
-        var deadline = Environment.TickCount64 + 2500;
+        var deadline = Environment.TickCount64 + 10_000;
         string[] names;
         do
         {
@@ -3647,7 +3688,7 @@ public static class SyntheticShellSortProbe
             if (names.Length == expectedCount && names.Contains(expectedName, StringComparer.OrdinalIgnoreCase)) return names;
             Pump(50);
         } while (Environment.TickCount64 < deadline);
-        throw new TimeoutException($"The synthetic Shell view did not settle to {expectedCount} rows including '{expectedName}' within 2.5 seconds; current=[{string.Join('|', names)}].");
+        throw new TimeoutException($"The synthetic Shell view did not settle to {expectedCount} rows including '{expectedName}' within 10 seconds; current=[{string.Join('|', names)}].");
     }
 
     private static void SetListViewSelectionAndFocus(nint listView, string name, string[] names)

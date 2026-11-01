@@ -1595,6 +1595,7 @@ namespace
     volatile LONG g_syntheticAsyncRecursiveSizeActiveWorkersForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizePeakWorkersForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeNotificationsSentForProbe = 0;
+    volatile LONG g_syntheticAsyncRecursiveSizeQueueRejectedScanCountForProbe = 0;
     HANDLE g_syntheticAsyncRecursiveSizeScanGateForProbe = nullptr;
     volatile LONG g_syntheticExtendedMetadataColumnsForProbe = 0;
     volatile LONG g_syntheticRelativePercentColumnTypeForProbe = SHCOLSTATE_TYPE_INT;
@@ -1637,11 +1638,15 @@ namespace
             for (auto& worker : _workers) if (worker.joinable()) worker.join();
         }
 
-        HRESULT Enqueue(std::function<void()>&& task)
+        HRESULT Enqueue(std::function<void()>&& task, bool recursiveSizeScan = false)
         {
             std::lock_guard<std::mutex> lock(_mutex);
             if (_stopping) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
-            if (_tasks.size() >= kMaximumQueuedTasks) return HRESULT_FROM_WIN32(ERROR_NOT_ENOUGH_QUOTA);
+            if (_tasks.size() >= kMaximumQueuedTasks)
+            {
+                if (recursiveSizeScan) InterlockedIncrement(&g_syntheticAsyncRecursiveSizeQueueRejectedScanCountForProbe);
+                return HRESULT_FROM_WIN32(ERROR_NOT_ENOUGH_QUOTA);
+            }
             try { _tasks.push(std::move(task)); }
             catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
             _ready.notify_one();
@@ -3321,7 +3326,7 @@ namespace
                     InterlockedIncrement(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe);
                     self->Release();
                 };
-                enqueueResult = GetSyntheticAsyncRecursiveSizeQueue().Enqueue(std::move(task));
+                enqueueResult = GetSyntheticAsyncRecursiveSizeQueue().Enqueue(std::move(task), true);
             }
             catch (const std::bad_alloc&) { enqueueResult = E_OUTOFMEMORY; }
             catch (const std::system_error&) { enqueueResult = E_FAIL; }
@@ -5691,6 +5696,7 @@ extern "C" __declspec(dllexport) void WINAPI ResetSyntheticOnDemandSizeMetricsFo
     InterlockedExchange64(&g_syntheticOnDemandSizeScanMicroseconds, 0);
     InterlockedExchange(&g_syntheticAsyncRecursiveSizeNotificationsSentForProbe, 0);
     InterlockedExchange(&g_syntheticAsyncRecursiveSizePeakWorkersForProbe, 0);
+    InterlockedExchange(&g_syntheticAsyncRecursiveSizeQueueRejectedScanCountForProbe, 0);
 }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticDirectoryMetricsCallCount()
@@ -5710,6 +5716,9 @@ extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizePeakW
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizeNotificationCountForProbe()
 { return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeNotificationsSentForProbe, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizeQueueRejectedScanCountForProbe()
+{ return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeQueueRejectedScanCountForProbe, 0, 0); }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticRecursiveSizeCacheMissesDuringCompareCount()
 { return InterlockedCompareExchange(&g_syntheticRecursiveSizeCacheMissesDuringCompareCount, 0, 0); }
