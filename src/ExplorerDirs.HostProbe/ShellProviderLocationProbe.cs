@@ -250,6 +250,34 @@ internal static class ShellProviderLocationProbe
                     throw new TimeoutException("The production delayed virtual-sort scheduler did not restore ascending recursive-size order.");
                 ReportSortExperiment(sortStrategy, orderAfterAsyncFill, autoResorted, 0, observation, classId);
             }
+            else if (sortStrategy == "header-click")
+            {
+                stage = "native-header-click-sort";
+                var sortHeaderViewWindowField = hostType.GetField("_viewWindow", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                var header = FindSortHeader((nint)sortHeaderViewWindowField.GetValue(host)!);
+                var headerTexts = ReadNativeHeaderTexts(header, 2);
+                var recursiveColumn = Array.FindIndex(headerTexts, name =>
+                    name.Equals("Recursive Size", StringComparison.OrdinalIgnoreCase) || name == "递归大小");
+                if (recursiveColumn < 0)
+                    throw new InvalidOperationException($"The product Shell header omitted the recursive-size column: [{string.Join('|', headerTexts)}].");
+
+                ClickHeaderColumn(header, recursiveColumn);
+                var firstClick = ObserveProductSort(hostType, host, capture, readRows, readItemCounts,
+                    nameColumn, TimeSpan.FromMilliseconds(400));
+                ClickHeaderColumn(header, recursiveColumn);
+                var secondClick = ObserveProductSort(hostType, host, capture, readRows, readItemCounts,
+                    nameColumn, TimeSpan.FromSeconds(2), ["folder-small", "folder-large"]);
+                var observation = (
+                    Names: secondClick.Names,
+                    ShellItemCounts: firstClick.ShellItemCounts.Concat(secondClick.ShellItemCounts).Distinct().Order().ToArray(),
+                    ExportRowCounts: firstClick.ExportRowCounts.Concat(secondClick.ExportRowCounts).Distinct().Order().ToArray(),
+                    TransientReadErrors: firstClick.TransientReadErrors + secondClick.TransientReadErrors);
+                ReportSortExperiment(sortStrategy, orderAfterAsyncFill, autoResorted, 0, observation, classId);
+                if (!secondClick.Names.SequenceEqual(["folder-small", "folder-large"], StringComparer.OrdinalIgnoreCase))
+                    throw new TimeoutException("Native recursive-size header clicks did not restore ascending order.");
+                if (observation.ShellItemCounts.Contains(0) || observation.ExportRowCounts.Contains(0))
+                    throw new InvalidOperationException("Native recursive-size header sorting temporarily emptied the product Shell view.");
+            }
             else throw new ArgumentOutOfRangeException(nameof(sortStrategy), sortStrategy, "Unknown product sort experiment.");
 
             return 0;

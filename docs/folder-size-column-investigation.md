@@ -2596,6 +2596,12 @@ App 现复用 `FolderOpenRouter` profile 锁作为注册互斥边界：确认拿
 App Release build 现在在构建阶段编译产品 native adapter，并将 DLL 复制到 build 与 publish 输出；`publish.ps1` 必须带出该 DLL 并把它纳入 SHA256 manifest。`publish-smoke.ps1` 的 fixture payload 检查已覆盖 DLL 及哈希。验证：App Release build、NativeProbe Release build、临时 `dotnet publish` 检查、publish isolation smoke、产品 DLL 无 Shell view 激活 smoke 和 profile owner registration smoke 均通过；owner smoke 覆盖 volatile 注册字段、同身份残留重建、清理和外部注册保留。
 
 此处属于 App 源码接线，尚未在真实 App 进程启动/退出；未做可见 ExplorerBrowser、递归列逐行绘制/排序、会话重启或 GUI 验收，未修改 `releases`。现阶段 owner 只建立 provider 激活基础，未把所有普通文件夹标签自动重定向到 namespace，也没有给用户提供“递归大小”列选择入口。后续仍须先集中验收菜单/文件操作/导航和关闭顺序，再决定该 adapter 进入预览 release。
+
+### 2026-11-02：原生列标题排序候选观察器（待运行）
+
+HostProbe 新增 `--shell-provider-product-async-header-click` 诊断参数：使用真实产品 adapter、生产 ExplorerBrowserHost 与临时两个目录；等待 5/29 B 异步值完成后，向原生递归大小列标题发送两次点击，再同时观察 `IFolderView.ItemCount` 和导出快照行数，要求最终恢复 5→29 B 升序且采样期间不出现 0 行。此路径只在隐藏测试宿主内运行，不接产品排序回调。
+
+HostProbe Release build 通过，0 警告/错误，`git diff --check` 通过；本轮未运行该 Shell-hosted 参数，因为当前没有本轮空闲桌面确认。它目前只是待运行的诊断工具，没有证明标题点击能重排、行数稳定、焦点/选区保持或可见像素不闪。运行后需按实测修正或删除该候选，再更新排序结论；产品代码与 release 未改。
 ## 2026-11-02：App 中的逐行递归大小原型入口
 
 增加一个明确 opt-in 的菜单入口：在“开发者”菜单选择“在新标签打开逐行递归大小实验视图”，将当前确认的文件系统目录编码为 profile-owned Shell parsing name，再以 `Name → Recursive Size → Type` 的详细视图状态创建独立标签。原始标签与其列、排序和浏览状态不变；关闭实验标签即可回到原目录。会话保存的是 provider parsing name，启动时由既有 profile owner 重建 volatile 注册；Q-Dir 导出使用现有 codec 将该身份转回物理目录路径。

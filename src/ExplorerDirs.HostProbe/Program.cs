@@ -39,6 +39,8 @@ internal static class Program
             return ShellProviderLocationProbe.RunProductAdapterOnDemandAsync("single-sort-verb");
         if (args is ["--shell-provider-product-async-set-sort-columns"])
             return ShellProviderLocationProbe.RunProductAdapterOnDemandAsync("set-sort-columns");
+        if (args is ["--shell-provider-product-async-header-click"])
+            return ShellProviderLocationProbe.RunProductAdapterOnDemandAsync("header-click");
         if (args is ["--shell-provider-product-async-notification-burst"])
             return ShellProviderLocationProbe.RunProductAdapterOnDemandAsync("notification-burst");
         if (args is ["--shell-provider-location-no-desktop-namespace"])
