@@ -1,5 +1,11 @@
 # 逐行文件夹大小与子项计数列调查
 
+## 2026-11-01：自然目录创建与删除失效
+
+在双视图夹具的 `size-10-renamed` 内，通过 `IFileOperation.NewItem` 新建子目录并加入 4 B 文件；探针自然收到 `SHCNE_MKDIR (0x8)`，使已缓存的递归父目录摘要失效，两视图共享新摘要 24 B。随后用 `IFileOperation.DeleteItem` 删除该非空子目录。实际系统事件为两条 `SHCNE_DELETE (0x4)`（其中一条的路径是被删目录本身），没有发出 `SHCNE_RMDIR`；失效逻辑据目录路径退休递归父项缓存，两视图共享重扫回到 20 B。为覆盖 Shell/驱动可能发送的目录专用事件，失效归类同时识别 `SHCNE_MKDIR/RMDIR`。
+
+Release NativeProbe build 0 警告/错误；三轮 Private Desktop watchdog exit 0，行 ID、排序、选区/焦点、前台和隔离清理守卫通过。运行日志：`20261101-202828-2e0b0384`、`20261101-202837-5540c51d`、`20261101-202843-91570258`。这只验证本地临时夹具和探针缓存模型，不覆盖同路径替换竞态、通知丢失/合并、网络路径或产品接线。
+
 ## 2026-11-01：Shell 文件创建、删除、改名的自然通知
 
 将双视图递归列探针中的测试文件创建、删除和改名改由 `IFileOperation.NewItem/DeleteItem/RenameItem` 执行，移除这些操作后的手动 `SHChangeNotify`。`SHChangeNotifyRegister` 连续三轮自然收到 `SHCNE_CREATE (0x2)`、`SHCNE_DELETE (0x4)`、`SHCNE_RENAMEITEM (0x1)`，其中改名还观察到父目录 `SHCNE_UPDATEDIR (0x2000)`。每次都只失效 `size-10` 的递归摘要，两视图共享一次重扫，结果依次为 23/20/20 B，行 ID、排序、选区/焦点不变。Release NativeProbe build 0 警告/错误，Private Desktop watchdog 三轮 exit 0。

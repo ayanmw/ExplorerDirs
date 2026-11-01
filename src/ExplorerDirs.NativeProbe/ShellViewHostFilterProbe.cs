@@ -48,6 +48,8 @@ internal static class ShellViewHostFilterProbe
     private const uint LvmIsGroupViewEnabled = 0x10AF;
     private const uint ShellChangeCreated = 0x00000002;
     private const uint ShellChangeDeleted = 0x00000004;
+    private const uint ShellChangeMakeDirectory = 0x00000008;
+    private const uint ShellChangeRemoveDirectory = 0x00000010;
     private const uint ShellChangeRenamedItem = 0x00000001;
     private const uint ShellChangeRenamedFolder = 0x00020000;
     private const uint ShellChangeUpdatedItem = 0x00002000;
@@ -1563,7 +1565,8 @@ internal static class ShellViewHostFilterProbe
             string[] InvalidateFromShellChanges(int eventIndex)
             {
                 var updates = watcher.ChangeEvents.Skip(eventIndex)
-                    .Where(change => change.EventId is ShellChangeCreated or ShellChangeDeleted or ShellChangeRenamedItem or
+                    .Where(change => change.EventId is ShellChangeCreated or ShellChangeDeleted or ShellChangeMakeDirectory or
+                        ShellChangeRemoveDirectory or ShellChangeRenamedItem or
                         ShellChangeRenamedFolder or ShellChangeUpdatedItem or ShellChangeUpdatedDirectory)
                     .SelectMany(change => new[] { (change.EventId, Path: change.FirstPath), (change.EventId, Path: change.SecondPath) })
                     .Where(update => !string.IsNullOrWhiteSpace(update.Path) && Path.IsPathRooted(update.Path))
@@ -1571,6 +1574,7 @@ internal static class ShellViewHostFilterProbe
                 var updatedDirectories = updates.Where(update => update.EventId == ShellChangeUpdatedDirectory)
                     .Select(update => update.Path).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
                 var structuralPaths = updates.Where(update => update.EventId is ShellChangeCreated or ShellChangeDeleted or
+                        ShellChangeMakeDirectory or ShellChangeRemoveDirectory or
                         ShellChangeRenamedItem or ShellChangeRenamedFolder)
                     .Select(update => update.Path).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
                 var changedPaths = structuralPaths.Length > 0
@@ -1872,9 +1876,74 @@ internal static class ShellViewHostFilterProbe
                 throw new InvalidOperationException("The peer projections did not publish the renamed directory caption.");
             Console.WriteLine($"ishellview-peer-recursive-size-change: kind=folder-rename; operation=IFileOperation.RenameItem; natural-shell-notification=True; invalidated-roots={folderInvalidatedRoots.Length}; old-cache-retired=True; in-flight-old-path-scan-completed=True; stale-result-rejected=True; new-path-shared-scan=True; bytes={renamedDirectoryFirst.Result.Bytes}; row-id={firstSelected.Id}; selection-focus-preserved=True");
 
+            var nestedDirectory = Path.Combine(renamedDirectory, "nested");
+            var nestedCreateEventIndex = watcher.Events.Count;
+            var nestedParentItem = GetShellItem(renamedDirectory);
+            try
+            {
+                PerformShellFileOperation(operation => Marshal.ThrowExceptionForHR(At<NewItem>(operation, 20)(operation,
+                    nestedParentItem, 0x00000010, "nested", null, 0)));
+            }
+            finally { Marshal.Release(nestedParentItem); }
+            if (!Directory.Exists(nestedDirectory) ||
+                !watcher.WaitForAnySince(nestedCreateEventIndex, [ShellChangeMakeDirectory], TimeSpan.FromSeconds(5)))
+                throw new TimeoutException($"The Shell folder-create operation did not produce SHCNE_MKDIR: events=[{string.Join('|', watcher.ChangeEvents.Skip(nestedCreateEventIndex).Select(change => $"0x{change.EventId:X8}:{change.FirstPath}->{change.SecondPath}"))}].");
+            File.WriteAllBytes(Path.Combine(nestedDirectory, "nested.bin"), new byte[4]);
+            var nestedCreateInvalidated = InvalidateFromShellChanges(nestedCreateEventIndex);
+            if (nestedCreateInvalidated.Length != 1 || !string.Equals(nestedCreateInvalidated[0], renamedDirectory, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"SHCNE_MKDIR did not invalidate only its recursive parent: [{string.Join('|', nestedCreateInvalidated)}].");
+            var nestedCreateFirst = Request(renamedDirectory);
+            var nestedCreateSecond = Request(renamedDirectory);
+            if (!Task.WaitAll([nestedCreateFirst, nestedCreateSecond], TimeSpan.FromSeconds(10)) || scanStarts != 11 ||
+                nestedCreateFirst.Result.Bytes != 24 || !ReferenceEquals(nestedCreateFirst.Result, nestedCreateSecond.Result))
+                throw new InvalidOperationException($"The nested-folder creation did not share one fresh 24 B scan: scans={scanStarts}; bytes={nestedCreateFirst.Result.Bytes}; shared={ReferenceEquals(nestedCreateFirst.Result, nestedCreateSecond.Result)}.");
+            firstResults[renamedDirectory] = nestedCreateFirst.Result;
+            secondResults[renamedDirectory] = nestedCreateSecond.Result;
+            firstBytesById = ApplyRecursiveValues(firstList, firstProjection.Rows, firstResults);
+            secondBytesById = ApplyRecursiveValues(secondList, secondProjection.Rows, secondResults);
+            SortPeerListByRecursiveSize(firstList, firstBytesById);
+            SortPeerListByRecursiveSize(secondList, secondBytesById);
+            VerifySortedSelection(firstList, firstProjection.Rows, firstBytesById, firstIds, firstSelected.Id);
+            VerifySortedSelection(secondList, secondProjection.Rows, secondBytesById, secondIds, secondSelected.Id);
+
+            var nestedDeleteEventIndex = watcher.Events.Count;
+            var nestedShellItem = GetShellItem(nestedDirectory);
+            try
+            {
+                PerformShellFileOperation(operation => Marshal.ThrowExceptionForHR(At<DeleteItem>(operation, 18)(operation, nestedShellItem, 0)));
+            }
+            finally { Marshal.Release(nestedShellItem); }
+            var nestedDeleteNotified = watcher.WaitForAnySince(nestedDeleteEventIndex,
+                [ShellChangeRemoveDirectory, ShellChangeDeleted], TimeSpan.FromSeconds(5));
+            var nestedDirectoryDeleteEvent = watcher.ChangeEvents.Skip(nestedDeleteEventIndex).Any(change =>
+                (change.EventId is ShellChangeRemoveDirectory or ShellChangeDeleted) &&
+                string.Equals(change.FirstPath, nestedDirectory, StringComparison.OrdinalIgnoreCase));
+            if (Directory.Exists(nestedDirectory) || !nestedDeleteNotified || !nestedDirectoryDeleteEvent)
+                throw new TimeoutException($"The Shell folder-delete operation did not produce a directory removal event: directory-exists={Directory.Exists(nestedDirectory)}; matching-directory-event={nestedDirectoryDeleteEvent}; events=[{string.Join('|', watcher.ChangeEvents.Skip(nestedDeleteEventIndex).Select(change => $"0x{change.EventId:X8}:{change.FirstPath}->{change.SecondPath}"))}].");
+            var nestedDeleteInvalidated = InvalidateFromShellChanges(nestedDeleteEventIndex);
+            if (nestedDeleteInvalidated.Length != 1 || !string.Equals(nestedDeleteInvalidated[0], renamedDirectory, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"The nested-folder removal event did not invalidate only its recursive parent: [{string.Join('|', nestedDeleteInvalidated)}].");
+            var nestedDeleteFirst = Request(renamedDirectory);
+            var nestedDeleteSecond = Request(renamedDirectory);
+            if (!Task.WaitAll([nestedDeleteFirst, nestedDeleteSecond], TimeSpan.FromSeconds(10)) || scanStarts != 12 ||
+                nestedDeleteFirst.Result.Bytes != 20 || !ReferenceEquals(nestedDeleteFirst.Result, nestedDeleteSecond.Result))
+                throw new InvalidOperationException($"The nested-folder deletion did not share one fresh 20 B scan: scans={scanStarts}; bytes={nestedDeleteFirst.Result.Bytes}; shared={ReferenceEquals(nestedDeleteFirst.Result, nestedDeleteSecond.Result)}.");
+            firstResults[renamedDirectory] = nestedDeleteFirst.Result;
+            secondResults[renamedDirectory] = nestedDeleteSecond.Result;
+            firstBytesById = ApplyRecursiveValues(firstList, firstProjection.Rows, firstResults);
+            secondBytesById = ApplyRecursiveValues(secondList, secondProjection.Rows, secondResults);
+            SortPeerListByRecursiveSize(firstList, firstBytesById);
+            SortPeerListByRecursiveSize(secondList, secondBytesById);
+            VerifySortedSelection(firstList, firstProjection.Rows, firstBytesById, firstIds, firstSelected.Id);
+            VerifySortedSelection(secondList, secondProjection.Rows, secondBytesById, secondIds, secondSelected.Id);
+            var observedDirectoryDeleteEvent = watcher.ChangeEvents.Skip(nestedDeleteEventIndex)
+                .First(change => (change.EventId is ShellChangeRemoveDirectory or ShellChangeDeleted) &&
+                    string.Equals(change.FirstPath, nestedDirectory, StringComparison.OrdinalIgnoreCase)).EventId;
+            Console.WriteLine($"ishellview-peer-recursive-size-change: kind=nested-folder-create-delete; create-event=SHCNE_MKDIR; delete-event=0x{observedDirectoryDeleteEvent:X8}; invalidated-roots={nestedCreateInvalidated.Length + nestedDeleteInvalidated.Length}; bytes=[created:{nestedCreateFirst.Result.Bytes},deleted:{nestedDeleteFirst.Result.Bytes}]; shared-scans=True; selection-focus-preserved=True");
+
             if (GetForegroundWindow() != foreground || IsWindowVisible(parent))
                 throw new InvalidOperationException("The multi-view Shell probe changed foreground ownership or exposed its hidden parent.");
-            Console.WriteLine($"ishellview-peer-recursive-size-multiview: real-shell-views=2; shared-root=True; unique-directories={firstPaths.Length}; shared-scan-starts-initial=4; shell-notification-invalidated-roots={invalidatedRoots.Length}; shared-scan-starts-after-all-changes={scanStarts}; update/create/delete/rename/folder-rename=True; stale-old-path-result-rejected=True; peer-row-ids-stable=True; numeric-sort=True; selection-focus-preserved=True; production-scanner=True; product-integration=False; foreground-unchanged=True; parent-visible=False");
+            Console.WriteLine($"ishellview-peer-recursive-size-multiview: real-shell-views=2; shared-root=True; unique-directories={firstPaths.Length}; shared-scan-starts-initial=4; shell-notification-invalidated-roots={invalidatedRoots.Length}; shared-scan-starts-after-all-changes={scanStarts}; update/create/delete/rename/folder-rename/nested-folder-create-delete=True; stale-old-path-result-rejected=True; peer-row-ids-stable=True; numeric-sort=True; selection-focus-preserved=True; production-scanner=True; product-integration=False; foreground-unchanged=True; parent-visible=False");
         }
         finally
         {
