@@ -9,6 +9,12 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 
+if (args is ["--shell-provider-profile-store-smoke"])
+{
+    ShellProviderProfileStoreSmoke.Run();
+    return;
+}
+
 if (args is ["--column-layout-process-roundtrip"])
 {
     ExplorerDirs.SettingsSmoke.ColumnLayoutProcessSmoke.Run();

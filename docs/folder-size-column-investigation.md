@@ -2397,3 +2397,9 @@ HostProbe Release 构建通过，四种隐藏合成视图场景（正常/忽略�
 在生产 `ExplorerBrowserHost` 的注册 provider HostProbe 中，分别对根目录和嵌套子目录 parsing name 调用 `SHParseDisplayName` 与 `SHGetNameFromIDList(SIGDN_FILESYSPATH)`。两次 API 都返回 `S_OK`，但返回值仍是 `::{CLSID}\edpath:<UTF-16 hex>` provider identity，不是 Shell 能直接给出的文件系统路径；该 identity 的 `edpath` token 可按原型格式解码为对应根/子目录的物理路径。HostProbe Release 构建 0 警告/错误，完整根目录、子目录导航/返回、递归大小排序和普通文件系统排序合同 exit 0。
 
 因此 `.qdr` 兼容可通过应用识别自有 provider identity 并解码其 `edpath` token 导出物理 `DirN` 路径；不能依赖 `SIGDN_FILESYSPATH` 自动去包装。`QdrShellPathCodec` 已接到 `QdrExporter.Prepare/Render` 的可选 profile CLSID 参数，纯 SettingsSmoke 覆盖根/子路径转换、其它 Shell CLSID 保留原格式及损坏 token 拒绝；现有应用调用尚未传入 profile CLSID，产品当前行为不变。该转换尚未覆盖路径 token 格式演进或跨机器不可达路径。隔离预览脚本会复制主 profile 的 ExplorerDirs、窗口 session、收藏/固定标签和导航树状态等明列文件；若稳定 CLSID 保存在 profile INI，预览克隆需在复制时分配新 CLSID，并重写这些 session/收藏状态中引用的 app provider identity。发布脚本当前没有此身份重映射步骤，故在其实现前不能安全地让带 provider identity 的主 profile 直接进入 `-IsolatedProfile` 预览副本。产品启动、profile ID 持久化及发布克隆重写仍未实现。
+
+### 2026-11-02：每 profile CLSID 的 portable INI 原型
+
+新增 `ShellNamespaceProfileStore` 原型，以独立 `ShellNamespace.ini` 的 `[ShellNamespace]` `FormatVersion=1` / `ClassId={D}` 保存一个非空 GUID。隔离 SettingsSmoke 覆盖首次创建、并发首次读取收敛到同一 ID、重载保持 ID，以及损坏/未来格式返回警告且原文件逐字保留。App 与 SettingsSmoke Release build 0 警告/错误；profile store smoke 及 Q-Dir Shell-location export/import smoke 通过。
+
+此 store 尚未从应用启动调用，也没有注册/回收 Shell namespace；发布脚本尚未复制并重映射 `ShellNamespace.ini` 或会话、收藏和 `.qdr` 扩展中的 provider identity。只有这两部分接好后，才能声称 profile 移动保持 identity、预览 profile 隔离或产品导出可用。
