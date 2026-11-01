@@ -2201,3 +2201,9 @@ NativeProbe 现在直接链接生产 `QdrViewWriter` 与 `QdrImporter` 源码，
 新增 NativeProbe 的 `DPRT` 路径身份 PIDL 编码：物理根路径分成每段最多 1,024 个 UTF-16 字符的多个 SHITEMID，`SyntheticSortFolder.Initialize` 优先从绝对 PIDL 解码该根路径；旧探针不带该 marker 时继续走既有 backing path。无窗口探针创建两个相同 CLSID 的 Shell 文件夹对象，各自以不同路径 PIDL 初始化，并在两个对象同时存活时核对 `GetCurFolder` 保留各自 PIDL、独有文件不串、同名目录递归大小分别为 13 B/29 B。另验证 1,100 字符路径跨多个 PIDL 段编码/解码一致。NativeProbe 与 C++ adapter Release 构建均为 0 警告/错误；单 CLSID 双根、双 CLSID 双根、Shell-folder-tree、按需递归列和 DLL unload 合同 smoke 均通过。
 
 这只证明 provider 的 `IPersistFolder2.Initialize` 可从路径 marker PIDL 取得互相独立的物理根。测试直接构造 PIDL 并创建 COM 文件夹对象，没有把 PIDL 挂在已注册 namespace 的根之后，未实现 `ParseDisplayName`/`BindToObject` 将产品路径转换成该 marker，也未验证 Shell 解析名、ExplorerBrowser 导航/历史、跨进程恢复、可见列或系统操作菜单。下一步先在无窗口探针验证一个已注册稳定 CLSID 的 root → path-marker `ParseDisplayName`/`BindToObject`/parsing-name 往返，再考虑 ExplorerBrowser 双窗格宿主。
+
+### 2026-11-02：路径根 PIDL 的文件夹合同往返
+
+扩展隔离 adapter：`ParseDisplayName` 收到绝对文件系统目录路径时，将路径编码为相对 marker PIDL；`GetDisplayNameOf` 返回同一物理路径；`BindToObject` 把 marker 与当前根 PIDL 组合，并以新绝对 PIDL 初始化独立 folder 对象。NativeProbe 先初始化普通根对象指向目录 A，再通过该合同解析目录 B，核对显示名重新解析后 PIDL 字节一致，绑定后的对象只枚举 B 的独有文件，递归值为 29 B（与 A 的 13 B 条目不串）。Release build 0 警告/错误；双根 PIDL、folder-tree、按需递归列及 DLL unload 合同 smoke 通过。
+
+此合同测试直接调用 adapter 的 `IShellFolder`，父 PIDL 是普通文件系统 PIDL，尚未通过 Windows 注册的 namespace CLSID 调用 `SHParseDisplayName` / `SHBindToObject`，也没有证明 Shell 可为组合 PIDL 生成稳定的 Desktop parsing name。因此它只验证 adapter 层的 Parse/Bind/name 逻辑，不代表注册 namespace 已可承载多路径根，更不涉及 ExplorerBrowser 或产品视图。

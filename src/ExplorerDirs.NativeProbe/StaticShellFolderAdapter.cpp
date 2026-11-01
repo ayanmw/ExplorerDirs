@@ -2889,6 +2889,28 @@ namespace
             if (!item) return E_POINTER;
             *item = nullptr;
             if (!_inner || !name) return E_INVALIDARG;
+            // The root-identity probe accepts an absolute filesystem path as one namespace child.
+            // This keeps the physical folder identity in the child PIDL instead of global CLSID state.
+            const bool hasDriveRoot = name[0] && name[1] == L':' &&
+                (name[2] == L'\\' || name[2] == L'/');
+            const bool hasUncRoot = (name[0] == L'\\' && name[1] == L'\\') ||
+                (name[0] == L'/' && name[1] == L'/');
+            if (hasDriveRoot || hasUncRoot)
+            {
+                PIDLIST_ABSOLUTE backingPidl = nullptr;
+                SFGAOF parsedAttributes = 0;
+                auto pathResult = SHParseDisplayName(name, bind, &backingPidl, SFGAO_FOLDER, &parsedAttributes);
+                if (FAILED(pathResult)) return pathResult;
+                CoTaskMemFree(backingPidl);
+                if (!(parsedAttributes & SFGAO_FOLDER)) return HRESULT_FROM_WIN32(ERROR_DIRECTORY);
+                PIDLIST_ABSOLUTE pathItem = nullptr;
+                pathResult = CreateSyntheticRootPathPidl(name, &pathItem);
+                if (FAILED(pathResult)) return pathResult;
+                *item = reinterpret_cast<PIDLIST_RELATIVE>(pathItem);
+                if (eaten) *eaten = static_cast<ULONG>(wcslen(name));
+                if (attributes) *attributes = SFGAO_FOLDER | SFGAO_HASSUBFOLDER;
+                return S_OK;
+            }
             IShellFolder2* backingFolder = _inner;
             backingFolder->AddRef();
             std::wstring currentBackingPath;
@@ -3042,6 +3064,22 @@ namespace
             if (!value) return E_POINTER;
             *value = nullptr;
             if (!_inner) return E_UNEXPECTED;
+            std::wstring pathRoot;
+            const auto rootPathResult = ReadSyntheticRootPathFromPidl(
+                reinterpret_cast<PCIDLIST_ABSOLUTE>(item), &pathRoot);
+            if (rootPathResult == S_OK)
+            {
+                auto* absoluteRoot = ILCombine(_root, item);
+                if (!absoluteRoot) return E_OUTOFMEMORY;
+                auto* nested = new (std::nothrow) SyntheticSortFolder(_recursiveSizeStore, _classId);
+                if (!nested) { CoTaskMemFree(absoluteRoot); return E_OUTOFMEMORY; }
+                auto result = nested->Initialize(absoluteRoot);
+                CoTaskMemFree(absoluteRoot);
+                if (SUCCEEDED(result)) result = nested->QueryInterface(iid, value);
+                nested->Release();
+                return result;
+            }
+            if (FAILED(rootPathResult)) return rootPathResult;
             const auto* child = SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(item));
             if (!child) return E_INVALIDARG;
             const bool traceNested = _wcsicmp(child->name, L"nested") == 0;
@@ -3319,6 +3357,19 @@ namespace
         HRESULT STDMETHODCALLTYPE GetDisplayNameOf(PCUITEMID_CHILD item, SHGDNF, STRRET* name) override
         {
             if (!name) return E_POINTER;
+            std::wstring rootPath;
+            const auto rootPathResult = ReadSyntheticRootPathFromPidl(
+                reinterpret_cast<PCIDLIST_ABSOLUTE>(item), &rootPath);
+            if (rootPathResult == S_OK)
+            {
+                name->uType = STRRET_WSTR;
+                const auto bytes = (rootPath.size() + 1) * sizeof(WCHAR);
+                name->pOleStr = static_cast<LPWSTR>(CoTaskMemAlloc(bytes));
+                if (!name->pOleStr) return E_OUTOFMEMORY;
+                CopyMemory(name->pOleStr, rootPath.c_str(), bytes);
+                return S_OK;
+            }
+            if (FAILED(rootPathResult)) return rootPathResult;
             const auto* child = SyntheticData(item);
             if (!child) return E_INVALIDARG;
             name->uType = STRRET_WSTR;
@@ -4816,6 +4867,48 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticSingleClassMultiRoot
     if (SUCCEEDED(result))
         result = VerifyConfiguredRootForProbe(second, secondExpectedName, secondForbiddenName, secondRecursiveBytes);
 
+    // Exercise the folder contract: a legacy configured root at A parses a path identity at B,
+    // round-trips its parsing name, then binds B as a separate folder object.
+    if (SUCCEEDED(result))
+    {
+        PIDLIST_ABSOLUTE ordinaryRoot = nullptr;
+        result = SHParseDisplayName(firstPath, nullptr, &ordinaryRoot, 0, nullptr);
+        auto* parsingRoot = SUCCEEDED(result)
+            ? new (std::nothrow) SyntheticSortFolder(nullptr, g_syntheticFolderClassId, firstPath)
+            : nullptr;
+        if (SUCCEEDED(result) && !parsingRoot) result = E_OUTOFMEMORY;
+        if (SUCCEEDED(result)) result = parsingRoot->Initialize(ordinaryRoot);
+        if (ordinaryRoot) CoTaskMemFree(ordinaryRoot);
+        ULONG eaten = 0;
+        PIDLIST_RELATIVE pathItem = nullptr;
+        if (SUCCEEDED(result)) result = parsingRoot->ParseDisplayName(nullptr, nullptr,
+            const_cast<LPWSTR>(secondPath), &eaten, &pathItem, nullptr);
+        if (SUCCEEDED(result) && (!pathItem || eaten != wcslen(secondPath)))
+            result = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+        STRRET displayName{};
+        if (SUCCEEDED(result)) result = parsingRoot->GetDisplayNameOf(
+            reinterpret_cast<PCUITEMID_CHILD>(pathItem), SHGDN_FORPARSING, &displayName);
+        if (SUCCEEDED(result) && (displayName.uType != STRRET_WSTR || !displayName.pOleStr ||
+            _wcsicmp(displayName.pOleStr, secondPath) != 0))
+            result = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+        PIDLIST_RELATIVE reparsedItem = nullptr;
+        if (SUCCEEDED(result)) result = parsingRoot->ParseDisplayName(nullptr, nullptr,
+            displayName.pOleStr, nullptr, &reparsedItem, nullptr);
+        if (SUCCEEDED(result) && (!reparsedItem || ILGetSize(pathItem) != ILGetSize(reparsedItem) ||
+            memcmp(pathItem, reparsedItem, ILGetSize(pathItem)) != 0))
+            result = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+        IShellFolder2* rebound = nullptr;
+        if (SUCCEEDED(result)) result = parsingRoot->BindToObject(
+            reinterpret_cast<PCUIDLIST_RELATIVE>(pathItem), nullptr, IID_PPV_ARGS(&rebound));
+        if (SUCCEEDED(result)) result = VerifyConfiguredRootForProbe(
+            rebound, secondExpectedName, firstExpectedName, secondRecursiveBytes);
+        if (rebound) rebound->Release();
+        if (parsingRoot) parsingRoot->Release();
+        if (reparsedItem) CoTaskMemFree(reparsedItem);
+        if (displayName.uType == STRRET_WSTR && displayName.pOleStr) CoTaskMemFree(displayName.pOleStr);
+        if (pathItem) CoTaskMemFree(pathItem);
+    }
+
     if (second) second->Release();
     if (first) first->Release();
     if (secondRoot) CoTaskMemFree(secondRoot);
@@ -4823,7 +4916,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticSingleClassMultiRoot
     if (SUCCEEDED(result))
     {
         char message[192]{};
-        sprintf_s(message, "synthetic-single-class-root-pidl: same-clsid=True; first=%ls:%lluB; second=%ls:%lluB",
+        sprintf_s(message, "synthetic-single-class-root-pidl: same-clsid=True; parse-bind-name-roundtrip=True; first=%ls:%lluB; second=%ls:%lluB",
             firstExpectedName, firstRecursiveBytes, secondExpectedName, secondRecursiveBytes);
         TraceSyntheticSortStage(message);
     }
