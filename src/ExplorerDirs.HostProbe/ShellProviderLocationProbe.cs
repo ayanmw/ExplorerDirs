@@ -14,7 +14,8 @@ using System.Windows.Threading;
 // Exercises the production ExplorerBrowserHost against a disposable Shell folder provider.
 internal static class ShellProviderLocationProbe
 {
-    internal static int Run(bool descending = false, bool ignoreFolderSizeForSort = false)
+    internal static int Run(bool descending = false, bool ignoreFolderSizeForSort = false,
+        bool registerDesktopNamespace = true)
     {
         var root = Path.Combine(Path.GetTempPath(), "ExplorerDirs-HostProvider-" + Guid.NewGuid().ToString("N"));
         var pathA = Path.Combine(root, "default-root");
@@ -50,8 +51,11 @@ internal static class ShellProviderLocationProbe
                 ignoreFolderSizeForSort ? 1 : 0));
             RegisterClass(classKeyPath, adapterPath);
             classRegistered = true;
-            RegisterNamespace(namespaceKeyPath);
-            namespaceRegistered = true;
+            if (registerDesktopNamespace)
+            {
+                RegisterNamespace(namespaceKeyPath);
+                namespaceRegistered = true;
+            }
 
             var targetIdentity = $"::{{{classId:D}}}\\edpath:{EncodePath(pathB)}";
             var appAssembly = Assembly.Load("ExplorerDirs.App");
@@ -76,6 +80,8 @@ internal static class ShellProviderLocationProbe
                 targetIdentity, initialViewState, initialDirection);
             targetIdentity = (string)restoredTab.GetType().GetProperty("Path")!.GetValue(restoredTab)!;
             var viewState = restoredTab.GetType().GetProperty("View")!.GetValue(restoredTab)!;
+            if (!registerDesktopNamespace)
+                Console.WriteLine("shell-provider-registration-gate: desktop-namespace-registration=False; clsid-com-registration=True");
             LaunchSessionRecoveryChild(Path.Combine(root, "ExplorerDirs.ini"), adapterPath, classId, pathA,
                 ignoreFolderSizeForSort);
             Console.WriteLine("shell-provider-session-ini: path-preserved=True; recursive-column-and-sort-preserved=True");

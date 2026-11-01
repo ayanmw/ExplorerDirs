@@ -2333,3 +2333,9 @@ HostProbe Release 构建通过，四种隐藏合成视图场景（正常/忽略�
 将上述往返扩展为父子进程：父进程写入临时 `ExplorerDirs.ini` 并注册一次性 HKCU Shell CLSID/NameSpace；新的 HostProbe 子进程重新加载 NativeAdapter、从 INI 读取 parsing name/`ViewState`，再由 Shell 按现存注册激活 provider，创建不可见的生产 `ExplorerBrowserHost`。正常递归升序恢复为 `folder-small → file-middle.bin → folder-large`；启用忽略文件夹大小排序时，降序恢复为 `file-middle.bin → folder-large → folder-small`。两种场景均读到 3 行、递归值 5/12/29 B 和递归列，子进程前台 HWND 不变且测试窗口不可见；父进程随后完成父子目录 Back 与物理文件系统排序对照。HostProbe Release build 0 警告/错误，两种完整运行 exit 0。
 
 首轮失败是子进程在行数刚变为 3 时立即检查顺序，Shell 尚未完成产品 Host 的延迟排序恢复；主进程既有探针已按完整目标顺序等待，本次让子进程使用同一条件等待后通过。该实验真实跨越进程边界并重新通过 Windows Shell 注册激活，但仍由父进程预先建立临时 HKCU 注册，不能证明绿色部署/无注册表激活、产品 App 重启、SessionStore 自动启动路由、所有 pane/tab 配置、普通物理目录派生列或可见交互。产品与 release 未改。
+
+### 2026-11-02：绿色部署注册依赖门槛探针
+
+新增一次性 HostProbe 开关，在唯一随机 CLSID 下保留临时 `HKCU\Software\Classes\CLSID` COM 类注册，但跳过 `Explorer\Desktop\NameSpace` 注册。父进程写 INI 后启动独立子进程；子进程能加载 NativeAdapter 和 SessionStore，但生产 `ExplorerBrowserHost` 在 20 秒内未能恢复 `::{CLSID}\edpath:...` 路径，探针失败并由父进程清除临时 CLSID 与夹具。相同 Release 二进制以完整临时 CLSID + Desktop NameSpace 注册运行的正向对照退出码为 0。
+
+结论限定为：当前以 Shell parsing name 跨进程保存/恢复的原型需要 Desktop NameSpace 注册；单独的每用户 COM 类注册不足以恢复该路径。这并未证明任何无注册表方案都不可行。若继续追求绿色部署，需要另做宿主原型：应用进程直接实例化 provider 的 `IShellFolder` 并通过 ExplorerBrowser 对象导航接口挂载，同时设计应用自有的可持久化位置标识；该路径会改变 Host 的导航/恢复边界，需单独评审，当前不进入产品。逐行递归扫描仍必须按用户显式动作触发，不能在普通导航/刷新时自动扫描。

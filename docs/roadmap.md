@@ -1,4 +1,5 @@
 # 路线图
+2026-11-02 递归列绿色注册依赖门槛：跳过临时 Desktop `NameSpace` 注册、只保留随机 HKCU CLSID 后，独立 HostProbe 子进程无法恢复保存的 Shell parsing name；完整临时注册正向对照通过。当前跨进程 Shell 路径依赖 NameSpace 注册，绿色部署需要另做进程内直接创建 `IShellFolder` 并以应用自有位置标识恢复的宿主原型；尚未进入产品。详见[逐行大小列调查](folder-size-column-investigation.md#2026-11-02绿色部署注册依赖门槛探针)。
 2026-11-02 递归列跨进程 INI 恢复原型：独立 HostProbe 子进程重新加载临时 INI、通过父进程遗留的 HKCU Shell 注册激活 provider，并以保存的路径/排序/显示列创建产品 ExplorerBrowserHost；正常递归升序与忽略文件夹大小的降序均通过，3 行值与排序正确，前台未变。已越过进程边界，仍不是产品 App 重启、绿色无注册表注册、普通物理目录列接线或可见验收。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-02-递归列-ini-在独立进程中的-host-恢复)。
 2026-11-02 递归列 INI 会话往返原型：用生产 `SessionStore.Save/Load` 写入并读回临时 `ExplorerDirs.ini`，再以恢复出的注册 Shell 路径、递归排序和两列宽度创建产品 ExplorerBrowserHost；升序、忽略文件夹大小降序及子目录 Back 恢复均通过。仅验证同进程 INI 往返与 Host 初始化；未证明跨进程启动、provider 绿色注册或普通物理目录派生列。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-02-递归列和注册路径的生产-ini-会话往返)。
 2026-11-02 注册路径根父子导航原型：生产 `ExplorerBrowserHost` 在隔离 HostProbe 中可从自定义路径身份进入物理子目录，再用 Back 返回；子级读取 1 行/5 B，父级恢复 3 行与递归值集合。正常排序及忽略文件夹递归大小排序两种策略下通过。仍是临时注册 namespace 原型，不代表鼠标输入、独立父子 ViewState、普通物理目录列接线、便携注册或可发布功能。详见[逐行大小列调查](folder-size-column-investigation.md#2026-11-02产品-host-的注册路径根进入子目录并回退)。
