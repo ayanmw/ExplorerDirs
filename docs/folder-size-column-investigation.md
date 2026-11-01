@@ -2276,8 +2276,10 @@ NativeProbe Release build 0 警告/错误，探针 exit 0、`git diff --check` �
 
 继续扩展隐藏 HostProbe，将 5 B 与 29 B 两个目录通过真实产品 `ExplorerBrowserHost` 浏览。首次枚举后，`CaptureViewState` 已读回升序 `{9e5e…}:1/+1`，但实际行序仍为 Shell 初始枚举序 `folder-large → folder-small`。provider 的 `MapColumnToSCID(1)` 返回递归数据键 `{7e1f…}:1`，直接调用 `CompareIDs(1, large, small)` 返回 `+1`；`GetDetailsEx` 能读回两值，provider 的列值与比较器合同正确。
 
-对当前 `IShellView` 调用一次 `Refresh` 后，HRESULT 为 `S_OK`，比较器调用增量为 1，行序变成 `folder-small → folder-large`。随后对已处于升序状态的 view 执行 `sortascending`，比较器没有增加；先执行 `sortdescending` 再执行 `sortascending` 时，两个方向变化均各调用一次比较器，行序分别为大→小和小→大。真实 `SysHeader32` 标题点击也能切换排序键方向并调用比较器。两次重复隐藏运行均得到相同结果。
+对当前 `IShellView` 调用一次 `Refresh` 后，HRESULT 为 `S_OK`，比较器调用增量为 1，行序变成 `folder-small → folder-large`。随后对已处于升序状态的 view 执行 `sortascending`，比较器没有增加；先执行 `sortdescending` 再执行 `sortascending` 时，两个方向变化均各调用一次比较器，行序分别为大→小和小→大。真实 `SysHeader32` 标题点击也能切换排序键方向并调用比较器。
 
-因此前一条“排序命令没有进入 provider 比较器”的归因需更正：provider 列身份映射和排序命令路由都可工作；相同方向的命令是无操作。当前已复现的缺口是此隔离 namespace Host 的初始排序恢复：`SetSortColumns` 状态读回成功，但它本身没有把当前枚举行序重排；Shell view `Refresh` 能实现重排。这个证据仅来自注册的 synthetic namespace 与产品 ExplorerBrowserHost，不能推断普通文件系统目录也需要 refresh，也没有评估可见刷新闪烁。是否把 refresh 接入虚拟位置的恢复流程，需要先验证用户可见成本及仅对需要的恢复场景调用是否可行。
+同一产品 Host 再以普通文件系统临时目录做标准 `PKEY_Size` 对照：文件名顺序 `a-large.bin → z-small.bin` 与大小升序相反；首次捕获时 Shell 已返回 `5 字节|29 字节` 和 `z-small.bin → a-large.bin`，即排序在 `IShellView.Refresh` 前已经正确应用。显式刷新后结果不变。两次重复隐藏运行一致。因此目前的初始重排差异只在注册 synthetic namespace 的产品 Host 观察到，不能推广为普通文件夹排序恢复缺陷。
 
-`CaptureFileViewExportSnapshot` 中递归列值为空仍是应用 `IPropertyStore` 快速读取合同的独立限制；没有可见 UI 验收，不能据此判断屏幕列显示。`ExplorerDirs.HostProbe` Release 构建 0 警告/错误；`--shell-provider-location` 连续两次 exit 0，父窗口不可见，临时 CLSID/NameSpace 与夹具由 finally 清理。产品代码及 release 未改。
+递归列 provider 的 `IShellFolder2.GetDetailsOf` 直接返回标题 `Recursive Size` 和行文本 `29|5`，`GetDetailsEx` 也返回对应数值；这证明 Shell 列显示所需的 provider 文本/属性回调合同可读，但不代替用户可见像素验收。与此同时，应用 `CaptureFileViewExportSnapshot` 的 `IPropertyStore` 快速属性路径仍为空值。列回调显示、属性存储读取和应用导出是独立数据消费路径；导出空值不能用来推断屏幕列为空。
+
+因此前一条“排序命令没有进入 provider 比较器”的归因需更正：provider 列身份映射和排序命令路由都可工作；相同方向的命令是无操作。当前原型缺口是 synthetic namespace Host 的初始排序恢复：`SetSortColumns` 状态读回成功，但它本身没有把初始枚举行序重排；该 Host 的 `IShellView.Refresh` 可以完成重排。是否在未来产品接入时为虚拟位置使用一次受限刷新，仍需评估可见闪烁和执行时机。`ExplorerDirs.HostProbe` Release 构建 0 警告/错误；包含 synthetic 与物理目录对照的 `--shell-provider-location` 连续两次 exit 0，父窗口不可见，临时 CLSID/NameSpace 与夹具由 finally 清理。产品代码及 release 未改。

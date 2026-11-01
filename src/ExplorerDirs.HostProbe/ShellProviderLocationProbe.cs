@@ -116,6 +116,11 @@ internal static class ShellProviderLocationProbe
                 directRecursiveValues = ReadRecursiveValues(hostType, host, 2);
                 return directRecursiveValues.Length == 2 && directRecursiveValues.All(value => !string.IsNullOrWhiteSpace(value));
             }, TimeSpan.FromSeconds(15), "the product host's IShellFolder2.GetDetailsEx did not return recursive values");
+            var recursiveDisplay = ReadRecursiveDisplayText(adapter, hostType, host, 2);
+            if (!string.Equals(recursiveDisplay.Header, "Recursive Size", StringComparison.Ordinal) ||
+                recursiveDisplay.Values.Select(value => TryReadBytes(value, out var bytes) ? bytes : ulong.MaxValue)
+                    .Order().SequenceEqual([5UL, 29UL]) is false)
+                throw new InvalidOperationException($"The provider's recursive GetDetailsOf contract is unexpected: header='{recursiveDisplay.Header}', values=[{string.Join('|', recursiveDisplay.Values)}].");
             var providerColumnContract = ReadProviderColumnContract(hostType, host);
             if (providerColumnContract.CompareResult != 1 ||
                 providerColumnContract.DataKey.FormatId != new Guid("7E1F84B7-C052-4E51-8A3C-869254A6B910") ||
@@ -207,9 +212,9 @@ internal static class ShellProviderLocationProbe
 
             var headerCompareDeltas = Enumerable.Range(0, columnCompareCountsBefore.Length)
                 .Select(index => getCompareCountForColumn((uint)index) - headerColumnCountsBefore[index]).ToArray();
-            Console.WriteLine($"shell-provider-location: product-host-navigation=True; is-filesystem=False; rows={total}; recursive-column=True; export-values=[{string.Join('|', rows.Select(row => row[sizeColumnIndex]))}]; order-before-shell-refresh=[{string.Join('|', orderBeforeRefresh)}]; order-after-shell-refresh=[{string.Join('|', orderAfterRefresh)}]; shell-refresh-hr=0x{shellRefreshResult:X8}; refresh-compare-delta={refreshCompareCountAfter - refreshCompareCountBefore}; displayed-order-after-two-header-clicks=[{string.Join('|', namesInShellOrder)}]; order-after-first-header-click=[{string.Join('|', headerFirstOrder)}]; header-sort-state-after-first-click=[{string.Join('|', headerFirstSorts)}]; order-after-sortascending=[{string.Join('|', orderAfterAscendingCommand)}]; order-after-sortdescending=[{string.Join('|', orderAfterDescendingCommand)}]; sort-state-after-sortdescending=[{string.Join('|', descendingCommandSorts)}]; order-after-next-sortascending=[{string.Join('|', orderAfterAscendingAgainCommand)}]; sort-state-after-next-sortascending=[{string.Join('|', ascendingAgainCommandSorts)}]; direct-recursive-values=[{string.Join('|', directRecursiveValues)}]; fixture-values-correct={recursiveValuesMatchFixture}; provider-map-column-to-scid={providerColumnContract.DataKey.FormatId:B}:{providerColumnContract.DataKey.PropertyId}; direct-provider-compare={providerColumnContract.CompareResult}; restored-sort-state=[{string.Join('|', actualSorts)}]; shell-sort-command-hr=0x{sortCommandResult:X8}; shell-command-compare-delta={commandCompareCount - ascendingCommandCompareCountBefore}; descending-command-hr=0x{descendingCommandResult:X8}; descending-command-compare-delta={descendingCommandCompareCount - commandCompareCount}; ascending-again-command-hr=0x{ascendingAgainCommandResult:X8}; ascending-again-command-compare-delta={ascendingAgainCommandCompareCount - descendingCommandCompareCount}; header-window={sortHeaderWindow}; first-header-compare-delta={headerFirstCompareCount - headerCompareCountBefore}; second-header-compare-delta={compareCountAfterSort - headerFirstCompareCount}; compare-delta-by-column=[{string.Join('|', columnCompareDeltas)}]; header-compare-delta-by-column=[{string.Join('|', headerCompareDeltas)}]; shell-sort-applied={sortApplied}; target=session-root; fallback=default-root; parent-visible={IsWindowVisible(source.Handle)}");
+            Console.WriteLine($"shell-provider-location: product-host-navigation=True; is-filesystem=False; rows={total}; recursive-column=True; getdetailsof-header='{recursiveDisplay.Header}'; getdetailsof-values=[{string.Join('|', recursiveDisplay.Values)}]; export-values=[{string.Join('|', rows.Select(row => row[sizeColumnIndex]))}]; order-before-shell-refresh=[{string.Join('|', orderBeforeRefresh)}]; order-after-shell-refresh=[{string.Join('|', orderAfterRefresh)}]; shell-refresh-hr=0x{shellRefreshResult:X8}; refresh-compare-delta={refreshCompareCountAfter - refreshCompareCountBefore}; displayed-order-after-two-header-clicks=[{string.Join('|', namesInShellOrder)}]; order-after-first-header-click=[{string.Join('|', headerFirstOrder)}]; header-sort-state-after-first-click=[{string.Join('|', headerFirstSorts)}]; order-after-sortascending=[{string.Join('|', orderAfterAscendingCommand)}]; order-after-sortdescending=[{string.Join('|', orderAfterDescendingCommand)}]; sort-state-after-sortdescending=[{string.Join('|', descendingCommandSorts)}]; order-after-next-sortascending=[{string.Join('|', orderAfterAscendingAgainCommand)}]; sort-state-after-next-sortascending=[{string.Join('|', ascendingAgainCommandSorts)}]; direct-recursive-values=[{string.Join('|', directRecursiveValues)}]; fixture-values-correct={recursiveValuesMatchFixture}; provider-map-column-to-scid={providerColumnContract.DataKey.FormatId:B}:{providerColumnContract.DataKey.PropertyId}; direct-provider-compare={providerColumnContract.CompareResult}; restored-sort-state=[{string.Join('|', actualSorts)}]; shell-sort-command-hr=0x{sortCommandResult:X8}; shell-command-compare-delta={commandCompareCount - ascendingCommandCompareCountBefore}; descending-command-hr=0x{descendingCommandResult:X8}; descending-command-compare-delta={descendingCommandCompareCount - commandCompareCount}; ascending-again-command-hr=0x{ascendingAgainCommandResult:X8}; ascending-again-command-compare-delta={ascendingAgainCommandCompareCount - descendingCommandCompareCount}; header-window={sortHeaderWindow}; first-header-compare-delta={headerFirstCompareCount - headerCompareCountBefore}; second-header-compare-delta={compareCountAfterSort - headerFirstCompareCount}; compare-delta-by-column=[{string.Join('|', columnCompareDeltas)}]; header-compare-delta-by-column=[{string.Join('|', headerCompareDeltas)}]; shell-sort-applied={sortApplied}; target=session-root; fallback=default-root; parent-visible={IsWindowVisible(source.Handle)}");
             if (IsWindowVisible(source.Handle)) throw new InvalidOperationException("The hidden Shell provider HostProbe parent became visible.");
-            return 0;
+            return RunFilesystemSortRestoreProbe();
         }
         finally
         {
@@ -224,6 +229,95 @@ internal static class ShellProviderLocationProbe
             if (namespaceRegistered) Registry.CurrentUser.DeleteSubKeyTree(namespaceKeyPath, throwOnMissingSubKey: false);
             if (classRegistered) Registry.CurrentUser.DeleteSubKeyTree(classKeyPath, throwOnMissingSubKey: false);
             if (adapter != 0) NativeLibrary.Free(adapter);
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static int RunFilesystemSortRestoreProbe()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ExplorerDirs-HostFilesystemSort-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var firstFile = Path.Combine(root, "a-large.bin");
+        var secondFile = Path.Combine(root, "z-small.bin");
+        File.WriteAllBytes(firstFile, new byte[29]);
+        File.WriteAllBytes(secondFile, new byte[5]);
+        HwndSource? source = null;
+        HwndHost? host = null;
+        try
+        {
+            var appAssembly = Assembly.Load("ExplorerDirs.App");
+            var viewStateType = appAssembly.GetType("ExplorerDirs.App.ViewState", throwOnError: true)!;
+            var propertyKeyType = appAssembly.GetType("ExplorerDirs.App.PropertyKeyState", throwOnError: true)!;
+            var sortColumnType = appAssembly.GetType("ExplorerDirs.App.SortColumnState", throwOnError: true)!;
+            var displayColumnType = appAssembly.GetType("ExplorerDirs.App.DisplayColumnState", throwOnError: true)!;
+            var sizeKey = Activator.CreateInstance(propertyKeyType,
+                Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 12u)!;
+            var nameKey = Activator.CreateInstance(propertyKeyType,
+                Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 10u)!;
+            var sortColumns = Array.CreateInstance(sortColumnType, 1);
+            sortColumns.SetValue(Activator.CreateInstance(sortColumnType, [sizeKey, 1]), 0);
+            var displayColumns = Array.CreateInstance(displayColumnType, 2);
+            displayColumns.SetValue(Activator.CreateInstance(displayColumnType, [nameKey, 240]), 0);
+            displayColumns.SetValue(Activator.CreateInstance(displayColumnType, [sizeKey, 120]), 1);
+            var viewStateConstructor = viewStateType.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                .Single(constructor => constructor.GetParameters().Length == 6);
+            var viewState = viewStateConstructor.Invoke([4u, 16, sortColumns, null, true, displayColumns]);
+            var hostType = appAssembly.GetType("ExplorerDirs.App.ExplorerBrowserHost", throwOnError: true)!;
+            host = (HwndHost)Activator.CreateInstance(hostType, root, viewState)!;
+            var grid = new Grid { Width = 800, Height = 500 };
+            grid.Children.Add(host);
+            source = new HwndSource(new HwndSourceParameters("ExplorerDirs filesystem sort HostProbe")
+            {
+                WindowStyle = unchecked((int)0x80000000), Width = 800, Height = 500
+            });
+            source.RootVisual = grid;
+            grid.Measure(new Size(800, 500));
+            grid.Arrange(new Rect(0, 0, 800, 500));
+            grid.UpdateLayout();
+
+            var navigatedField = hostType.GetField("_hasNavigated", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var viewWindowField = hostType.GetField("_viewWindow", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            WaitUntil(() => Equals(navigatedField.GetValue(host), true) && (nint)viewWindowField.GetValue(host)! != 0,
+                TimeSpan.FromSeconds(15), "the product ExplorerBrowserHost did not navigate to the filesystem sort fixture");
+            var readCounts = hostType.GetMethod("ReadItemCounts", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            object? counts = null;
+            WaitUntil(() =>
+            {
+                counts = readCounts.Invoke(host, [false, false]);
+                return counts is not null && (int)counts.GetType().GetProperty("Total")!.GetValue(counts)! == 2;
+            }, TimeSpan.FromSeconds(15), "the filesystem sort fixture did not enumerate both files");
+
+            var capture = hostType.GetMethod("CaptureFileViewExportSnapshot", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!;
+            var (columnNames, rowsBeforeRefresh) = ReadExportRows(capture.Invoke(host, null)!);
+            var nameColumnIndex = Array.FindIndex(columnNames, name => name.Equals("Name", StringComparison.OrdinalIgnoreCase) || name == "名称");
+            var sizeColumnIndex = Array.FindIndex(columnNames, name => name.Equals("Size", StringComparison.OrdinalIgnoreCase) || name == "大小");
+            if (nameColumnIndex < 0 || sizeColumnIndex < 0 || rowsBeforeRefresh.Length != 2)
+                throw new InvalidOperationException($"The filesystem sort snapshot is incomplete: columns=[{string.Join('|', columnNames)}], rows={rowsBeforeRefresh.Length}.");
+            var orderBeforeRefresh = rowsBeforeRefresh.Select(row => Path.GetFileName(row[nameColumnIndex]) ?? row[nameColumnIndex]).ToArray();
+            var sizesBeforeRefresh = rowsBeforeRefresh.Select(row => row[sizeColumnIndex]).ToArray();
+            var restoredSorts = CaptureSortColumns(hostType, host);
+            var refreshResult = RefreshCurrentShellView(hostType, host);
+            if (refreshResult < 0) Marshal.ThrowExceptionForHR(refreshResult);
+            PumpDispatcher(TimeSpan.FromMilliseconds(500));
+            var (_, rowsAfterRefresh) = ReadExportRows(capture.Invoke(host, null)!);
+            var orderAfterRefresh = rowsAfterRefresh.Select(row => Path.GetFileName(row[nameColumnIndex]) ?? row[nameColumnIndex]).ToArray();
+            var expectedAscending = new[] { "z-small.bin", "a-large.bin" };
+            var physicalAscendingAppliedBeforeRefresh = orderBeforeRefresh.SequenceEqual(expectedAscending, StringComparer.OrdinalIgnoreCase);
+            var physicalAscendingAppliedAfterRefresh = orderAfterRefresh.SequenceEqual(expectedAscending, StringComparer.OrdinalIgnoreCase);
+            Console.WriteLine($"filesystem-sort-restore: rows={rowsBeforeRefresh.Length}; restored-sort=[{string.Join('|', restoredSorts)}]; size-values-before-refresh=[{string.Join('|', sizesBeforeRefresh)}]; order-before-refresh=[{string.Join('|', orderBeforeRefresh)}]; order-after-refresh=[{string.Join('|', orderAfterRefresh)}]; refresh-hr=0x{refreshResult:X8}; sort-applied-before-refresh={physicalAscendingAppliedBeforeRefresh}; sort-applied-after-refresh={physicalAscendingAppliedAfterRefresh}; parent-visible={IsWindowVisible(source.Handle)}");
+            if (IsWindowVisible(source.Handle)) throw new InvalidOperationException("The hidden filesystem sort HostProbe parent became visible.");
+            return physicalAscendingAppliedBeforeRefresh ? 0 : 1;
+        }
+        finally
+        {
+            if (source is not null)
+            {
+                source.RootVisual = null;
+                source.Dispose();
+            }
+            else if (host is IDisposable disposable)
+                disposable.Dispose();
+            PumpDispatcher(TimeSpan.FromMilliseconds(150));
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
         }
     }
@@ -419,6 +513,59 @@ internal static class ShellProviderLocationProbe
             }).ToArray();
     }
 
+    private static (string Header, string[] Values) ReadRecursiveDisplayText(nint adapter, Type hostType, HwndHost host, int count)
+    {
+        var view = (nint)hostType.GetMethod("GetFolderView2Pointer", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(host, null)!;
+        if (view == 0) throw new InvalidOperationException("The product host returned no view for recursive display text.");
+        try
+        {
+            var folderId = new Guid("93F2F68C-1D1B-11D3-A30E-00C04F79ABD1");
+            Check(GetMethod<GetFolder>(view, 5)(view, ref folderId, out var folder));
+            if (folder == 0) throw new InvalidOperationException("The product view returned no IShellFolder2 for display text.");
+            try
+            {
+                var detailsSize = checked((int)GetExport<GetShellDetailsSizeNative>(adapter, "GetStaticShellDetailsSize")());
+                var details = Marshal.AllocCoTaskMem(detailsSize);
+                try
+                {
+                    var values = new string[count];
+                    var getDetails = GetMethod<GetDetailsOf>(folder, 18);
+                    Marshal.Copy(new byte[detailsSize], 0, details, detailsSize);
+                    Check(getDetails(folder, 0, 1, details));
+                    var header = ReadShellDetailsText(details);
+                    var getItem = GetMethod<GetItem>(view, 6);
+                    for (var index = 0; index < count; index++)
+                    {
+                        Marshal.Copy(new byte[detailsSize], 0, details, detailsSize);
+                        Check(getItem(view, index, out var pidl));
+                        try
+                        {
+                            Check(getDetails(folder, pidl, 1, details));
+                            values[index] = ReadShellDetailsText(details);
+                        }
+                        finally { Marshal.FreeCoTaskMem(pidl); }
+                    }
+                    return (header, values);
+                }
+                finally { Marshal.FreeCoTaskMem(details); }
+            }
+            finally { Marshal.Release(folder); }
+        }
+        finally { Marshal.Release(view); }
+    }
+
+    private static string ReadShellDetailsText(nint details)
+    {
+        var strretOffset = 8;
+        if (Marshal.ReadInt32(details, strretOffset) != 0)
+            throw new InvalidOperationException("The synthetic Shell provider returned a non-WSTR STRRET.");
+        var pointer = Marshal.ReadIntPtr(details, strretOffset + (IntPtr.Size == 8 ? 8 : 4));
+        if (pointer == 0) return string.Empty;
+        try { return Marshal.PtrToStringUni(pointer) ?? string.Empty; }
+        finally { Marshal.FreeCoTaskMem(pointer); }
+    }
+
     private static int InvokeBackgroundShellVerb(Type hostType, HwndHost host, string expectedVerb)
     {
         var assembly = hostType.Assembly;
@@ -581,6 +728,8 @@ internal static class ShellProviderLocationProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFolder(nint self, ref Guid iid, out nint folder);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItem(nint self, int index, out nint pidl);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetDetailsEx(nint self, nint pidl, ref NativePropertyKey key, nint variant);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetDetailsOf(nint self, nint pidl, uint column, nint details);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate uint GetShellDetailsSizeNative();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int MapColumnToScid(nint self, uint column, out NativePropertyKey key);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CompareIds(nint self, nint column, nint left, nint right);
     [StructLayout(LayoutKind.Sequential)] private struct NativeInvokeCommand
