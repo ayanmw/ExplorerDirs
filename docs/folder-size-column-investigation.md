@@ -1824,3 +1824,9 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 这仍是合成 namespace + ExplorerBrowser 隔离实验。它由探针在 `Destroy` 后显式调用 view-retire 入口；不证明 Browser 自动触发产品取消，也不验证产品 Pane/UI dispatcher 或可见重绘。
 
 路线调整依据：通用 `StaticShellFolderAdapter` 已有真实文件系统 child PIDL 的包裹/解包和 Shell folder 方法转发；然而[包装 PIDL DefView 复验](#2026-11-01-包装-pidl-defview-列消费复验)中，DefView 只请求了自定义列标题，没有请求逐行值或排序比较。因此只把本隔离 namespace 的合成 child PIDL 替换为真实 PIDL，不能跨过列消费门槛。下一阶段优先在受控行视图中把已有真实 Shell 行身份、递归列、Shell 菜单/文件操作、通知刷新、焦点和拖放组合成一条集成合同；每个宿主迁移门槛仍需独立验证。产品和 release 未修改。
+
+### 2026-11-01：Shell 通知刷新保持多选与独立焦点锚点
+
+扩展 `--shell-change-reconciliation` 隐藏集成合同：初始 ListView 同时选择 `stable.txt` 与 `attribute.txt`，只将 `stable.txt` 设为 focused item。Shell `UPDATEITEM` 后后台扫描并回到 owner thread 发布，递归列从 `4 B` 更新至 `7 B`；之后的属性切换/恢复、create/update、名称重排、删除和递归目录改名/重扫，都重新投影行并恢复相同两项选择及 `stable.txt` 焦点。断言同时检查行模型 snapshot 和真实 `SysListView32` 的选中 ID 集合恰好为这两项，避免只检查单一焦点行而漏掉多选丢失。
+
+同一命令继续通过双窗格 `IFileOperation` Copy/Move/Rename/Delete 与跨卷 Move 对账；所有窗口隐藏，前台未变化。NativeProbe Release build 0 警告/错误，`--shell-change-reconciliation` exit 0。该合同把多选保持接入真实 Shell 通知、递归值回填和行重排，但仍是隐藏自有 ListView 行模型，不是产品视图、真实鼠标输入、菜单或 OLE `DoDragDrop` 证据；ExplorerBrowser 产品和 release 未修改。

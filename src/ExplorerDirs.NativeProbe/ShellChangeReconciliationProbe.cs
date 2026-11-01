@@ -84,10 +84,13 @@ internal static class ShellChangeReconciliationProbe
             AddColumn(listView, "Contents", 130, 2);
             ProjectRows(listView, current.Rows);
             var stableId = current.Rows.Single(row => row.DisplayName == "stable.txt").Id;
+            var attributeId = current.Rows.Single(row => row.DisplayName == "attribute.txt").Id;
             var sizeFolderId = current.Rows.Single(row => row.DisplayName == "size-folder").Id;
             var initialRecursiveBytes = current.Rows.Single(row => row.Id == sizeFolderId).RecursiveBytes;
             var initialRecursiveSummary = current.Rows.Single(row => row.Id == sizeFolderId).RecursiveSummary!;
+            // Exercise a multi-selection with a distinct focus anchor across each projected refresh.
             SetRowState(listView, FindIndexById(listView, stableId), LvisSelected | LvisFocused, LvisSelected | LvisFocused);
+            SetRowState(listView, FindIndexById(listView, attributeId), LvisSelected, LvisSelected);
             var selection = CaptureSelection(listView, current.Rows);
             var watch = new ShellChangeEntry { Pidl = folderPidl, Recursive = true };
             registration = SHChangeNotifyRegister(window.Handle, ShellAndInterruptSources, WatchEvents,
@@ -112,13 +115,12 @@ internal static class ShellChangeReconciliationProbe
             var itemUpdatedValue = GetItemText(listView, FindIndexById(listView, sizeFolderId), 1);
             var itemUpdatedIdentityPreserved = current.Rows.Single(row => row.DisplayName == "stable.txt").Id == stableId &&
                 current.Rows.Single(row => row.Id == sizeFolderId).Id == sizeFolderId;
-            var itemUpdatedSelectionPreserved = HasStableSelection(current.Rows) && HasStableListViewSelection(listView, stableId);
+            var itemUpdatedSelectionPreserved = HasStableSelection(current.Rows) && HasTwoRowSelection(listView, stableId, attributeId);
             if (itemUpdatedBytes != 7 || itemUpdatedValue != "7 B" || !itemUpdatedIdentityPreserved || !itemUpdatedSelectionPreserved ||
                 itemUpdateScanWorker == Environment.CurrentManagedThreadId || !itemUpdateScanPublishedOnOwner)
                 throw new InvalidOperationException("SHCNE_UPDATEITEM did not refresh the derived folder row while preserving row identity and selection.");
             Console.WriteLine($"shell-change-reconciliation: event=UPDATEITEM; event-received=True; recursive-size={itemUpdatedBytes}; displayed={itemUpdatedValue}; stable-id-preserved={itemUpdatedIdentityPreserved}; selection-preserved={itemUpdatedSelectionPreserved}; worker-thread={itemUpdateScanWorker}; owner-thread={Environment.CurrentManagedThreadId}");
 
-            var attributeId = current.Rows.Single(row => row.DisplayName == "attribute.txt").Id;
             var originalAttributes = File.GetAttributes(attributePath);
             var attributesEventStart = window.Events.Count;
             File.SetAttributes(attributePath, originalAttributes | FileAttributes.ReadOnly);
@@ -134,7 +136,7 @@ internal static class ShellChangeReconciliationProbe
             var readonlyRow = current.Rows.Single(row => row.Id == attributeId);
             var readonlyFlagUpdated = (readonlyRow.Attributes & 0x00040000) != 0; // SFGAO_READONLY
             var attributeIdentityPreserved = readonlyRow.Id == attributeId;
-            var selectionAfterAttributes = HasStableSelection(current.Rows) && HasStableListViewSelection(listView, stableId);
+            var selectionAfterAttributes = HasStableSelection(current.Rows) && HasTwoRowSelection(listView, stableId, attributeId);
             Console.WriteLine($"shell-change-reconciliation: event=ATTRIBUTES-check; event-received={attributesEvent}; file-attributes=0x{(uint)File.GetAttributes(attributePath):X8}; shell-attributes=0x{readonlyRow.Attributes:X8}; readonly-flag-updated={readonlyFlagUpdated}; row-id-preserved={attributeIdentityPreserved}; selection-preserved={selectionAfterAttributes}");
             if (!attributesEvent || !readonlyFlagUpdated || !attributeIdentityPreserved || !selectionAfterAttributes)
                 throw new InvalidOperationException("SHCNE_ATTRIBUTES did not refresh the row attributes while preserving row identity and selection.");
@@ -154,7 +156,7 @@ internal static class ShellChangeReconciliationProbe
             ApplySelection(listView, current.Rows, selection);
             var restoredAttributeRow = current.Rows.Single(row => row.Id == attributeId);
             var readonlyFlagCleared = (restoredAttributeRow.Attributes & 0x00040000) == 0;
-            var restoredAttributeSelection = HasStableSelection(current.Rows) && HasStableListViewSelection(listView, stableId);
+            var restoredAttributeSelection = HasStableSelection(current.Rows) && HasTwoRowSelection(listView, stableId, attributeId);
             if (!restoredAttributesEvent || !readonlyFlagCleared || restoredAttributeRow.Id != attributeId || !restoredAttributeSelection)
                 throw new InvalidOperationException("SHCNE_ATTRIBUTES did not clear the row's read-only attribute while preserving row identity and selection.");
             Console.WriteLine($"shell-change-reconciliation: event=ATTRIBUTES-restore; event-received={restoredAttributesEvent}; readonly-flag-cleared={readonlyFlagCleared}; row-id-preserved={restoredAttributeRow.Id == attributeId}; selection-preserved={restoredAttributeSelection}");
@@ -199,7 +201,7 @@ internal static class ShellChangeReconciliationProbe
                 recursiveSummaryAfterReconciliation.Files == 2 && recursiveSummaryAfterReconciliation.Directories == 1;
             var projectedDerivedValuesUpdated = projectedSize == "12 B" && projectedContents == "files: 2, folders: 1";
             var updateIdPreserved = current.Rows.Single(row => row.DisplayName == "stable.txt").Id == stableId;
-            var selectionAfterUpdatePreserved = HasStableSelection(current.Rows) && HasStableListViewSelection(listView, stableId);
+            var selectionAfterUpdatePreserved = HasStableSelection(current.Rows) && HasTwoRowSelection(listView, stableId, attributeId);
 
             var renamedPath = Path.Combine(fixture, "renamed.txt");
             File.Move(createdPath, renamedPath);
@@ -218,7 +220,7 @@ internal static class ShellChangeReconciliationProbe
             ProjectRows(listView, current.Rows);
             ApplySelection(listView, current.Rows, selection);
             var renamedId = current.Rows.Single(row => row.DisplayName == "renamed.txt").Id;
-            var selectionAfterReorderPreserved = HasStableSelection(current.Rows) && HasStableListViewSelection(listView, stableId);
+            var selectionAfterReorderPreserved = HasStableSelection(current.Rows) && HasTwoRowSelection(listView, stableId, attributeId);
 
             File.Delete(renamedPath);
             SHChangeNotify(Deleted, PathUnicode, renamedPath, null);
@@ -267,7 +269,7 @@ internal static class ShellChangeReconciliationProbe
 
             var stableIdentityPreserved = current.Rows.Single(row => row.DisplayName == "stable.txt").Id == stableId;
             var sizeFolderIdentityPreserved = current.Rows.Single(row => row.DisplayName == "renamed-size-folder").Id == sizeFolderId;
-            var selectionAfterDeletePreserved = HasStableSelection(current.Rows) && HasStableListViewSelection(listView, stableId);
+            var selectionAfterDeletePreserved = HasStableSelection(current.Rows) && HasTwoRowSelection(listView, stableId, attributeId);
             var renameIdentityPreserved = renamedId == createdId;
             var addedNewIdentity = createdId != stableId && renamedId != stableId;
             Console.WriteLine($"shell-change-reconcile: create-notified={createEvent}; update-notified={updateEvent}; update-item-notified={updatedItemEvent}; rename-notified={renameEvent}; rename-folder-notified={renameFolderEvent}; delete-notified={deleteEvent}; " +
@@ -280,7 +282,7 @@ internal static class ShellChangeReconciliationProbe
                 $"scan-workers={initialScanWorker}/{updateScanWorker}/{folderRenameScanWorker};scan-on-worker={initialScanWorker != Environment.CurrentManagedThreadId}/{updateScanWorker != Environment.CurrentManagedThreadId}/{folderRenameScanWorker != Environment.CurrentManagedThreadId};" +
                 $"scan-published-on-owner={initialScanPublishedOnOwner}/{updateScanPublishedOnOwner}/{folderRenameScanPublishedOnOwner};" +
                 $"selection-after-update/reorder/delete={selectionAfterUpdatePreserved}/{selectionAfterReorderPreserved}/{selectionAfterDeletePreserved}; " +
-                $"listview-row-count={SendMessageW(listView, LvmGetItemCount, 0, 0)};selection-focused-row-preserved={selectionAfterUpdatePreserved}/{selectionAfterReorderPreserved}/{selectionAfterDeletePreserved};" +
+                $"listview-row-count={SendMessageW(listView, LvmGetItemCount, 0, 0)};multi-selection-and-focus-preserved={selectionAfterUpdatePreserved}/{selectionAfterReorderPreserved}/{selectionAfterDeletePreserved};" +
                 $"final-row-count={current.Rows.Count}; foreground-unchanged={GetForegroundWindow() == foreground}; hidden-window={IsWindowVisible(window.Handle) == false && !IsWindowVisible(listParent)}");
             if (!createEvent || !updateEvent || !updatedItemEvent || !renameEvent || !renameFolderEvent || !deleteEvent || !stableIdentityPreserved || !updateIdPreserved ||
                 !renameIdentityPreserved || !addedNewIdentity ||
@@ -297,8 +299,13 @@ internal static class ShellChangeReconciliationProbe
             VerifyCrossPaneMove(foreground, crossVolume: true);
             return 0;
 
-            bool HasStableSelection(IReadOnlyList<ShellListViewRow> rows) => selection.Resolve(rows)
-                .Any(state => state.RowId == stableId && state.Selected && state.Focused);
+            bool HasStableSelection(IReadOnlyList<ShellListViewRow> rows)
+            {
+                var states = selection.Resolve(rows);
+                return states.Count(state => state.Selected) == 2 &&
+                    states.Any(state => state.RowId == stableId && state.Selected && state.Focused) &&
+                    states.Any(state => state.RowId == attributeId && state.Selected && !state.Focused);
+            }
         }
         finally
         {
@@ -925,6 +932,22 @@ internal static class ShellChangeReconciliationProbe
             break;
         }
         return selectedStableRow && focusedStableRow;
+    }
+
+    private static bool HasTwoRowSelection(nint listView, long focusedId, long otherSelectedId)
+    {
+        var count = SendMessageW(listView, LvmGetItemCount, 0, 0).ToInt32();
+        var selectedIds = new HashSet<long>();
+        long focusedRowId = 0;
+        for (var index = 0; index < count; index++)
+        {
+            var rowId = GetItemId(listView, index);
+            var state = unchecked((uint)SendMessageW(listView, LvmGetItemState, index,
+                (nint)(LvisSelected | LvisFocused)));
+            if ((state & LvisSelected) != 0) selectedIds.Add(rowId);
+            if ((state & LvisFocused) != 0) focusedRowId = rowId;
+        }
+        return selectedIds.SetEquals([focusedId, otherSelectedId]) && focusedRowId == focusedId;
     }
 
     private static IReadOnlyDictionary<string, ShellListViewRowScanResult> ScanLatestPaths(
