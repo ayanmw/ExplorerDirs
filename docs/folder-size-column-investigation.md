@@ -1366,3 +1366,9 @@ Private Desktop 隐藏 view 探针将 `child` 的递归大小快照覆盖为 1,2
 Microsoft API 页面说明 `RefreshObject` 是重绘指定项目，`UpdateObject` 是以新项目替换旧项目；本探针复现了其调用，但派生递归列值依赖 provider 缓存，结果仍不满足“值更新且排序位置正确”的门槛。另需考虑 `IShellFolderView` 自 Windows 7 起已不再供应用使用，Microsoft 建议使用 `IFolderView2` / `IFolderView`；即使当前 Shell 对象仍可 QueryInterface，也不应把该旧接口作为产品依赖。参考 [RefreshObject](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-ishellfolderview-refreshobject)、[UpdateObject](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-ishellfolderview-updateobject) 和 [IShellFolderView 接口状态](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nn-shlobj_core-ishellfolderview)。
 
 结论：该单行 API 路线关闭，不接入 ExplorerBrowser。当前有证据的递归大小值更新和正确重排仍需完整 `IShellView::Refresh()`，代价是整视图重枚举；隐藏 Private Desktop 合成 view 未测可见刷新闪烁、真实 filesystem 多窗格体验或产品接线。
+
+### 2026-11-01：为按需递归大小列补齐隔离 watchdog 入口
+
+复核发现上述按需列值探针已有 NativeProbe 命令，但 `scripts/native-probe-watchdog.ps1` 没有对应映射；直接用统一 watchdog 调用时会在启动前以“不支持的 probe”退出。将该场景加入 synthetic Shell 的唯一 CLSID/夹具生命周期、CLI 映射和超时 dump 保护，再从 Release 构建产物经 watchdog 重跑。100 目录、102 行的 WPF Private Desktop view 初始请求 22 行并同步扫描 22 个目录、访问 213 个后代条目；主动读取全部行后累计 101 次扫描、1,003 个条目，比较阶段扫描为 0。该轮扫描计时为 8.635 ms / 24.333 ms，随机器缓存和负载变化，不作为性能承诺；缓存载荷统计由 22 项增至 101 项、30,492 字节，不含分配器开销。探针退出码 0，前台 HWND 与 last-input tick 未变化，临时注册和夹具清理通过。日志：`src/.state/native-probe-watchdog/20261101-114438-21280a4f.stdout.log`。
+
+本次只修复隔离测试入口并复验现有原型，没有改产品宿主或发布版本。结果再次表明“按需”是列值被 Shell 请求时同步递归扫描，不等同于后台扫描；刷新原型虽已验证后台扫描后通过完整 view refresh 更新和重排，但单行派生值刷新仍未找到可靠方案。没有测可见 UI 阻塞/闪烁、真实磁盘或网络路径、多窗格并发、ExplorerBrowser 列请求及产品接线。

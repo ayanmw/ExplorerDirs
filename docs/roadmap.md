@@ -5595,3 +5595,7 @@ SettingsSmoke 新增父/子进程合同：父进程写入含递归大小 prototy
 ### 2026-11-01：关闭旧 `IShellFolderView` 单行刷新/重排候选
 
 在 100 目录、102 行隐藏 Shell view 中，`RefreshObject` 未重取递归大小；`UpdateObject` 可改列值但产生空白行且不重排。`Rearrange` 可清除空白行，但丢失自定义大小排序；重新设回升序或反向降序均未触发新的比较，反向排序反例确认行序错误。此接口自 Windows 7 起不再建议应用使用，故关闭该旧接口路线，不接入产品。当前单行派生值刷新及排序正确性仍未解决，完整 view refresh 是唯一已验证闭环，后续须评估其产品视图集成的刷新成本与可见体验。证据边界和官方 API 链接见[递归大小列调查](folder-size-column-investigation.md#2026-11-01ishellfolderview-单项更新与排序重排探针)。
+
+### 2026-11-01：按需递归大小列原型可由统一 watchdog 重跑
+
+NativeProbe 已有按需列值扫描，但统一 watchdog 缺少该场景的启动映射；补齐映射、唯一临时 Shell 注册/夹具清理及超时 dump 配置后，Release 构建与 WPF Private Desktop 复跑通过。100 目录 view 初始仅请求/扫描 22 行；读完整列后累计 101 次目录扫描、1,003 个条目，排序比较阶段无递归扫描。扫描仍发生在列值请求线程上，不是后台首屏加载；该原型未接 ExplorerBrowser 产品，未测可见 UI 或真实文件系统性能。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01为按需递归大小列补齐隔离-watchdog-入口)。
