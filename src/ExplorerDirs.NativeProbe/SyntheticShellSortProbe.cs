@@ -747,11 +747,11 @@ public static class SyntheticShellSortProbe
                     }
                     void ReadSharedViewColumns()
                     {
-                        sharedInitialNames = ReadNames(sharedSizeListView, module, expectedCount: expectedInitialCount);
+                        sharedInitialNames = WaitForNames(sharedSizeListView, module, "child", expectedCount: expectedInitialCount);
                         sharedInitialSizes = ReadColumnTexts(sharedSizeListView, module, 1, expectedCount: expectedInitialCount);
                         for (var index = 0; index < additionalListViews.Length; index++)
                         {
-                            additionalInitialNames[index] = ReadNames(additionalListViews[index], module, expectedCount: expectedInitialCount);
+                            additionalInitialNames[index] = WaitForNames(additionalListViews[index], module, "child", expectedCount: expectedInitialCount);
                             additionalInitialSizes[index] = ReadColumnTexts(additionalListViews[index], module, 1, expectedCount: expectedInitialCount);
                         }
                     }
@@ -767,6 +767,27 @@ public static class SyntheticShellSortProbe
                         Console.WriteLine($"synthetic-async-recursive-size-queue-gate: rejected-before-release={rejectedBeforeRelease}; queue-capacity=256; distinct-roots=4");
                         Marshal.GetDelegateForFunctionPointer<NativeVoidCall>(
                             NativeLibrary.GetExport(module, "ReleaseSyntheticAsyncRecursiveSizeQueueGateForProbe"))();
+                        var acceptedScanTarget = expectedAsyncScanCount - rejectedBeforeRelease;
+                        var acceptedDrainDeadline = Math.Min(deadline, Environment.TickCount64 + 15_000);
+                        var getFinishedScans = Marshal.GetDelegateForFunctionPointer<NativeLibraryUnloadContractSmoke>(
+                            NativeLibrary.GetExport(module, "GetSyntheticAsyncRecursiveSizeScanFinishedCountForProbe"));
+                        while (getFinishedScans() < acceptedScanTarget && Environment.TickCount64 < acceptedDrainDeadline)
+                            Pump(25);
+                        var updatedRows = 0;
+                        foreach (var targetListView in new[] { sizeListView, sharedSizeListView }.Concat(additionalListViews))
+                        {
+                            var rowCount = checked((int)SendMessageW(targetListView, LvmGetItemCount, 0, 0));
+                            for (var rowIndex = 0; rowIndex < rowCount; rowIndex++)
+                            {
+                                _ = SendMessageW(targetListView, LvmUpdate, rowIndex, 0);
+                                updatedRows++;
+                            }
+                        }
+                        var scansAfterRowUpdate = ReadCounter(module, "GetSyntheticOnDemandSizeScanCount");
+                        foreach (var targetView in new[] { view, view2 }.Concat(additionalViews))
+                            Check(At<RefreshView>(targetView, 8)(targetView));
+                        Pump(500);
+                        Console.WriteLine($"synthetic-async-recursive-size-overflow-retry: stage=after-accepted-queue-drain; accepted-scans={acceptedScanTarget}; scans-after-LVM_UPDATE={scansAfterRowUpdate}; scans-after-IShellView.Refresh={ReadCounter(module, "GetSyntheticOnDemandSizeScanCount")}; listview-update-rows={updatedRows}; refreshed-views={1 + (view2 != 0 ? 1 : 0) + additionalViews.Length}");
                     }
                     var allAsyncColumnValuesReady = AllAsyncColumnValuesReady(initialNames, initialSizes);
                     var allSharedAsyncColumnValuesReady = AllSharedAsyncColumnValuesReady();
