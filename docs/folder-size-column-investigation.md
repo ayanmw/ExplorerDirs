@@ -1672,3 +1672,11 @@ RED 基线仅在递归函数内部无取消检查时失败：关闭前累计 32 
 在四个不同根、每根 520 个目录（每目录一个文件）的隐藏 Shell view 中启用 view-batch，并让队列 worker 在扫描闸门处等待。四个 view 均排入批次后先销毁全部 view，再放行 worker；最终 4 个批次均结束，递归扫描数为 0、Shell 更新通知数为 0。Private Desktop watchdog exit 0，前台 HWND 与 last-input tick 不变，隔离桌面及临时注册/夹具清理通过。日志：`src/.state/native-probe-watchdog/20261101-164218-85ad1cc0.stdout.log`、`20261101-164218-85ad1cc0.stderr.log`。
 
 此结果将“已排队批次取消”从此前每 view 500 项扩展到 520 项，并确认取消发生在目录指标扫描开始之前；不覆盖已进入单次文件系统调用时的中断能力，也不是产品 ExplorerBrowser 或可见 UI 验收。
+
+### 2026-11-01：隐藏 Shell 递归列原型默认使用 view-batch
+
+基于队列超限对照，将 NativeProbe 隐藏 Shell view 的异步按需扫描默认策略改为按 view 合并批次；设置 `EXPLORER_DIRS_NATIVEPROBE_ASYNC_BATCH_BY_VIEW=0` 可显式回到逐项模式，`=1` 仍可显式选批次。强制队列饱和实验要求显式选择逐项模式，避免误把批次下没有队列溢出当成逐项容量合同。
+
+默认环境下运行四个不同根、每根 500 个目录、缓存容量 2,048 的隐藏 Shell view：2,004 个目录唯一扫描完成，队列拒绝 0、重复扫描 0、每 view 一次通知，四份列值均为 502/502，选择/焦点全部保留。Private Desktop watchdog exit 0，前台/last-input 与隔离清理守卫通过。日志：`src/.state/native-probe-watchdog/20261101-164532-858ca37e.stdout.log`、`20261101-164532-858ca37e.stderr.log`。
+
+逐项 A/B 明确设置 `EXPLORER_DIRS_NATIVEPROBE_ASYNC_BATCH_BY_VIEW=0`，四根各 520 个目录、缓存 4,096 时，在释放 worker 前拒绝 34 项并按预期停在容量门槛。队列排空后的缺值影响已由前节的延续诊断确认。日志：`src/.state/native-probe-watchdog/20261101-164612-22d0d270.stdout.log`、`20261101-164612-22d0d270.stderr.log`。两种结果均为隐藏合成 `IShellView` 原型证据；产品 ExplorerBrowser 与发布包未修改。

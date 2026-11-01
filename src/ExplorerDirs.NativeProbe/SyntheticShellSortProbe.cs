@@ -343,7 +343,10 @@ public static class SyntheticShellSortProbe
         var asyncSharedViewRootMode = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_SHARED_VIEW_ROOTS") ?? "same";
         var asyncSharedViewDistinctRoots = asyncSharedViewProbe && asyncSharedViewRootMode == "distinct";
         var asyncQueueSaturationRequested = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_FORCE_QUEUE_SATURATION") == "1";
-        var asyncParentBatchProbe = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_BATCH_BY_VIEW") == "1";
+        var asyncBatchByViewSetting = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_BATCH_BY_VIEW");
+        if (!string.IsNullOrEmpty(asyncBatchByViewSetting) && asyncBatchByViewSetting is not ("0" or "1"))
+            throw new ArgumentException("View-batch mode must be unset, 0 (per-row), or 1 (view-batch).", nameof(asyncBatchByViewSetting));
+        var asyncParentBatchProbe = asyncOnDemandRecursiveSize && asyncBatchByViewSetting != "0";
         var asyncScanDelayText = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_SCAN_DELAY_MS");
         var asyncScanDelayMs = string.IsNullOrWhiteSpace(asyncScanDelayText) ? 0 :
             int.TryParse(asyncScanDelayText, out var parsedAsyncScanDelayMs) ? parsedAsyncScanDelayMs : -1;
@@ -369,8 +372,8 @@ public static class SyntheticShellSortProbe
         if (asyncSharedViewRootMode is not ("same" or "distinct") ||
             (asyncSharedViewRootMode == "distinct" && (!asyncSharedViewProbe || asyncSharedViewCount != 4)))
             throw new ArgumentException("Distinct recursive-size roots require the four-view shared-store probe.", nameof(asyncSharedViewRootMode));
-        if (asyncQueueSaturationRequested && !asyncQueueSaturationProbe)
-            throw new ArgumentException("Forced queue saturation requires four active views on distinct roots.", nameof(asyncQueueSaturationRequested));
+        if (asyncQueueSaturationRequested && (!asyncQueueSaturationProbe || asyncParentBatchProbe))
+            throw new ArgumentException("Forced queue saturation requires four distinct-root views and explicit per-row mode (set ASYNC_BATCH_BY_VIEW=0).", nameof(asyncQueueSaturationRequested));
         if (asyncParentBatchProbe && (!recursiveDirectorySizeSortOnly || !asyncOnDemandRecursiveSize))
             throw new ArgumentException("View-batched recursive-size scanning requires the on-demand Shell view probe.", nameof(asyncParentBatchProbe));
         if (asyncCancelAfterQueueProbe && (!asyncParentBatchProbe || !asyncSharedViewProbe || asyncSharedViewCount != 4))

@@ -5728,3 +5728,7 @@ Q-Dir 对照确认 Type 列的递归 counts 也需要复用后台扫描值。Nat
 ### 2026-11-01：高行数 view-batch 排队关闭验证
 
 四个不同根各 520 个目录时，按 view 批次在 worker 门闩处排队；关闭全部 view 后再放行，4 个批次结束且扫描和 Shell 通知均为 0。Private Desktop 前台、输入与清理守卫通过。队列取消合同扩展到高于原 500 目录夹具的负载；仍只证明 NativeProbe 已排队任务取消，不代表产品接线或在途文件系统调用可中断。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01高行数批次排队期间关闭全部-view)。
+
+### 2026-11-01：隐藏 Shell 递归列原型默认 view-batch
+
+NativeProbe 隐藏 Shell 异步按需扫描现默认按 view 合并，显式 `EXPLORER_DIRS_NATIVEPROBE_ASYNC_BATCH_BY_VIEW=0` 保留逐项 A/B。默认四根×500 目录实验完成 2,004/2,004 唯一扫描，零拒绝/重复，四视图值、通知及选择焦点通过；逐项四根×520 的强制压力实验仍复现 34 项队列拒绝。该默认只适用于隔离原型，产品 ExplorerBrowser 未接线。详见[调查记录](folder-size-column-investigation.md#2026-11-01隐藏-shell-递归列原型默认使用-view-batch)。
