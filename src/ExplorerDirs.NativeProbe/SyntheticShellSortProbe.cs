@@ -1789,6 +1789,44 @@ public static class SyntheticShellSortProbe
         var itemPath = Path.Combine(backingFolder, itemName);
         var renamedItemPath = Path.Combine(backingFolder, renamedItemName);
         File.WriteAllText(itemPath, "post-recreate-notification");
+        var publishRecursiveSnapshot = Marshal.GetDelegateForFunctionPointer<PublishRecursiveSizeSnapshot>(
+            NativeLibrary.GetExport(module, "PublishSyntheticRecursiveSizeSnapshotForViewProbe"));
+        var hasRecursiveSnapshot = Marshal.GetDelegateForFunctionPointer<HasRecursiveSizeSnapshot>(
+            NativeLibrary.GetExport(module, "HasSyntheticRecursiveSizeSnapshotForViewProbe"));
+        const ulong recursiveSnapshotSentinel = 0xD1A6BEEF;
+        Check(publishRecursiveSnapshot(view, "child", recursiveSnapshotSentinel));
+        if (!hasRecursiveSnapshot(view, "child"))
+            throw new InvalidOperationException("The active synthetic view did not retain its published child recursive-size snapshot.");
+        var childDirectory = Path.Combine(backingFolder, "child");
+        Check(SHParseDisplayName(childDirectory, 0, out var childDirectoryPidl, 0, out _));
+        if (childDirectoryPidl == 0) throw new InvalidOperationException("Could not parse the recursive-size child folder PIDL.");
+        try
+        {
+            SHChangeNotify(ShcneUpdateitem, 0, childDirectoryPidl, 0);
+            var invalidationDeadline = Environment.TickCount64 + 3000;
+            while (hasRecursiveSnapshot(view, "child") && Environment.TickCount64 < invalidationDeadline) Pump(20);
+            var invalidatedByShellView = !hasRecursiveSnapshot(view, "child");
+            Console.WriteLine($"synthetic-size-update-notification: event=SHCNE_UPDATEITEM; target=child-folder; snapshot-invalidated={invalidatedByShellView}");
+            if (!invalidatedByShellView)
+                throw new TimeoutException("A real SHChangeNotify event did not reach the active synthetic view to invalidate the child's recursive-size snapshot.");
+        }
+        finally { ILFree(childDirectoryPidl); }
+        Check(publishRecursiveSnapshot(view, "child", recursiveSnapshotSentinel + 1));
+        var changedNestedFile = Path.Combine(childDirectory, "recursive-size-notification-check.dat");
+        File.WriteAllBytes(changedNestedFile, [0x52]);
+        Check(SHParseDisplayName(childDirectory, 0, out childDirectoryPidl, 0, out _));
+        if (childDirectoryPidl == 0) throw new InvalidOperationException("Could not reparse the recursive-size child folder PIDL.");
+        try
+        {
+            SHChangeNotify(ShcneUpdatedir, 0, childDirectoryPidl, 0);
+            var nestedInvalidationDeadline = Environment.TickCount64 + 3000;
+            while (hasRecursiveSnapshot(view, "child") && Environment.TickCount64 < nestedInvalidationDeadline) Pump(20);
+            var nestedContentsInvalidated = !hasRecursiveSnapshot(view, "child");
+            Console.WriteLine($"synthetic-size-update-notification: event=SHCNE_UPDATEDIR; target=child-folder; nested-file-created=True; snapshot-invalidated={nestedContentsInvalidated}");
+            if (!nestedContentsInvalidated)
+                throw new TimeoutException("A Shell directory-content notification did not reach the active parent view to invalidate its recursive-size snapshot.");
+        }
+        finally { ILFree(childDirectoryPidl); }
         Check(SHParseDisplayName(backingFolder, 0, out var absolutePidl, 0, out _));
         if (absolutePidl == 0) throw new InvalidOperationException("Could not parse the physical backing-folder PIDL.");
         try
@@ -3050,6 +3088,7 @@ public static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ScheduleSingleRefresh(nint view);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int NotifySingleRefresh(nint view);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int PublishRecursiveSizeSnapshot(nint view, [MarshalAs(UnmanagedType.LPWStr)] string childName, ulong bytes);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] [return: MarshalAs(UnmanagedType.Bool)] private delegate bool HasRecursiveSizeSnapshot(nint view, [MarshalAs(UnmanagedType.LPWStr)] string childName);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RenameItems(nint self, nint dataObject, [MarshalAs(UnmanagedType.LPWStr)] string newName);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DeleteItems(nint self, nint dataObject);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int NewItem(nint self, nint destination, uint attributes, [MarshalAs(UnmanagedType.LPWStr)] string name, nint template, nint progressSink);

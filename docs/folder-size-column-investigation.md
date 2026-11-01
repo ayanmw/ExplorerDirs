@@ -1200,3 +1200,9 @@ NativeProbe Release 构建 0 警告/错误；`--shell-change-reconciliation` 退
 继续追踪缓存正确性时发现，删除 `folder\file.txt` 只清理文件路径下方的项不会使 `folder` 行上缓存的递归总量失效。缓存现按变更路径同时清除匹配项与所有路径祖先；目录移除/重命名还清除旧/新目录子树。合成 `SFVM_FSNOTIFY` 覆盖 create/delete/mkdir/rmdir/item rename/folder rename/update item/update dir，rename 两端 PIDL 分别处理；递归总量变化通知继续返回 `E_NOTIMPL` 交给 DefView 默认更新。
 
 回归先在旧逻辑上复现：对嵌套文件路径发送 `SHCNE_DELETE` 后，父目录快照仍在，合同失败；修复后 `recursive-size-ancestor-invalidation-passed`、`recursive-size-subtree-invalidation-passed` 和 callback 路径 `recursive-size-parent-summary-invalidation-passed` 均通过，且兄弟路径不误删。Native adapter `/W4 /WX`、NativeProbe Release 和 `--static-shell-column-folder-smoke` 通过，`window-created=False`。仍未验证注册到真实 view 的外部变更通知时序、ExplorerBrowser 产品接线、用户可见排序刷新或缓存容量上限。
+
+### 2026-11-01：活动隔离 Shell view 收到递归大小变更通知
+
+此前直接调用 provider 回调只能证明缓存失效逻辑，不能证明 Shell 会把事件投递给 view。NativeProbe 现通过活动的 synthetic `IShellView` 与 `WPF HwndSource` 隐藏宿主验证完整投递：先为 `child` 行发布哨兵快照，再将绝对 PIDL 的 `SHCNE_UPDATEITEM` 与 `SHCNE_UPDATEDIR` 分别交给 Shell 通知系统；第二项前在 `child` 中创建临时文件。两事件到达活动 view 后，provider 中 `child` 快照均变为 miss。既有目录更新检查同时看到根列表一轮重枚举、303 行可见，view 没有安排自有延迟刷新。Private Desktop probe exit 0，前台 HWND/最后输入 tick 未变，`isolation-clean=True`。
+
+该实验确认本机 Windows Shell 的显式 `SHChangeNotify` 经活动 view 注册路径可触发递归大小缓存失效；没有验证不显式发送 Shell 通知的任意第三方写入、跨进程事件生成时序、ExplorerBrowser 产品接线、可见列刷新或长期缓存容量。
