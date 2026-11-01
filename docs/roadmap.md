@@ -5591,3 +5591,7 @@ SettingsSmoke 新增父/子进程合同：父进程写入含递归大小 prototy
 ### 2026-11-01：关闭当前 DefView 单行派生列刷新候选
 
 100 行隐藏合成 view 中，`SFVM_UPDATEOBJECT` 的相对及绝对 PIDL 形式均未重取已变化的递归大小值或触发排序重排，并在一轮测试中增加空名称行；虽然消息返回 `0`，该返回值不能作为列刷新成功证据。当前单行更新候选不进入产品，递归大小列后续仍以完整 `IShellView::Refresh()` 原型为已验证基线，并需继续评估其用户可见体验与刷新成本。详情见[递归大小列调查](folder-size-column-investigation.md)。
+
+### 2026-11-01：关闭旧 `IShellFolderView` 单行刷新/重排候选
+
+在 100 目录、102 行隐藏 Shell view 中，`RefreshObject` 未重取递归大小；`UpdateObject` 可改列值但产生空白行且不重排。`Rearrange` 可清除空白行，但丢失自定义大小排序；重新设回升序或反向降序均未触发新的比较，反向排序反例确认行序错误。此接口自 Windows 7 起不再建议应用使用，故关闭该旧接口路线，不接入产品。当前单行派生值刷新及排序正确性仍未解决，完整 view refresh 是唯一已验证闭环，后续须评估其产品视图集成的刷新成本与可见体验。证据边界和官方 API 链接见[递归大小列调查](folder-size-column-investigation.md#2026-11-01ishellfolderview-单项更新与排序重排探针)。

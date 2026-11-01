@@ -8,6 +8,7 @@ using ExplorerDirs.App;
 public static class SyntheticShellSortProbe
 {
     private static readonly Guid FolderView2Id = new("1AF3A467-214F-4298-908E-06B03E0B39F9");
+    private static readonly Guid ShellFolderViewId = new("37A378C0-F82D-11CE-AE65-08002B2E1262");
     private static readonly Guid ColumnManagerId = new("D8EC27BB-3F3B-4042-B10A-4ACFD924D453");
     private static readonly Guid ShellFolder2Id = new("93F2F68C-1D1B-11D3-A30E-00C04F79ABD1");
     private static readonly Guid ContextMenuId = new("000214E4-0000-0000-C000-000000000046");
@@ -264,10 +265,10 @@ public static class SyntheticShellSortProbe
         var shellWindowScrollProbe = sizeUpdateStrategy == "single-item-recreate-shell-window-scroll";
         if (exerciseUpdateNotifications && sizeUpdateStrategy == "all")
             throw new ArgumentException("Run each recursive-size update strategy in its own fresh probe process; 'all' cannot share a view baseline.");
-        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("single-item" or "single-item-reapply-column" or "single-item-reapply-column-recreate-view" or "single-item-reapply-column-save-state-recreate-window" or "single-item-recreate-shell-window" or "single-item-recreate-shell-window-multiselect" or "single-item-recreate-shell-window-scroll" or "single-item-capture-reapply-recreate-window" or "single-item-live-cache-publish" or "single-item-lvm-update-live-cache-publish" or "item-plus-parent-live-cache-publish" or "full-view-refresh-live-cache-publish" or "full-view-refresh-background-scan-live-cache-publish" or "full-view-refresh-redraw-live-cache-publish" or "large-view-sort-refresh" or "large-view-sort-updateobject" or "large-view-sort-updateobject-absolute" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
+        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("single-item" or "single-item-reapply-column" or "single-item-reapply-column-recreate-view" or "single-item-reapply-column-save-state-recreate-window" or "single-item-recreate-shell-window" or "single-item-recreate-shell-window-multiselect" or "single-item-recreate-shell-window-scroll" or "single-item-capture-reapply-recreate-window" or "single-item-live-cache-publish" or "single-item-lvm-update-live-cache-publish" or "item-plus-parent-live-cache-publish" or "full-view-refresh-live-cache-publish" or "full-view-refresh-background-scan-live-cache-publish" or "full-view-refresh-redraw-live-cache-publish" or "large-view-sort-refresh" or "large-view-sort-updateobject" or "large-view-sort-updateobject-absolute" or "large-view-sort-ishellfolderview-refreshobject" or "large-view-sort-ishellfolderview-updateobject" or "large-view-sort-ishellfolderview-updateobject-resort" or "large-view-sort-ishellfolderview-updateobject-rearrange" or "large-view-sort-ishellfolderview-updateobject-rearrange-restore-sort" or "large-view-sort-ishellfolderview-updateobject-rearrange-toggle-sort" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
             throw new ArgumentException($"Unknown recursive-size update strategy '{sizeUpdateStrategy}'.");
         var largeViewSortRefreshProbe = sizeUpdateStrategy == "large-view-sort-refresh";
-        var largeViewSortUpdateObjectProbe = sizeUpdateStrategy is "large-view-sort-updateobject" or "large-view-sort-updateobject-absolute";
+        var largeViewSortUpdateObjectProbe = sizeUpdateStrategy is "large-view-sort-updateobject" or "large-view-sort-updateobject-absolute" or "large-view-sort-ishellfolderview-refreshobject" or "large-view-sort-ishellfolderview-updateobject" or "large-view-sort-ishellfolderview-updateobject-resort" or "large-view-sort-ishellfolderview-updateobject-rearrange" or "large-view-sort-ishellfolderview-updateobject-rearrange-restore-sort" or "large-view-sort-ishellfolderview-updateobject-rearrange-toggle-sort";
         var largeViewSortProbe = largeViewSortRefreshProbe || largeViewSortUpdateObjectProbe;
         if (largeViewSortProbe && (!onDemandRecursiveSize || onDemandFolderCount == 0))
             throw new ArgumentException("The large-view sort probe requires on-demand recursive sizing and at least one synthetic sibling folder.");
@@ -1430,7 +1431,7 @@ public static class SyntheticShellSortProbe
         try
         {
             Console.WriteLine($"synthetic-size-update: selected-strategy={strategyFilter}");
-            if (strategyFilter is "large-view-sort-refresh" or "large-view-sort-updateobject" or "large-view-sort-updateobject-absolute")
+            if (strategyFilter is "large-view-sort-refresh" or "large-view-sort-updateobject" or "large-view-sort-updateobject-absolute" or "large-view-sort-ishellfolderview-refreshobject" or "large-view-sort-ishellfolderview-updateobject" or "large-view-sort-ishellfolderview-updateobject-resort" or "large-view-sort-ishellfolderview-updateobject-rearrange" or "large-view-sort-ishellfolderview-updateobject-rearrange-restore-sort" or "large-view-sort-ishellfolderview-updateobject-rearrange-toggle-sort")
             {
                 var listView = FindListView(view);
                 var namesBeforeSort = WaitForNames(listView, module, "child", loadFolderCount + 2);
@@ -1449,20 +1450,37 @@ public static class SyntheticShellSortProbe
                     throw new InvalidOperationException("The large-view probe did not establish an ascending recursive-size Shell sort before refresh.");
 
                 var updateViaRefresh = strategyFilter == "large-view-sort-refresh";
-                RunSizeUpdateStrategy(strategyFilter, 1,
-                    () =>
-                    {
-                        if (updateViaRefresh) Check(At<RefreshView>(view, 8)(view));
-                        else
+                var usesShellFolderView = strategyFilter is "large-view-sort-ishellfolderview-refreshobject" or "large-view-sort-ishellfolderview-updateobject" or "large-view-sort-ishellfolderview-updateobject-resort" or "large-view-sort-ishellfolderview-updateobject-rearrange" or "large-view-sort-ishellfolderview-updateobject-rearrange-restore-sort" or "large-view-sort-ishellfolderview-updateobject-rearrange-toggle-sort";
+                nint shellFolderView = 0;
+                if (usesShellFolderView)
+                {
+                    var queryResult = Marshal.QueryInterface(view, in ShellFolderViewId, out shellFolderView);
+                    Console.WriteLine($"synthetic-size-update: strategy={strategyFilter}; ishellfolderview-qi=0x{queryResult:X8}; available={queryResult >= 0}");
+                    if (queryResult < 0) return;
+                }
+                try
+                {
+                    RunSizeUpdateStrategy(strategyFilter, 1,
+                        () =>
                         {
-                            Check(At<GetWindow>(view, 3)(view, out var shellViewWindow));
-                            UpdateShellViewObject(shellViewWindow, folder, rootPidl, "child",
-                                absolutePidls: strategyFilter == "large-view-sort-updateobject-absolute");
-                        }
-                    }, module, folderView, view, backingFolder,
-                    publishLiveSnapshot: true, expectLiveRefresh: true, largeViewLoad: true,
-                    expectedRowCount: loadFolderCount + 2, expectedFolderSortPair: ("child", "folder-000"),
-                    expectedInitialChildSize: "30", host: host);
+                            if (updateViaRefresh) Check(At<RefreshView>(view, 8)(view));
+                            else if (usesShellFolderView)
+                                UpdateThroughShellFolderView(shellFolderView, folderView, folder, strategyFilter);
+                            else
+                            {
+                                Check(At<GetWindow>(view, 3)(view, out var shellViewWindow));
+                                UpdateShellViewObject(shellViewWindow, folder, rootPidl, "child",
+                                    absolutePidls: strategyFilter == "large-view-sort-updateobject-absolute");
+                            }
+                        }, module, folderView, view, backingFolder,
+                        publishLiveSnapshot: true, expectLiveRefresh: true, largeViewLoad: true,
+                        expectedRowCount: loadFolderCount + 2, expectedFolderSortPair: ("child", "folder-000"),
+                        expectedInitialChildSize: "30", host: host);
+                }
+                finally
+                {
+                    if (shellFolderView != 0) Marshal.Release(shellFolderView);
+                }
                 return;
             }
             if (strategyFilter == "single-item")
@@ -1632,6 +1650,73 @@ public static class SyntheticShellSortProbe
         }
     }
 
+    private static void UpdateThroughShellFolderView(nint shellFolderView, nint folderView, nint folder, string strategy)
+    {
+        Check(At<ParseDisplayName>(folder, 3)(folder, 0, 0, "child", 0, out var childPidl, 0));
+        if (childPidl == 0) throw new InvalidOperationException("The synthetic namespace did not parse 'child' for IShellFolderView.");
+        try
+        {
+            uint itemIndex;
+            int result;
+            if (strategy == "large-view-sort-ishellfolderview-refreshobject")
+                result = At<RefreshShellFolderObject>(shellFolderView, 14)(shellFolderView, childPidl, out itemIndex);
+            else
+            {
+                result = At<UpdateShellFolderObject>(shellFolderView, 13)(shellFolderView, childPidl, childPidl, out itemIndex);
+                if (result >= 0 && strategy == "large-view-sort-ishellfolderview-updateobject-resort")
+                {
+                    var currentSort = CaptureNativeSortColumns(folderView);
+                    if (currentSort.Length == 0)
+                        throw new InvalidOperationException("The native Shell view did not retain the recursive-size sort to reapply.");
+                    var sort = Marshal.AllocCoTaskMem(checked(currentSort.Length * Marshal.SizeOf<NativeSortColumn>()));
+                    try
+                    {
+                        for (var index = 0; index < currentSort.Length; index++)
+                            Marshal.StructureToPtr(currentSort[index], sort + index * Marshal.SizeOf<NativeSortColumn>(), false);
+                        var sortResult = At<SetSortColumns>(folderView, 27)(folderView, sort, currentSort.Length);
+                        Console.WriteLine($"synthetic-size-update: strategy={strategy}; reapply-current-sort-result=0x{sortResult:X8}");
+                        Check(sortResult);
+                    }
+                    finally { Marshal.FreeCoTaskMem(sort); }
+                }
+                else if (result >= 0 && strategy == "large-view-sort-ishellfolderview-updateobject-rearrange")
+                {
+                    var rearrangeResult = At<RearrangeShellFolderView>(shellFolderView, 3)(shellFolderView, 0);
+                    Console.WriteLine($"synthetic-size-update: strategy={strategy}; rearrange-result=0x{rearrangeResult:X8}");
+                    Check(rearrangeResult);
+                }
+                else if (result >= 0 && strategy is "large-view-sort-ishellfolderview-updateobject-rearrange-restore-sort" or "large-view-sort-ishellfolderview-updateobject-rearrange-toggle-sort")
+                {
+                    var originalSort = CaptureNativeSortColumns(folderView);
+                    if (originalSort.Length == 0)
+                        throw new InvalidOperationException("The native Shell view did not retain the recursive-size sort before update.");
+                    var toggleDirection = strategy == "large-view-sort-ishellfolderview-updateobject-rearrange-toggle-sort";
+                    var rearrangeResult = At<RearrangeShellFolderView>(shellFolderView, 3)(shellFolderView, 0);
+                    Console.WriteLine($"synthetic-size-update: strategy={strategy}; rearrange-result=0x{rearrangeResult:X8}");
+                    Check(rearrangeResult);
+                    var sort = Marshal.AllocCoTaskMem(checked(originalSort.Length * Marshal.SizeOf<NativeSortColumn>()));
+                    try
+                    {
+                        for (var index = 0; index < originalSort.Length; index++)
+                        {
+                            var sortColumn = originalSort[index];
+                            if (toggleDirection) sortColumn.Direction = -sortColumn.Direction;
+                            Marshal.StructureToPtr(sortColumn, sort + index * Marshal.SizeOf<NativeSortColumn>(), false);
+                        }
+                        var sortResult = At<SetSortColumns>(folderView, 27)(folderView, sort, originalSort.Length);
+                        Console.WriteLine($"synthetic-size-update: strategy={strategy}; apply-sort-result=0x{sortResult:X8}; direction-toggled={toggleDirection}");
+                        Check(sortResult);
+                    }
+                    finally { Marshal.FreeCoTaskMem(sort); }
+                }
+            }
+            Console.WriteLine($"synthetic-size-update: strategy={strategy}; ishellfolderview-result=0x{result:X8}; item-index={itemIndex}");
+            if (result < 0)
+                Console.WriteLine($"synthetic-size-update: strategy={strategy}; api-result=failed; diagnostic-only=True");
+        }
+        finally { ILFree(childPidl); }
+    }
+
     private static nint CloneItemIdList(nint pidl)
     {
         var size = 0;
@@ -1782,7 +1867,8 @@ public static class SyntheticShellSortProbe
         var notificationStarted = Environment.TickCount64;
         notify();
         var mapCallsAfterNotification = ReadCounter(module, "GetSyntheticMapColumnToScidCount");
-        if (name.StartsWith("large-view-sort-updateobject", StringComparison.Ordinal))
+        if (name.StartsWith("large-view-sort-updateobject", StringComparison.Ordinal) ||
+            name.StartsWith("large-view-sort-ishellfolderview-", StringComparison.Ordinal))
         {
             Pump(2500);
             var immediateNames = ReadNames(listView, module, expectedCount: -1);
@@ -1810,17 +1896,16 @@ public static class SyntheticShellSortProbe
             var missingNames = expectedNames.Where(item => !immediateNames.Contains(item, StringComparer.OrdinalIgnoreCase)).ToArray();
             var immediateSelection = HasSelectionAndFocus(listView, immediateNames, "small.bin");
             Console.WriteLine($"synthetic-size-update: strategy={name}; immediate-rows={immediateNames.Length}; child-count={immediateChildCount}; blank-name-count={blankNameCount}; duplicate-names=[{string.Join('|', duplicateNames)}]; unexpected-names=[{string.Join('|', unexpectedNames)}]; missing-names=[{string.Join('|', missingNames)}]; child-index={childIndex}; folder-000-index={folderIndex}; small-bin-index={fileIndex}; child-size={immediateChildSize}; child-before-folder-000={immediateChildBeforeFolder}; selection-focus={immediateSelection}; headers=[{string.Join('|', immediateHeaders)}]; columns-hr=0x{immediateColumnResult:X8}; columns=[{FormatColumns(immediateColumns)}]; sort=[{FormatSortColumns(immediateSort)}]; enum-delta={enumDelta}; size-detail-delta={detailsDelta}; compare-delta={compareDelta}");
-            var targetedUpdateObserved = immediateChildSize == updatedSize.ToString() && immediateChildBeforeFolder;
+            var targetedValueRefreshObserved = immediateChildSize == updatedSize.ToString();
+            var expectedChildBeforeFolder = name != "large-view-sort-ishellfolderview-updateobject-rearrange-toggle-sort";
+            var targetedSortReorderObserved = immediateChildBeforeFolder == expectedChildBeforeFolder;
             var onlyBlankUnexpectedRows = unexpectedNames.Length == blankNameCount && unexpectedNames.All(string.IsNullOrWhiteSpace);
-            var targetedUpdateWasNoOp = immediateChildSize == expectedInitialChildSize && !immediateChildBeforeFolder &&
-                (immediateChildCount == 1 || immediateChildCount == 2) &&
+            var expectedRowsPreserved = (immediateChildCount == 1 || immediateChildCount == 2) &&
                 (immediateNames.Length == expectedRowCount || immediateNames.Length == expectedRowCount + 1) &&
-                onlyBlankUnexpectedRows && missingNames.Length == 0 && duplicateNames.Length == 0 &&
-                enumDelta == 0 && detailsDelta <= 1 && compareDelta == 0;
-            if (!immediateSelection ||
-                (!targetedUpdateObserved && !targetedUpdateWasNoOp))
-                throw new InvalidOperationException($"SFVM_UPDATEOBJECT produced an unexpected large-view state: rows={immediateNames.Length}/{expectedRowCount}; child-count={immediateChildCount}; child-size={immediateChildSize}; child-before-folder-000={immediateChildBeforeFolder}; selection-focus={immediateSelection}; enum-delta={enumDelta}; details-delta={detailsDelta}; compare-delta={compareDelta}.");
-            Console.WriteLine($"synthetic-size-update: strategy={name}; targeted-property-refresh={(targetedUpdateObserved ? "observed" : "not-observed")}; row-count={immediateNames.Length}; duplicate-child={immediateChildCount > 1}; selection-focus-preserved=True");
+                onlyBlankUnexpectedRows && missingNames.Length == 0 && duplicateNames.Length == 0;
+            if (!immediateSelection || !expectedRowsPreserved)
+                throw new InvalidOperationException($"The targeted update API produced an unexpected large-view state: rows={immediateNames.Length}/{expectedRowCount}; child-count={immediateChildCount}; child-size={immediateChildSize}; child-before-folder-000={immediateChildBeforeFolder}; selection-focus={immediateSelection}; enum-delta={enumDelta}; details-delta={detailsDelta}; compare-delta={compareDelta}.");
+            Console.WriteLine($"synthetic-size-update: strategy={name}; targeted-value-refresh={(targetedValueRefreshObserved ? "observed" : "not-observed")}; expected-child-before-folder={expectedChildBeforeFolder}; sorted-reorder={(targetedSortReorderObserved ? "observed" : "not-observed")}; row-count={immediateNames.Length}; blank-name-count={blankNameCount}; enum-delta={enumDelta}; size-detail-delta={detailsDelta}; compare-delta={compareDelta}; selection-focus-preserved=True");
             return;
         }
 
@@ -3757,6 +3842,9 @@ public static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSortColumns(nint self, nint columns, int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSortColumnCount(nint self, out int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int RefreshView(nint self);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int RefreshShellFolderObject(nint self, nint childPidl, out uint itemIndex);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int UpdateShellFolderObject(nint self, nint oldChildPidl, nint newChildPidl, out uint itemIndex);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int RearrangeShellFolderView(nint self, nint sortParameter);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemObject(nint self, uint item, ref Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryContextMenu(nint self, nint menu, uint index, uint firstCommand, uint lastCommand, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryGetData(nint self, in FormatEtc format);

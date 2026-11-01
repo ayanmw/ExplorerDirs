@@ -1358,3 +1358,11 @@ Private Desktop 隐藏 view 探针将 `child` 的递归大小快照覆盖为 1,2
 为 100 个同级目录（102 行视图）建立递归大小升序，初始 `child=30 B` 排在 `folder-000=20 B` 之后；生产扫描器将活动 provider 快照更新为 `child=1 B` 后，分别调用 `SHShellFolderView_Message(SFVM_UPDATEOBJECT)` 并传入相对 PIDL、绝对 PIDL 对。两种调用都返回 `0`，但等待 2.5 秒后大小仍是 `30`、排序位置未变；行数从 102 变为 103，多出一个空名称行。没有触发重新枚举或比较回调，选择/焦点保持，列与排序设置未变。NativeProbe Release 构建无警告/错误，两个隐藏 Private Desktop 探针退出码为 0，前台、输入和隔离清理守卫通过。
 
 在此宿主上，返回 `0` 不代表派生属性已刷新；相对和绝对 PIDL 两条形式都没有达到更新目的，还引入额外空行。因此不把 `SFVM_UPDATEOBJECT` 接入产品。Microsoft 文档描述了传入旧/新 PIDL 对的默认视图更新消息，但同时提示该函数可能变化或不可用，见 [SHShellFolderView_Message 文档](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-shshellfolderview_message)。当前只有完整 `IShellView::Refresh()` 被验证能重取递归大小值并在排序下重排；其限制仍是全视图重枚举和未验证用户可见闪烁，见 [IShellView::Refresh 文档](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellview-refresh)。以上证据仅来自合成隐藏 Shell view，不证明所有系统版本或第三方 namespace 的行为，也未接入 ExplorerBrowser 产品。
+
+### 2026-11-01：`IShellFolderView` 单项更新与排序重排探针
+
+在同一 100 目录、102 行隐藏 DefView 合成负载中，先建立递归大小升序（`child=30 B`、`folder-000=20 B`），后台发布 `child=1 B` 后分别调用 `IShellFolderView::RefreshObject` 和 `UpdateObject`。`RefreshObject` 返回 `S_OK` 并给出项目索引，但值仍是 30，且列表多出一个空名称行；`UpdateObject` 返回 `S_OK`，值更新为 1，但也多出空名称行且没有比较回调或排序重排。之后测试 `Rearrange(0)`：可移除空行，却把 Shell 排序状态改回 Name；重设原大小排序后值虽更新，`CompareIDs` 仍未再次调用。再反向切换排序方向，`child=1` 仍留在 `folder-000=20` 前面，直接证明行序没有按新的降序重新计算。两种重排路径均保留了探针选区和焦点；结果分别为 102 行无空行，但排序不正确。调用均返回成功，因此 HRESULT 不能单独证明派生列刷新与排序完成。
+
+Microsoft API 页面说明 `RefreshObject` 是重绘指定项目，`UpdateObject` 是以新项目替换旧项目；本探针复现了其调用，但派生递归列值依赖 provider 缓存，结果仍不满足“值更新且排序位置正确”的门槛。另需考虑 `IShellFolderView` 自 Windows 7 起已不再供应用使用，Microsoft 建议使用 `IFolderView2` / `IFolderView`；即使当前 Shell 对象仍可 QueryInterface，也不应把该旧接口作为产品依赖。参考 [RefreshObject](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-ishellfolderview-refreshobject)、[UpdateObject](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-ishellfolderview-updateobject) 和 [IShellFolderView 接口状态](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nn-shlobj_core-ishellfolderview)。
+
+结论：该单行 API 路线关闭，不接入 ExplorerBrowser。当前有证据的递归大小值更新和正确重排仍需完整 `IShellView::Refresh()`，代价是整视图重枚举；隐藏 Private Desktop 合成 view 未测可见刷新闪烁、真实 filesystem 多窗格体验或产品接线。
