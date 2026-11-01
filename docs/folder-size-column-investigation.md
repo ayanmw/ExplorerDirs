@@ -1640,3 +1640,9 @@ NativeProbe Release 构建通过，子进程均退出码 0；Private Desktop 探
 探针现在在所有 view 初始行数齐备后，等待 `EnumObjects` 计数连续安静 1 秒，再设置独立选区/焦点；同时保留仅诊断时输出状态转移的记录。调整后，200 目录/四视图、500 目录/四视图最小内容夹具，以及 500 目录/四视图原始夹具均通过。原始夹具结果：2,004 次唯一扫描、队列拒绝 0、重复扫描 0、通知 4、聚合枚举增量 4、四份 502/502 值正确，四份选区与焦点全保留；前台 HWND 与最后输入不变，watchdog exit 0。日志：`src/.state/native-probe-watchdog/20261101-160829-7a1f4dd3.stdout.log`（焦点丢失转移的定位样本）、`src/.state/native-probe-watchdog/20261101-160722-67ff309f.stdout.log`（200 目录回归）、`src/.state/native-probe-watchdog/20261101-161025-b53e63ed.stdout.log`（500 目录最小夹具）、`src/.state/native-probe-watchdog/20261101-161107-788ad7f9.stdout.log`（500 目录原始夹具通过）。
 
 这是 NativeProbe 隐藏 DefView 的初始化时序修正与压力合同，不是产品 ExplorerBrowser 接线，也不证明可见应用在切换窗格时的焦点行为。先前一次大夹具诊断运行在 view 建立/清理阶段超时，未进入焦点断言，视为无结论；之后原始夹具运行正常完成。
+
+### 2026-11-01：四视图高负载关闭与扫描接管
+
+用 500 个目录/视图的最小内容夹具复核批处理取消。四个不同根 view 在工作闸门关闭时各排入一个批次，退休全部 view 后再释放 worker：4 个批次均结束，扫描 0、Shell 更新通知 0。四个同根 view 的单 view 退休场景则在释放后由存活 view 接管同一批请求：只扫描 501 个唯一目录（无重复），4 批结束，通知 1 次，存活 view 值完整且聚合枚举增量 3。
+
+两次 Private Desktop watchdog 均 exit 0，前台与最后输入守卫不变，测试夹具及隔离窗口清理通过。结果只覆盖 NativeProbe 隐藏 DefView、按 view 批次与这两种受控关闭时序；不代表产品 ExplorerBrowser、逐项模式、慢磁盘/网络取消延迟或可见窗口交互。日志：`src/.state/native-probe-watchdog/20261101-161401-54f597cb.stdout.log`（四个不同根全部关闭）、`src/.state/native-probe-watchdog/20261101-161429-cc2804f3.stdout.log`（单 view 退休、同根接管）。
