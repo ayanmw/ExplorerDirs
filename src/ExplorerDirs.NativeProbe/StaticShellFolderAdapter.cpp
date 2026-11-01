@@ -1611,6 +1611,15 @@ namespace
             _sizes.erase(exact);
             return true;
         }
+        bool InvalidateSnapshotPathExact(PCWSTR parsingName)
+        {
+            if (!parsingName || !*parsingName) return false;
+            std::wstring exact;
+            try { exact.assign(parsingName); }
+            catch (const std::bad_alloc&) { return false; }
+            std::lock_guard<std::mutex> lock(_mutex);
+            return _sizes.erase(exact) != 0;
+        }
         bool TryGet(const std::wstring& parsingName, const SyntheticFileIdentity& identity, ULONGLONG* bytes,
             ULONGLONG* files = nullptr, ULONGLONG* folders = nullptr) const
         {
@@ -1776,6 +1785,10 @@ namespace
     volatile LONG g_syntheticAsyncRecursiveSizeActiveWorkersForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizePeakWorkersForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeNotificationsSentForProbe = 0;
+    volatile LONG g_syntheticAsyncRecursiveSizeItemNotificationsSentForProbe = 0;
+    volatile LONG g_syntheticAsyncRecursiveSizeDirectoryNotificationsSentForProbe = 0;
+    // NativeProbe-only A/B switch: target the completed directory row instead of invalidating its parent view.
+    volatile LONG g_syntheticAsyncRecursiveSizeItemNotificationForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeNotificationInvalidatedReservationsForProbe = 0;
     volatile LONG g_syntheticTraceNotificationPidlsForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeQueueRejectedScanCountForProbe = 0;
@@ -2802,6 +2815,20 @@ namespace
             if (!child || !(child->attributes & FILE_ATTRIBUTE_DIRECTORY)) result = E_INVALIDARG;
             else result = GetAbsoluteParsingName(child, &parsingName);
             const bool invalidated = SUCCEEDED(result) && _recursiveSizeStore->InvalidateReservedPathExact(parsingName.c_str());
+            CoTaskMemFree(childItem);
+            return FAILED(result) ? result : (invalidated ? S_OK : S_FALSE);
+        }
+        HRESULT InvalidateRecursiveSizeSnapshotForChildProbe(PCWSTR childName)
+        {
+            if (!childName || !*childName || !_recursiveSizeStore) return E_INVALIDARG;
+            PITEMID_CHILD childItem = nullptr;
+            auto result = ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(childName), nullptr, &childItem, nullptr);
+            if (FAILED(result)) return result;
+            const auto* child = SyntheticData(childItem);
+            std::wstring parsingName;
+            if (!child || !(child->attributes & FILE_ATTRIBUTE_DIRECTORY)) result = E_INVALIDARG;
+            else result = GetAbsoluteParsingName(child, &parsingName);
+            const bool invalidated = SUCCEEDED(result) && _recursiveSizeStore->InvalidateSnapshotPathExact(parsingName.c_str());
             CoTaskMemFree(childItem);
             return FAILED(result) ? result : (invalidated ? S_OK : S_FALSE);
         }
@@ -3937,7 +3964,7 @@ namespace
                         std::lock_guard<std::mutex> lock(self->_asyncSizeScanMutex);
                         self->_asyncSizeScansPending.erase(parsingName);
                     }
-                    if (SUCCEEDED(scanResult)) self->ScheduleAsyncViewUpdateNotification();
+                    if (SUCCEEDED(scanResult)) self->ScheduleAsyncViewUpdateNotification(parsingName.c_str());
                     InterlockedIncrement(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe);
                     self->Release();
                 };
@@ -4249,7 +4276,7 @@ namespace
             }
             return S_OK;
         }
-        void ScheduleAsyncViewUpdateNotification() const
+        void ScheduleAsyncViewUpdateNotification(PCWSTR itemParsingName = nullptr) const
         {
             auto* self = const_cast<SyntheticSortFolder*>(this);
             if (!InterlockedCompareExchange(&self->_asyncNotificationsEnabled, 0, 0) || !self->_backingRoot ||
@@ -4258,13 +4285,29 @@ namespace
             HRESULT enqueueResult = E_FAIL;
             try
             {
-                std::function<void()> task = [self]
+                std::wstring parsingName = itemParsingName ? itemParsingName : L"";
+                std::function<void()> task = [self, parsingName = std::move(parsingName)]
                 {
                     Sleep(SyntheticAsyncRecursiveSizeQueue::kShellUpdateCoalesceMilliseconds);
                     if (InterlockedCompareExchange(&self->_asyncNotificationsEnabled, 0, 0) && self->_backingRoot)
                     {
+                        PIDLIST_ABSOLUTE itemPidl = nullptr;
+                        const bool targetItem = InterlockedCompareExchange(
+                            &g_syntheticAsyncRecursiveSizeItemNotificationForProbe, 0, 0) &&
+                            !parsingName.empty() && SUCCEEDED(SHParseDisplayName(
+                                parsingName.c_str(), nullptr, &itemPidl, 0, nullptr)) && itemPidl;
                         InterlockedIncrement(&g_syntheticAsyncRecursiveSizeNotificationsSentForProbe);
-                        SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_IDLIST, self->_backingRoot, nullptr);
+                        if (targetItem)
+                        {
+                            InterlockedIncrement(&g_syntheticAsyncRecursiveSizeItemNotificationsSentForProbe);
+                            SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_IDLIST, itemPidl, nullptr);
+                        }
+                        else
+                        {
+                            InterlockedIncrement(&g_syntheticAsyncRecursiveSizeDirectoryNotificationsSentForProbe);
+                            SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_IDLIST, self->_backingRoot, nullptr);
+                        }
+                        if (itemPidl) CoTaskMemFree(itemPidl);
                     }
                     InterlockedExchange(&self->_asyncViewUpdatePending, 0);
                     self->Release();
@@ -7174,6 +7217,19 @@ extern "C" __declspec(dllexport) HRESULT WINAPI InvalidateSyntheticRecursiveSize
     return E_INVALIDARG;
 }
 
+extern "C" __declspec(dllexport) HRESULT WINAPI InvalidateSyntheticRecursiveSizeSnapshotForChildProbe(
+    IShellView* view, PCWSTR childName)
+{
+    if (!view || !childName || !*childName) return E_INVALIDARG;
+    for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
+    {
+        auto* folder = static_cast<SyntheticSortFolder*>(InterlockedCompareExchangePointer(&g_syntheticSortViewHolds[index], nullptr, nullptr));
+        if (!folder || !folder->OwnsShellView(view)) continue;
+        return folder->InvalidateRecursiveSizeSnapshotForChildProbe(childName);
+    }
+    return E_INVALIDARG;
+}
+
 extern "C" __declspec(dllexport) LONG WINAPI ScheduleSyntheticSortRefreshesForProbe()
 {
     LONG scheduled = 0;
@@ -7227,6 +7283,12 @@ extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticRecursiveSizeScanOnD
 extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticAsyncRecursiveSizeScanForProbe(BOOL enabled)
 {
     InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanForProbe, enabled ? 1 : 0);
+    return S_OK;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticAsyncRecursiveSizeItemNotificationForProbe(BOOL enabled)
+{
+    InterlockedExchange(&g_syntheticAsyncRecursiveSizeItemNotificationForProbe, enabled ? 1 : 0);
     return S_OK;
 }
 
@@ -7331,6 +7393,9 @@ extern "C" __declspec(dllexport) void WINAPI ResetSyntheticOnDemandSizeMetricsFo
     InterlockedExchange(&g_syntheticOnDemandSizeScanCount, 0);
     InterlockedExchange64(&g_syntheticOnDemandSizeScanMicroseconds, 0);
     InterlockedExchange(&g_syntheticAsyncRecursiveSizeNotificationsSentForProbe, 0);
+    InterlockedExchange(&g_syntheticAsyncRecursiveSizeItemNotificationsSentForProbe, 0);
+    InterlockedExchange(&g_syntheticAsyncRecursiveSizeDirectoryNotificationsSentForProbe, 0);
+    InterlockedExchange(&g_syntheticAsyncRecursiveSizeItemNotificationForProbe, 0);
     InterlockedExchange(&g_syntheticAsyncRecursiveSizeNotificationInvalidatedReservationsForProbe, 0);
     InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanStartedForProbe, 0);
     InterlockedExchange(&g_syntheticAsyncRecursiveSizePeakWorkersForProbe, 0);
@@ -7364,6 +7429,12 @@ extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizePeakW
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizeNotificationCountForProbe()
 { return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeNotificationsSentForProbe, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizeItemNotificationCountForProbe()
+{ return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeItemNotificationsSentForProbe, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizeDirectoryNotificationCountForProbe()
+{ return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeDirectoryNotificationsSentForProbe, 0, 0); }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizeNotificationInvalidatedReservationCountForProbe()
 { return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeNotificationInvalidatedReservationsForProbe, 0, 0); }

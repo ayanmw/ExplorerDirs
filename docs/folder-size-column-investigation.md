@@ -2429,3 +2429,9 @@ NativeProbe Release 构建 0 警告/错误；注册 namespace Private Desktop wa
 扩展异根生命周期 Private Desktop 探针：根 A、根 B 分别为同一相对名 `lifecycle-scan` 请求递归值；销毁 A 的 ExplorerBrowser 后仅根 B 扫描成功。新增合同要求 B 的值完成后，不止 provider cache 出现 7 B，还必须发送异步视图更新通知并观察到 Shell provider 再次枚举。NativeProbe Release 构建 0 警告/错误；watchdog exit 0，结果 `notifications=0→1`、`enumerations=27→28`、根 B 值 7 B，前台/last-input 未变且隔离清理通过。日志：`src/.state/native-probe-watchdog/20261102-032008-811afbd6.stdout.log` 与 `.stderr.log`。
 
 这是 ExplorerBrowser 实际 provider/视图的隐藏重枚举证据，说明缓存完成通知到达 Shell 消费链；它没有测量屏幕像素、列表行最终绘制、重枚举引发的闪烁或选区焦点变化，也不等于用户可见刷新体验已改善。当前通知使用合并的 `SHCNE_UPDATEDIR`；下一步评估目标项 `SHCNE_UPDATEITEM` 能否刷新递归列，同时减少整目录重枚举，并比较状态保持。产品未接线。
+
+### 2026-11-02：递归值目标项通知与整目录通知 A/B
+
+在同一存活的 ExplorerBrowser peer view 中，用已显示的 `shared-folder` 行完成第二次异步递归扫描：先仅从测试缓存精确移除旧 29 B 快照，将 payload 改为 11 B，再通过该真实 provider 的列值读取排入受 gate 控制的扫描。扫描完成时测试专用分支解析该目录的绝对 Shell PIDL 并发送 `SHCNE_UPDATEITEM`；Private Desktop watchdog exit 0，更新路径计数确认发送的是 item 事件而非 fallback 的 `SHCNE_UPDATEDIR`。Shell 之后再次请求 item details，provider 读回 11 B。
+
+两种通知都观察到 provider `EnumObjects` 增加一次：完整目录通知样本为 27→28，目标项通知为 28→29。因此本轮没有测出目标项事件减少 provider 重枚举；单次原型样本也不能证明两种刷新对像素闪烁、列表行原位更新、选区/焦点或性能的差异。目标项事件的值回读链路可用，但是否保留为产品候选仍需真实行绘制和状态检查；产品通知策略未改。Native adapter 与 NativeProbe Release 构建 0 警告/错误，Private Desktop 前台/last-input 与临时注册清理守卫通过。最终日志：`src/.state/native-probe-watchdog/20261102-033052-3ba7fc72.stdout.log`、`.stderr.log`。

@@ -864,8 +864,18 @@ internal static class ExplorerBrowserWrapperProbe
             NativeLibrary.GetExport(nativeLibrary, "GetSyntheticRecursiveSizeCacheSnapshotCountForProbe"));
         var getNotificationCount = Marshal.GetDelegateForFunctionPointer<GetProbeCount>(
             NativeLibrary.GetExport(nativeLibrary, "GetSyntheticAsyncRecursiveSizeNotificationCountForProbe"));
+        var getItemNotificationCount = Marshal.GetDelegateForFunctionPointer<GetProbeCount>(
+            NativeLibrary.GetExport(nativeLibrary, "GetSyntheticAsyncRecursiveSizeItemNotificationCountForProbe"));
+        var getDirectoryNotificationCount = Marshal.GetDelegateForFunctionPointer<GetProbeCount>(
+            NativeLibrary.GetExport(nativeLibrary, "GetSyntheticAsyncRecursiveSizeDirectoryNotificationCountForProbe"));
         var getEnumerationCount = Marshal.GetDelegateForFunctionPointer<GetProbeCount>(
             NativeLibrary.GetExport(nativeLibrary, "GetSyntheticEnumObjectsCount"));
+        var getItemDetailsCount = Marshal.GetDelegateForFunctionPointer<GetProbeCount>(
+            NativeLibrary.GetExport(nativeLibrary, "GetSyntheticItemDetailsOfCount"));
+        var setItemNotification = Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(
+            NativeLibrary.GetExport(nativeLibrary, "SetSyntheticAsyncRecursiveSizeItemNotificationForProbe"));
+        var invalidateSnapshot = Marshal.GetDelegateForFunctionPointer<InvalidateChildScan>(
+            NativeLibrary.GetExport(nativeLibrary, "InvalidateSyntheticRecursiveSizeSnapshotForChildProbe"));
         var hasSnapshot = Marshal.GetDelegateForFunctionPointer<HasChildScanReservation>(
             NativeLibrary.GetExport(nativeLibrary, "HasSyntheticRecursiveSizeSnapshotForViewProbe"));
         var getViewHoldCount = Marshal.GetDelegateForFunctionPointer<GetProbeCount>(
@@ -976,6 +986,54 @@ internal static class ExplorerBrowserWrapperProbe
                 notificationsAfterRetire <= notificationsBefore || enumerationsAfterRetire <= enumerationsBefore)
                 throw new InvalidOperationException($"Retiring the view for root A did not isolate root B's scan and refresh its surviving ExplorerBrowser view: finished={finishedCount}/2; completed={completedCount}/1; scans={scansBefore}->{scansAfterRetire}; snapshots={snapshotsBefore}->{snapshotsAfterRetire}; notifications={notificationsBefore}->{notificationsAfterRetire}; enumerations={enumerationsBefore}->{enumerationsAfterRetire}; surviving-root-B-value='{peerValueAfterRetirement}'.");
             Console.WriteLine($"explorerbrowser-registered-namespace-scan-lifecycle: distinct-root-requests=2; same-relative-child={scanChildName}; expected-root-values=3/7; first-browser-destroyed=True; root-A-request-canceled=True; root-B-request-completed=True; view-notification-sent=True; surviving-view-reenumerated=True; finished={finishedCount}; completed={completedCount}; scan-count={scansBefore}->{scansAfterRetire}; cache-count={snapshotsBefore}->{snapshotsAfterRetire}; notifications={notificationsBefore}->{notificationsAfterRetire}; enumerations={enumerationsBefore}->{enumerationsAfterRetire}; root-B-has-target-snapshot={survivingViewHasSnapshot}; root-B-value={peerValueAfterRetirement}");
+
+            Marshal.ThrowExceptionForHR(setItemNotification(1));
+            clearGate();
+            Marshal.ThrowExceptionForHR(beginGate());
+            const string itemNotificationChildName = "shared-folder";
+            var itemRowNames = ReadViewItemNamesInOrder(peerFolderView, peerViewFolder);
+            if (!itemRowNames.Contains(itemNotificationChildName, StringComparer.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The completed async-scan row is no longer present for the item-update comparison.");
+            var itemNotificationBaseline = getNotificationCount();
+            var itemTypedNotificationBaseline = getItemNotificationCount();
+            var itemDirectoryNotificationBaseline = getDirectoryNotificationCount();
+            var itemEnumerationBaseline = getEnumerationCount();
+            var itemScanFinishedBaseline = getFinished();
+            var itemScanCompletedBaseline = getCompleted();
+            File.WriteAllBytes(Path.Combine(peerFixture, itemNotificationChildName, "payload.bin"), new byte[11]);
+            Marshal.ThrowExceptionForHR(invalidateSnapshot(peerShellView, itemNotificationChildName));
+            var pendingItemValue = ReadParsedItemDetailsByName(peerViewFolder, itemNotificationChildName, 1);
+            if (pendingItemValue.Length != 0)
+                throw new InvalidOperationException($"The item-notification comparison expected a fresh asynchronous value, got '{pendingItemValue}'.");
+            var itemPendingDeadline = Environment.TickCount64 + 5000;
+            while (hasReservation(peerShellView, itemNotificationChildName) == 0 && Environment.TickCount64 < itemPendingDeadline)
+            {
+                Application.DoEvents();
+                Thread.Sleep(10);
+            }
+            if (hasReservation(peerShellView, itemNotificationChildName) == 0)
+                throw new TimeoutException("The invalidated Shell row did not queue its gated replacement scan.");
+            var itemDetailsBaseline = getItemDetailsCount();
+            releaseGate();
+            var itemScanDeadline = Environment.TickCount64 + 5000;
+            while ((getFinished() <= itemScanFinishedBaseline || getCompleted() <= itemScanCompletedBaseline ||
+                    getNotificationCount() <= itemNotificationBaseline ||
+                    getItemDetailsCount() <= itemDetailsBaseline) && Environment.TickCount64 < itemScanDeadline)
+            {
+                Application.DoEvents();
+                Thread.Sleep(10);
+            }
+            var itemEnumerationsAfter = getEnumerationCount();
+            var valueAfterItemNotification = ReadParsedItemDetailsByName(peerViewFolder, itemNotificationChildName, 1);
+            var itemValueReadbackAfterNotification = valueAfterItemNotification == "11" && getItemDetailsCount() > itemDetailsBaseline;
+            var typedItemNotificationSent = getItemNotificationCount() > itemTypedNotificationBaseline;
+            var directoryNotificationDelta = getDirectoryNotificationCount() - itemDirectoryNotificationBaseline;
+            Console.WriteLine($"explorerbrowser-registered-namespace-item-update-ab: updateitem-sent={typedItemNotificationSent}; notifications={itemNotificationBaseline}->{getNotificationCount()}; directory-notification-delta={directoryNotificationDelta}; item-details-callback={getItemDetailsCount() - itemDetailsBaseline}; enumerations={itemEnumerationBaseline}->{itemEnumerationsAfter}; value={valueAfterItemNotification}; provider-value-readback-after-notification={itemValueReadbackAfterNotification}");
+            if (getFinished() <= itemScanFinishedBaseline || getCompleted() <= itemScanCompletedBaseline ||
+                getNotificationCount() <= itemNotificationBaseline || !typedItemNotificationSent || directoryNotificationDelta != 0 ||
+                !itemValueReadbackAfterNotification)
+                throw new InvalidOperationException($"The targeted update notification did not return the completed recursive value to the Shell provider: finished={itemScanFinishedBaseline}->{getFinished()}; completed={itemScanCompletedBaseline}->{getCompleted()}; notifications={itemNotificationBaseline}->{getNotificationCount()}; item-details={itemDetailsBaseline}->{getItemDetailsCount()}; value='{valueAfterItemNotification}'.");
+            Marshal.ThrowExceptionForHR(setItemNotification(0));
         }
         finally
         {
@@ -1009,6 +1067,7 @@ internal static class ExplorerBrowserWrapperProbe
             if (peerShellView != 0) Marshal.Release(peerShellView);
             if (peerBrowser != 0) Marshal.Release(peerBrowser);
             if (peerPidl != 0) Marshal.FreeCoTaskMem(peerPidl);
+            _ = setItemNotification(0);
         }
     }
 
@@ -1964,6 +2023,7 @@ internal static class ExplorerBrowserWrapperProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetFolderClassId(ref Guid classId);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int SetBackingPath([MarshalAs(UnmanagedType.LPWStr)] string path);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetProbeFlag(int enabled);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int InvalidateChildScan(nint view, [MarshalAs(UnmanagedType.LPWStr)] string childName);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetProbeCount();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProbeActionResult();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ProbeAction();
