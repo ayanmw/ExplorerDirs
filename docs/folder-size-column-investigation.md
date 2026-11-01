@@ -2265,3 +2265,9 @@ NativeProbe Release build 0 警告/错误，探针 exit 0、`git diff --check` �
 修复 NativeProbe adapter：当 `GetAttributesOf` 收到单个有效路径身份 PIDL 时，从 marker 解出路径并向 Windows Shell 解析该物理目录，再按请求掩码返回文件夹/文件系统属性。之后应用的 `ShellLocationIdentity.TryGetFolderPidl` 和 `TryGetPersistedIdentity` 均通过；session INI round-trip 保持同一 parsing name，跨进程测试把 fallback 置为 A 后仍读回 B 的专属文件及 29 B。注册路径探针、双根 PIDL、folder-tree 文件操作/缓存失效合同、按需列 smoke 均通过；NativeProbe Release 0 警告/错误，C++ adapter `/W4 /WX` 构建通过。
 
 该属性补充仅在 NativeProbe synthetic adapter 中，未更改 Explorer Dirs 产品代码。它补强了“会话路径可保存且通用身份帮助类能解析该原型 provider”的证据；仍未接入产品 CLSID/启动注册生命周期、ExplorerBrowserHost 多标签 session 恢复、可见 UI 或 portable 部署。
+
+### 2026-11-02：产品 ExplorerBrowserHost 消费注册 Shell 路径身份
+
+新增隐藏 HostProbe：临时创建两个不同物理根目录，注册随机 CLSID 的 synthetic Shell-folder adapter，并把它的默认 backing 路径设为 A；再通过产品实际 `ExplorerBrowserHost` 导航到包含路径 marker 的 B parsing name。生产 host 的 `CurrentPath` 保持 B 身份、`ShellLocationIdentity` 将其判为非普通文件系统路径，`ReadItemCounts` 读到 B 独有的 2 项，而不是 fallback A 的 decoy 项。WPF/HwndSource 父窗口没有 `WS_VISIBLE`，运行结果也确认不可见；测试结束清理临时注册与目录。
+
+`ExplorerDirs.HostProbe` Release build 通过（0 警告/错误），`--shell-provider-location` exit 0。输出：`product-host-navigation=True; is-filesystem=False; rows=2; target=session-root; fallback=default-root; parent-visible=False`。因此正式 ExplorerBrowserHost 的导航/枚举接口能消费原型 parsing name；仍未验证产品 provider 注册/卸载和便携部署、应用 SessionStore 跨重启接线、可配置递归列在产品 host 中显示/排序、异步扫描回填、菜单/拖放/通知的产品生命周期或可见 UI。本次仅扩展隔离 HostProbe，没有修改产品 host 或发布版。
