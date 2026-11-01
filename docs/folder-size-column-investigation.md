@@ -2593,7 +2593,7 @@ App 生命周期接线位置仍是：在 `FolderOpenRouter.TryStart` 成功后�
 
 为解释产品 HostProbe 中“16 次 `SHCNE_UPDATEITEM` 发送、Desktop 观察器只收到 11 项”的差异，诊断 DLL 现在额外记录自定义 `IShellFolderViewCB::MessageSFVCB(SFVM_FSNOTIFY)` 调用数和通知 PIDL 身份。16 项 burst 中 adapter 确实发出 16 次；Shell view 的 `SFVM_FSNOTIFY` 回调为 0 次、无回调 PIDL；独立 Desktop scope observer 在 30 秒内固定收到 `folder-extra-00..10` 共 11 项。HostProbe Release 与诊断 DLL 构建均为 0 警告/错误。
 
-随后只在诊断 DLL/HostProbe 中把 `SFVM_GETNOTIFY` 返回根从物理 backing directory 临时切换到 synthetic namespace root，再运行同一 16 项 burst，结果仍为回调 0、Desktop observer 11/16。由此排除“通知监听根仅选错为 backing directory”这一简单原因；当前证据指向合成子项 `SHCNE_UPDATEITEM` 未进入这个 ExplorerBrowser 自定义 view callback 的通知链，但尚不能确定是 Shell 注册范围、ExplorerBrowser 内部订阅方式还是 PIDL 身份/格式约定导致。此次 burst 按现有完整投递门槛预期失败，不能算通过。
+随后只在诊断 DLL/HostProbe 中把 `SFVM_GETNOTIFY` 返回根从物理 backing directory 临时切换到 synthetic namespace root，再运行同一 16 项 burst。诊断记录确认 ExplorerBrowser view 调用了 `SFVM_GETNOTIFY` 两次；最后返回的根 parsing name 是该测试 synthetic namespace view root，事件掩码为 `SHCNE_ALLEVENTS`。但 16 项通知后仍是 `SFVM_FSNOTIFY` 回调 0、Desktop observer 11/16。官方接口契约说明 GETNOTIFY 的 PIDL 与事件掩码用于注册变更通知，匹配事件应通过 FSNOTIFY 回调，因此现在已排除“view 未查询 GETNOTIFY”以及“只把监听根选为物理 backing directory”两个简单解释。剩余重点是核对发送 PIDL 与注册根的二进制层级/身份，及 ExplorerBrowser/DefView 实际通知匹配行为；parsing name 一致本身不证明 PIDL 二进制身份一致。此次 burst 按现有完整投递门槛预期失败，不能算通过。
 
 实验切换与计数只存在于 `EXPLORERDIRS_PRODUCT_DIAGNOSTICS` 构建及 HostProbe，不进入正式产品 DLL；没有改 App、发布版本或可见 UI。后续若继续，先验证该 view 实际提供给 `SFVM_GETNOTIFY` 的 PIDL/事件掩码及 Shell 的订阅登记，再设计单项通知对照；在确认 Shell view 能接收并正确刷新目标行前，不把逐行递归大小列接入普通浏览器视图。
 

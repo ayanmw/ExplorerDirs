@@ -1860,8 +1860,12 @@ namespace
     std::vector<std::wstring> g_productAsyncItemNotificationIdentities;
     volatile LONG g_productViewItemNotificationCallbacks = 0;
     volatile LONG g_productViewNotificationsUseSyntheticRoot = 0;
+    volatile LONG g_productViewGetNotifyCalls = 0;
+    volatile LONG g_productViewGetNotifyEventMask = 0;
     std::mutex g_productViewItemNotificationIdentityMutex;
     std::vector<std::wstring> g_productViewItemNotificationIdentities;
+    std::mutex g_productViewNotifyRootMutex;
+    std::wstring g_productViewNotifyRootIdentity;
 
     void RecordProductAsyncItemNotificationIdentity(PCIDLIST_ABSOLUTE itemPidl)
     {
@@ -3089,13 +3093,29 @@ namespace
             if (message != SFVM_GETNOTIFY) return E_NOTIMPL;
             if (!wParam || !lParam || !_backingRoot) return E_POINTER;
 #if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
-            *reinterpret_cast<PIDLIST_ABSOLUTE*>(wParam) =
+            auto* notifyRoot =
                 InterlockedCompareExchange(&g_productViewNotificationsUseSyntheticRoot, 0, 0) && _root
                     ? _root : _backingRoot;
+            *reinterpret_cast<PIDLIST_ABSOLUTE*>(wParam) = notifyRoot;
+            auto* eventMask = reinterpret_cast<LONG*>(lParam);
+            *eventMask = SHCNE_ALLEVENTS;
+            InterlockedIncrement(&g_productViewGetNotifyCalls);
+            InterlockedExchange(&g_productViewGetNotifyEventMask, *eventMask);
+            LPWSTR parsingName = nullptr;
+            if (SUCCEEDED(SHGetNameFromIDList(notifyRoot, SIGDN_DESKTOPABSOLUTEPARSING, &parsingName)) && parsingName)
+            {
+                try
+                {
+                    std::lock_guard<std::mutex> lock(g_productViewNotifyRootMutex);
+                    g_productViewNotifyRootIdentity.assign(parsingName);
+                }
+                catch (...) {}
+                CoTaskMemFree(parsingName);
+            }
 #else
             *reinterpret_cast<PIDLIST_ABSOLUTE*>(wParam) = _backingRoot;
-#endif
             *reinterpret_cast<LONG*>(lParam) = SHCNE_ALLEVENTS;
+#endif
             return S_OK;
         }
         HRESULT STDMETHODCALLTYPE ParseDisplayName(HWND owner, IBindCtx* bind, LPWSTR name, ULONG* eaten,
@@ -5116,6 +5136,20 @@ extern "C" HRESULT WINAPI GetProductAsyncItemNotificationIdentity(LONG index, LP
 
 extern "C" LONG WINAPI GetProductViewItemNotificationCallbackCount()
 { return InterlockedCompareExchange(&g_productViewItemNotificationCallbacks, 0, 0); }
+
+extern "C" LONG WINAPI GetProductViewGetNotifyCallCount()
+{ return InterlockedCompareExchange(&g_productViewGetNotifyCalls, 0, 0); }
+
+extern "C" LONG WINAPI GetProductViewGetNotifyEventMask()
+{ return InterlockedCompareExchange(&g_productViewGetNotifyEventMask, 0, 0); }
+
+extern "C" HRESULT WINAPI GetProductViewGetNotifyRootIdentity(LPWSTR buffer, UINT capacity)
+{
+    if (!buffer || capacity == 0) return E_INVALIDARG;
+    std::lock_guard<std::mutex> lock(g_productViewNotifyRootMutex);
+    if (g_productViewNotifyRootIdentity.empty()) return S_FALSE;
+    return StringCchCopyW(buffer, capacity, g_productViewNotifyRootIdentity.c_str());
+}
 
 extern "C" void WINAPI SetProductViewNotificationsUseSyntheticRoot(BOOL enabled)
 { InterlockedExchange(&g_productViewNotificationsUseSyntheticRoot, enabled ? 1 : 0); }

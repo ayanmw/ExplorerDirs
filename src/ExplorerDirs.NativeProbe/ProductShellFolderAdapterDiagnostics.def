@@ -8,6 +8,9 @@ EXPORTS
     GetProductAsyncItemNotificationIdentityCount
     GetProductAsyncItemNotificationIdentity
     GetProductViewItemNotificationCallbackCount
+    GetProductViewGetNotifyCallCount
+    GetProductViewGetNotifyEventMask
+    GetProductViewGetNotifyRootIdentity
     SetProductViewNotificationsUseSyntheticRoot
     GetProductViewItemNotificationIdentityCount
     GetProductViewItemNotificationIdentity
