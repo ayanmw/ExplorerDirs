@@ -5677,3 +5677,8 @@ NativeProbe 递归快照缓存新增 in-flight 失效标记，确保目录变更
 ### 2026-11-01：按需大小列补齐异步递归文件/文件夹数量
 
 Q-Dir 对照确认 Type 列的递归 counts 也需要复用后台扫描值。NativeProbe 之前只缓存 bytes，异步按需模式下 Type 会得到空扫描数据；现已让 Type 首次读取加入同一有界任务，并随 bytes 一起发布递归文件/文件夹数量。未完成时为空，完成后隔离夹具读到 `2 files, 1 folder`；逐项与 view-batch smoke、原生/Release 构建通过。仍是 NativeProbe 原型，不代表产品 ExplorerBrowser 接线或可见验收。详见[调查记录](folder-size-column-investigation.md#2026-11-01按需递归大小快照同时保存文件与文件夹数量)。
+### 2026-11-01：递归文件夹大小忽略排序原型
+
+按 Q-Dir 官方提供的“忽略文件夹大小排序”性能选项，在 NativeProbe 中验证开关合同：默认 10 B 递归文件夹排在 4 B 文件之后；启用忽略时文件夹按 0 B 比较并排在该文件之前，文件仍按实际字节数比较。两种排序比较均未触发额外递归目录扫描。原生 adapter `/W4 /WX`、NativeProbe Release（0 警告/错误）、静态 folder contract 和按需异步计数 smoke 通过，均为无窗口验证。
+
+该选项的精确排序语义尚未与 Q-Dir 可见行为核对；代码仅在 NativeProbe，ExplorerBrowser 产品及 release 未变。详情见[递归大小列调查](folder-size-column-investigation.md#2026-11-01递归文件夹大小忽略排序合同)。

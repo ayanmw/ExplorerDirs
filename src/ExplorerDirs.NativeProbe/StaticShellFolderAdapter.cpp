@@ -1645,6 +1645,7 @@ namespace
     volatile LONG g_syntheticMaskFilesystemAttributes = 0;
     volatile LONG g_syntheticOwnAttributesForProbe = 0;
     volatile LONG g_syntheticCustomSizeColumnForProbe = 0;
+    volatile LONG g_syntheticIgnoreRecursiveFolderSizeSortForProbe = 0;
     volatile LONG g_syntheticHumanSizeTextForProbe = 0;
     volatile LONG g_syntheticSizeDisplayUnitForProbe = 0;
     volatile LONG g_syntheticSizeDisplayDecimalsForProbe = 2;
@@ -2821,8 +2822,13 @@ namespace
             case 1:
                 if (!g_syntheticSizeMetricsObservation) InterlockedIncrement(&g_syntheticSizeCompareCount);
             {
-                const auto leftSize = SizeForItem(reinterpret_cast<PCUITEMID_CHILD>(left));
-                const auto rightSize = SizeForItem(reinterpret_cast<PCUITEMID_CHILD>(right));
+                const bool ignoreFolderSize =
+                    InterlockedCompareExchange(&g_syntheticIgnoreRecursiveFolderSizeSortForProbe, 0, 0) != 0;
+                // Q-Dir exposes an option to ignore recursive folder sizes for sorting while keeping them displayable.
+                const auto leftSize = ignoreFolderSize && (leftChild->attributes & FILE_ATTRIBUTE_DIRECTORY)
+                    ? 0 : SizeForItem(reinterpret_cast<PCUITEMID_CHILD>(left));
+                const auto rightSize = ignoreFolderSize && (rightChild->attributes & FILE_ATTRIBUTE_DIRECTORY)
+                    ? 0 : SizeForItem(reinterpret_cast<PCUITEMID_CHILD>(right));
                 comparison = leftSize < rightSize ? -1 : leftSize > rightSize ? 1 : 0;
                 break;
             }
@@ -4477,6 +4483,37 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
             result = E_FAIL;
             goto cleanup;
         }
+        PIDLIST_RELATIVE rootFileForSort = nullptr;
+        ULONG sortCharactersEaten = 0;
+        WCHAR sortRootFileName[] = L"root.txt";
+        result = root->ParseDisplayName(nullptr, nullptr, sortRootFileName, &sortCharactersEaten,
+            &rootFileForSort, nullptr);
+        if (FAILED(result) || !rootFileForSort || sortCharactersEaten != ARRAYSIZE(sortRootFileName) - 1)
+        {
+            if (rootFileForSort) CoTaskMemFree(rootFileForSort);
+            CoTaskMemFree(item);
+            result = E_FAIL;
+            goto cleanup;
+        }
+        InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 1);
+        const auto recursiveFolderSort = root->CompareIDs(1, item, reinterpret_cast<PCUITEMID_CHILD>(rootFileForSort));
+        InterlockedExchange(&g_syntheticIgnoreRecursiveFolderSizeSortForProbe, 1);
+        const auto ignoredFolderSort = root->CompareIDs(1, item, reinterpret_cast<PCUITEMID_CHILD>(rootFileForSort));
+        InterlockedExchange(&g_syntheticIgnoreRecursiveFolderSizeSortForProbe, 0);
+        InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 0);
+        CoTaskMemFree(rootFileForSort);
+        const auto recursiveFolderSortValue = static_cast<short>(HRESULT_CODE(recursiveFolderSort));
+        const auto ignoredFolderSortValue = static_cast<short>(HRESULT_CODE(ignoredFolderSort));
+        if (recursiveFolderSortValue <= 0 || ignoredFolderSortValue >= 0 ||
+            InterlockedCompareExchange(&g_syntheticDirectoryMetricsCallCount, 0, 0) != enumerationMetricCalls ||
+            InterlockedCompareExchange(&g_syntheticDirectoryMetricsEntryCount, 0, 0) != enumerationMetricEntries)
+        {
+            CoTaskMemFree(item);
+            TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-sort-ignore-failed");
+            result = E_FAIL;
+            goto cleanup;
+        }
+        TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-sort-ignore-passed");
         SHCOLUMNID mappedSizeKey{};
         result = root->MapColumnToSCID(1, &mappedSizeKey);
         const bool standardSizeKeyMapped = SUCCEEDED(result) && mappedSizeKey == kSizeKey;

@@ -1546,3 +1546,11 @@ NativeProbe 新增 `--shell-view-real-pidl-navigation-smoke`，使用临时真�
 无窗口 NativeProbe 回归先因 pending count 返回 `0 files, 0 folders` 按预期失败；修复后逐项队列和按 view 批次均读到 `2 files, 1 folder`，仍为两 worker、重复读取命中缓存、关闭后取消剩余任务。Native adapter `/W4 /WX`、NativeProbe Release、两种异步队列 smoke 与静态 folder contract 通过。快照每项增加两个 `ULONGLONG` 计数字段；这里只证明原型快照行为。
 
 边界：未接入 ExplorerBrowser 产品，不证明可见 Type 列绘制、Q-Dir 本地化/格式偏好或可见刷新效果；这仍是隔离 P2 原型。包装真实本地目录的 ExplorerBrowser 宿主切片仍未过迁移门槛。
+
+### 2026-11-01：递归文件夹大小忽略排序合同
+
+Q-Dir 官方 FAQ 提供“排序时忽略文件夹大小”的选项，并说明递归大小参与排序可能影响导航性能；官方说明没有规定忽略后文件夹与文件之间的精确排序次序。本原型据此采用可验证的局部假设：启用时，递归文件夹在 Size 比较中按 0 参与比较，文件仍使用真实字节数；列显示值和递归快照不受影响。
+
+`--static-shell-column-folder-smoke` 先以红测确认此前忽略开关不起作用；实现后通过无窗口对照：夹具中的 10 B 文件夹默认排在 4 B 文件之后，启用忽略后该文件夹按 0 B 排到文件之前。两次比较都没有增加目录指标调用或遍历条目数，证明排序比较不会触发递归扫描。原生 adapter `/W4 /WX` 构建、NativeProbe Release 构建（0 警告/错误）、静态 folder contract 及按需异步计数 smoke 均通过；Shell view 窗口未创建。
+
+边界：这是 NativeProbe 内部排序合同，不是产品设置，也未验证 Q-Dir 忽略模式的精确文件/文件夹相对次序或可见 Shell 排序体验；需后续与 Q-Dir 实际行为对照。ExplorerBrowser 产品、用户配置与 release 均未修改。
