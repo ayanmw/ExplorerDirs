@@ -128,6 +128,8 @@ Explorer Dirs 的首要目标是稳定地承载 Windows Shell 文件管理，并
 
 ## 当前下一步
 
+2026-11-01 CreateViewObject 后失败回滚探针（部分复核）：在已成功绑定目标并创建 child `IShellView` 后、尚未请求 view HWND 前注入 `E_FAIL`。Desktop 与 Recycle Bin 的 Private Desktop watchdog exit 0，确认原 view/window 有效、没有 pending view、当前 PIDL 与 history 保持不变；随后既有 CreateViewWindow 成功后交接失败检查亦通过。This PC 的上述断言有输出，但全局 last-input 在运行期间改变，隔离守卫报 `isolation-clean=False`，因此不接受为有效运行。依据项目守卫已停止剩余虚拟宿主探针；Libraries、Network Places、Control Panel、Search Folder、ZIP 尚未跑此故障注入。Release NativeProbe build 0 警告/错误。该发现提示 Private Desktop watchdog 的 last-input 是全局输入活动指标，即使探针所在 desktop 与 foreground HWND 未变化也会判为污染；不可忽略该检查或把此轮误记为全通过。
+
 2026-11-01 view-window handoff 失败回滚：对 Desktop、This PC、Recycle Bin、Libraries、Network Places、Control Panel、Search Folder、ZIP，在有效目标上调用真实 `CreateViewWindow`，取得替代 view window 后、但尚未交给宿主接管前注入 `E_FAIL`。八类均确认失败窗口已销毁、原 view window 仍有效、`host.View`/当前绝对 PIDL/历史索引和数量未改变，且没有 pending view；随后同路径重试可成功接管。各自 Private Desktop watchdog exit 0，前台、输入和夹具清理守卫通过；Release NativeProbe build 0 警告/错误。该故障注入验证一个明确的部分创建/交接失败路径，不代表所有 COM 故障、COM 引用计数/内存泄漏、产品 ExplorerBrowser 或可见 UI。
 
 2026-11-01 This PC 同路径 view 重复退役：同一 Private Desktop 宿主连续八次导航到当前 This PC PIDL。每轮都成功创建新 view，并在接管后同步销毁旧 Shell view window；旧 HWND 均不再有效、新 HWND 有效，当前 PIDL、历史索引和历史数量保持稳定。随后 This PC 与系统卷根之间的父级及 Back/Forward 往返仍通过。Release NativeProbe build 0 警告/错误，watchdog exit 0，前台/输入/隔离清理守卫通过。这里只断言窗口句柄销毁及 history/PIDL 稳定，不作为 COM 引用或进程内存无泄漏证明；其它 Shell provider、枚举完成、产品 ExplorerBrowser 和可见 UI 未覆盖。
