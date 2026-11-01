@@ -76,6 +76,28 @@ public static class SyntheticShellSortProbe
         finally { Directory.Delete(fixture, recursive: true); }
     }
 
+    internal static int RunOnDemandRecursiveSizeColumnSmoke()
+    {
+        var fixture = Path.Combine(Path.GetTempPath(), $"ExplorerDirs-OnDemandRecursiveSize-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(fixture, "child", "nested-folder"));
+            File.WriteAllBytes(Path.Combine(fixture, "child", "direct.bin"), [1, 2, 3, 4, 5, 6]);
+            File.WriteAllBytes(Path.Combine(fixture, "child", "nested-folder", "nested.bin"), [1, 2, 3, 4]);
+            var module = NativeLibrary.Load(FindAdapterLibrary());
+            try
+            {
+                var check = Marshal.GetDelegateForFunctionPointer<FolderTreeContractSmoke>(
+                    NativeLibrary.GetExport(module, "RunSyntheticOnDemandRecursiveSizeColumnSmoke"));
+                Check(check(fixture));
+            }
+            finally { NativeLibrary.Free(module); }
+            Console.WriteLine("synthetic-on-demand-recursive-size-column-smoke: enumeration-does-not-scan=True; first-value-read-scans=True; repeated-value-read-uses-cache=True; compareids-does-not-scan=True; shell-view-created=False");
+            return 0;
+        }
+        finally { Directory.Delete(fixture, recursive: true); }
+    }
+
     internal static int RunFolderEnumerationScanCostProbe()
     {
         var fixture = Path.Combine(Path.GetTempPath(), $"ExplorerDirs-FolderEnumerationCost-{Guid.NewGuid():N}");

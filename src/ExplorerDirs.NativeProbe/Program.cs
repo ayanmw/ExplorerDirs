@@ -103,6 +103,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunSyntheticShellFactorySnapshotCache();
         if (args.Length == 1 && args[0] == "--synthetic-shell-folder-tree-smoke")
             return SyntheticShellSortProbe.RunFolderTreeContractSmoke();
+        if (args.Length == 1 && args[0] == "--synthetic-on-demand-recursive-size-column-smoke")
+            return SyntheticShellSortProbe.RunOnDemandRecursiveSizeColumnSmoke();
         if (args.Length == 1 && args[0] == "--synthetic-folder-enumeration-scan-cost-probe")
             return SyntheticShellSortProbe.RunFolderEnumerationScanCostProbe();
         if (args.Length == 1 && args[0] == "--synthetic-dll-unload-contract-smoke")

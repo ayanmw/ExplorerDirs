@@ -1569,6 +1569,7 @@ namespace
     volatile LONG g_syntheticSizeDisplayThousandsForProbe = 0;
     volatile LONG g_syntheticSlowCustomSizeColumnForProbe = 0;
     volatile LONG g_syntheticRecursiveSizeScanEnabledForProbe = 1;
+    volatile LONG g_syntheticRecursiveSizeScanOnDemandForProbe = 0;
     volatile LONG g_syntheticExtendedMetadataColumnsForProbe = 0;
     volatile LONG g_syntheticRelativePercentColumnTypeForProbe = SHCOLSTATE_TYPE_INT;
     volatile LONG64 g_syntheticChildSizeOverride = -1;
@@ -1850,7 +1851,8 @@ namespace
                     try { childPath = backingPath + L"\\" + entry.cFileName; }
                     catch (const std::bad_alloc&) { result = E_OUTOFMEMORY; break; }
                     TryGetSyntheticFileIdentity(childPath.c_str(), &child.identity);
-                    if (InterlockedCompareExchange(&g_syntheticRecursiveSizeScanEnabledForProbe, 0, 0))
+                    if (InterlockedCompareExchange(&g_syntheticRecursiveSizeScanEnabledForProbe, 0, 0) &&
+                        !InterlockedCompareExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, 0, 0))
                     {
                         SyntheticDirectoryMetrics metrics{};
                         result = GetSyntheticDirectoryMetrics(childPath, &metrics);
@@ -2863,6 +2865,15 @@ namespace
             }
             else if (*key == kSizeKey || *key == kSyntheticRecursiveSizeKey)
             {
+                const auto* sizeChild = SyntheticData(item);
+                if (*key == kSyntheticRecursiveSizeKey &&
+                    InterlockedCompareExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, 0, 0) &&
+                    sizeChild && (sizeChild->attributes & FILE_ATTRIBUTE_DIRECTORY) &&
+                    !(sizeChild->attributes & FILE_ATTRIBUTE_REPARSE_POINT))
+                {
+                    const auto scanResult = EnsureRecursiveSizeSnapshot(sizeChild);
+                    if (FAILED(scanResult)) return scanResult;
+                }
                 value->vt = VT_UI8;
                 value->ullVal = SizeForItem(item);
             }
@@ -2896,6 +2907,14 @@ namespace
             else
             {
                 if (!child) return E_INVALIDARG;
+                if (column == 1 &&
+                    InterlockedCompareExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, 0, 0) &&
+                    (child->attributes & FILE_ATTRIBUTE_DIRECTORY) &&
+                    !(child->attributes & FILE_ATTRIBUTE_REPARSE_POINT))
+                {
+                    const auto scanResult = EnsureRecursiveSizeSnapshot(child);
+                    if (FAILED(scanResult)) return scanResult;
+                }
                 text = column == 0 ? child->name : column == 1 ?
                     (InterlockedCompareExchange(&g_syntheticHumanSizeTextForProbe, 0, 0)
                         ? FormatSyntheticSizeText(SizeForItem(item)) : std::to_wstring(SizeForItem(item))) :
@@ -3022,6 +3041,37 @@ namespace
             CoTaskMemFree(name);
             return result;
         }
+        HRESULT EnsureRecursiveSizeSnapshot(const SyntheticChild* child) const
+        {
+            if (!child || !(child->attributes & FILE_ATTRIBUTE_DIRECTORY) ||
+                (child->attributes & FILE_ATTRIBUTE_REPARSE_POINT)) return E_INVALIDARG;
+            if (!_recursiveSizeStore) return E_OUTOFMEMORY;
+            std::wstring parsingName;
+            auto result = GetAbsoluteParsingName(child, &parsingName);
+            if (FAILED(result)) return result;
+            ULONGLONG cachedBytes = 0;
+            if (_recursiveSizeStore->TryGet(parsingName, child->identity, &cachedBytes)) return S_OK;
+
+            std::wstring childPath;
+            try { childPath = _backingPath + L"\\" + child->name; }
+            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+            SyntheticFileIdentity beforeScan{};
+            if (!TryGetSyntheticFileIdentity(childPath.c_str(), &beforeScan))
+                return HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
+            const SyntheticFileIdentityLess less{};
+            if (!beforeScan.available || less(beforeScan, child->identity) || less(child->identity, beforeScan))
+                return HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
+
+            SyntheticDirectoryMetrics metrics{};
+            result = GetSyntheticDirectoryMetrics(childPath, &metrics);
+            if (FAILED(result)) return result;
+            SyntheticFileIdentity afterScan{};
+            if (!TryGetSyntheticFileIdentity(childPath.c_str(), &afterScan))
+                return HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
+            if (!afterScan.available || less(beforeScan, afterScan) || less(afterScan, beforeScan))
+                return HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
+            return _recursiveSizeStore->Set(parsingName.c_str(), afterScan, metrics.bytes);
+        }
         ULONGLONG SizeForItem(PCUITEMID_CHILD item) const
         {
             const auto* child = SyntheticData(item);
@@ -3134,7 +3184,8 @@ namespace
                 catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
                 TryGetSyntheticFileIdentity(childPath.c_str(), &child->identity);
                 if (!(child->attributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
-                    InterlockedCompareExchange(&g_syntheticRecursiveSizeScanEnabledForProbe, 0, 0))
+                    InterlockedCompareExchange(&g_syntheticRecursiveSizeScanEnabledForProbe, 0, 0) &&
+                    !InterlockedCompareExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, 0, 0))
                 {
                     SyntheticDirectoryMetrics metrics{};
                     result = GetSyntheticDirectoryMetrics(childPath, &metrics);
@@ -4416,6 +4467,99 @@ cleanup:
     if (enumerator) enumerator->Release();
     if (root) root->Release();
     if (rootPidl) CoTaskMemFree(rootPidl);
+    return result;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticOnDemandRecursiveSizeColumnSmoke(PCWSTR backingPath)
+{
+    if (!backingPath || !*backingPath) return E_INVALIDARG;
+    const auto previousDemandSetting = InterlockedExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, 1);
+    const auto previousCustomColumnSetting = InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 1);
+    const auto result = [&]() -> HRESULT
+    {
+        auto operationResult = SetSyntheticSortBackingPath(backingPath);
+        if (FAILED(operationResult)) return operationResult;
+        PIDLIST_ABSOLUTE rootPidl = nullptr;
+        SyntheticSortFolder* root = nullptr;
+        IEnumIDList* enumerator = nullptr;
+        PITEMID_CHILD item = nullptr;
+        const auto cleanup = [&]()
+        {
+            if (item) CoTaskMemFree(item);
+            if (enumerator) enumerator->Release();
+            if (root) root->Release();
+            if (rootPidl) CoTaskMemFree(rootPidl);
+        };
+
+        operationResult = SHParseDisplayName(backingPath, nullptr, &rootPidl, 0, nullptr);
+        if (FAILED(operationResult)) { cleanup(); return operationResult; }
+        root = new (std::nothrow) SyntheticSortFolder();
+        if (!root) { cleanup(); return E_OUTOFMEMORY; }
+        operationResult = root->Initialize(rootPidl);
+        if (FAILED(operationResult)) { cleanup(); return operationResult; }
+
+        InterlockedExchange(&g_syntheticDirectoryMetricsCallCount, 0);
+        InterlockedExchange(&g_syntheticDirectoryMetricsEntryCount, 0);
+        operationResult = root->EnumObjects(nullptr, SHCONTF_FOLDERS, &enumerator);
+        if (FAILED(operationResult) || !enumerator)
+        {
+            cleanup();
+            return FAILED(operationResult) ? operationResult : E_UNEXPECTED;
+        }
+        const auto enumerateCalls = InterlockedCompareExchange(&g_syntheticDirectoryMetricsCallCount, 0, 0);
+        const auto enumerateEntries = InterlockedCompareExchange(&g_syntheticDirectoryMetricsEntryCount, 0, 0);
+        if (enumerateCalls != 0 || enumerateEntries != 0) { cleanup(); return E_FAIL; }
+
+        ULONG fetched = 0;
+        operationResult = enumerator->Next(1, &item, &fetched);
+        const auto* child = SyntheticData(item);
+        if (operationResult != S_OK || fetched != 1 || !child || !(child->attributes & FILE_ATTRIBUTE_DIRECTORY))
+        { cleanup(); return E_FAIL; }
+
+        SHELLDETAILS details{};
+        operationResult = root->GetDetailsOf(item, 1, &details);
+        const bool firstValueMatches = SUCCEEDED(operationResult) && details.str.uType == STRRET_WSTR &&
+            details.str.pOleStr && _wcsicmp(details.str.pOleStr, L"10") == 0;
+        if (details.str.uType == STRRET_WSTR && details.str.pOleStr) CoTaskMemFree(details.str.pOleStr);
+        const auto requestedCalls = InterlockedCompareExchange(&g_syntheticDirectoryMetricsCallCount, 0, 0);
+        const auto requestedEntries = InterlockedCompareExchange(&g_syntheticDirectoryMetricsEntryCount, 0, 0);
+        if (!firstValueMatches || requestedCalls != 2 || requestedEntries != 3)
+        { cleanup(); return E_FAIL; }
+
+        SHCOLUMNID recursiveSizeKey{};
+        operationResult = root->MapColumnToSCID(1, &recursiveSizeKey);
+        VARIANT propertyValue{};
+        if (SUCCEEDED(operationResult))
+            operationResult = root->GetDetailsEx(item, &recursiveSizeKey, &propertyValue);
+        const bool propertyValueMatches = SUCCEEDED(operationResult) && propertyValue.vt == VT_UI8 &&
+            propertyValue.ullVal == 10;
+        VariantClear(&propertyValue);
+        if (!propertyValueMatches ||
+            InterlockedCompareExchange(&g_syntheticDirectoryMetricsCallCount, 0, 0) != requestedCalls ||
+            InterlockedCompareExchange(&g_syntheticDirectoryMetricsEntryCount, 0, 0) != requestedEntries)
+        { cleanup(); return E_FAIL; }
+
+        details = {};
+        operationResult = root->GetDetailsOf(item, 1, &details);
+        const bool cachedValueMatches = SUCCEEDED(operationResult) && details.str.uType == STRRET_WSTR &&
+            details.str.pOleStr && _wcsicmp(details.str.pOleStr, L"10") == 0;
+        if (details.str.uType == STRRET_WSTR && details.str.pOleStr) CoTaskMemFree(details.str.pOleStr);
+        const bool repeatedReadWasCached =
+            InterlockedCompareExchange(&g_syntheticDirectoryMetricsCallCount, 0, 0) == requestedCalls &&
+            InterlockedCompareExchange(&g_syntheticDirectoryMetricsEntryCount, 0, 0) == requestedEntries;
+        if (!cachedValueMatches || !repeatedReadWasCached) { cleanup(); return E_FAIL; }
+
+        operationResult = root->CompareIDs(1, item, item);
+        const bool compareAvoidedScanning = SUCCEEDED(operationResult) &&
+            InterlockedCompareExchange(&g_syntheticDirectoryMetricsCallCount, 0, 0) == requestedCalls &&
+            InterlockedCompareExchange(&g_syntheticDirectoryMetricsEntryCount, 0, 0) == requestedEntries;
+        cleanup();
+        if (!compareAvoidedScanning) return E_FAIL;
+        TraceSyntheticSortStage("synthetic-on-demand-size: enumeration=0; first-details-read=2-calls/3-entries; repeated-read=cached; compareids=0-additional-scans");
+        return S_OK;
+    }();
+    InterlockedExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, previousDemandSetting);
+    InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, previousCustomColumnSetting);
     return result;
 }
 
