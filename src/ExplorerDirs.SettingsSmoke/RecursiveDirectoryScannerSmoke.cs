@@ -1,5 +1,6 @@
 using ExplorerDirs.App;
 using ExplorerDirs.NativeProbe;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 
@@ -7,6 +8,101 @@ namespace ExplorerDirs.SettingsSmoke;
 
 internal static class RecursiveDirectoryScannerSmoke
 {
+    internal static void RunIncrementalDirectoryTreePublishProbe()
+    {
+        const int folderCount = 8;
+        var root = Path.Combine(Path.GetTempPath(), "ExplorerDirs-IncrementalTreePublish-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var folderPaths = new string[folderCount];
+            for (var index = 0; index < folderCount; index++)
+            {
+                var folder = Path.Combine(root, $"folder-{index:D2}");
+                var nested = Path.Combine(folder, "nested");
+                Directory.CreateDirectory(nested);
+                File.WriteAllBytes(Path.Combine(folder, "payload.bin"), new byte[index + 3]);
+                File.WriteAllBytes(Path.Combine(nested, "deep.bin"), new byte[index + 5]);
+                folderPaths[index] = Path.GetFullPath(folder);
+            }
+
+            var rootPath = Path.GetFullPath(root);
+            var requestedPaths = folderPaths.Append(rootPath).ToArray();
+            var requestedFolders = folderPaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var ownerThread = Environment.CurrentManagedThreadId;
+            var published = new ConcurrentQueue<(string Path, ShellListViewRowScanResult Result, int WorkerThread)>();
+            using var firstFolderReady = new ManualResetEventSlim();
+            using var releaseFirstFolder = new ManualResetEventSlim();
+            var firstCallbackEntered = 0;
+            var completedTask = Task.Run(() => HandleBoundRecursiveDirectoryScanner.ScanDirectoryTree(
+                rootPath, requestedPaths, CancellationToken.None, completedDirectory: (path, result) =>
+                {
+                    published.Enqueue((path, result, Environment.CurrentManagedThreadId));
+                    if (requestedFolders.Contains(path) && Interlocked.Exchange(ref firstCallbackEntered, 1) == 0)
+                    {
+                        firstFolderReady.Set();
+                        if (!releaseFirstFolder.Wait(TimeSpan.FromSeconds(5)))
+                            throw new TimeoutException("The incremental publish probe did not release the first folder callback.");
+                    }
+                }));
+
+            if (!firstFolderReady.Wait(TimeSpan.FromSeconds(5)))
+            {
+                releaseFirstFolder.Set();
+                throw new TimeoutException("The handle-bound tree scan did not publish a completed sibling folder.");
+            }
+            var firstFolderUpdates = published.Where(item => requestedFolders.Contains(item.Path)).ToArray();
+            if (completedTask.IsCompleted || firstFolderUpdates.Length == 0)
+            {
+                releaseFirstFolder.Set();
+                throw new InvalidOperationException("A completed folder value was not available on the worker before the full tree scan completed.");
+            }
+            var firstPublished = firstFolderUpdates[0];
+            var firstResult = firstPublished.Result;
+            var expectedBytes = (ulong)(new FileInfo(Path.Combine(firstPublished.Path, "payload.bin")).Length +
+                new FileInfo(Path.Combine(firstPublished.Path, "nested", "deep.bin")).Length);
+            if (firstPublished.WorkerThread == ownerThread || firstResult.Summary.Bytes != expectedBytes)
+            {
+                releaseFirstFolder.Set();
+                throw new InvalidOperationException("A completed folder value was not available on the worker before the full tree scan completed.");
+            }
+
+            // The owner reads the queued update while the worker is still paused in this callback.
+            var ownerApplied = new Dictionary<string, ShellListViewRowScanResult>(StringComparer.OrdinalIgnoreCase)
+            {
+                [firstPublished.Path] = firstResult
+            };
+            releaseFirstFolder.Set();
+            var finalResults = completedTask.GetAwaiter().GetResult();
+            var completions = published.ToArray();
+            if (completions.Length != requestedPaths.Length || completions[^1].Path != rootPath ||
+                completions.Any(item => item.Result != finalResults[item.Path]) ||
+                ownerApplied[firstPublished.Path] != finalResults[firstPublished.Path])
+                throw new InvalidOperationException("Incremental directory callbacks did not reconcile with the final handle-bound scan results.");
+
+            using var cancellation = new CancellationTokenSource();
+            var cancelledCallbacks = new ConcurrentQueue<string>();
+            var cancelledTask = Task.Run(() => HandleBoundRecursiveDirectoryScanner.ScanDirectoryTree(
+                rootPath, requestedPaths, cancellation.Token, completedDirectory: (path, _) =>
+                {
+                    cancelledCallbacks.Enqueue(path);
+                    if (requestedFolders.Contains(path)) cancellation.Cancel();
+                }));
+            var cancelled = false;
+            try { _ = cancelledTask.GetAwaiter().GetResult(); }
+            catch (OperationCanceledException) { cancelled = true; }
+            if (!cancelled || cancelledCallbacks.Count != 1 || cancelledCallbacks.Contains(rootPath))
+                throw new InvalidOperationException("Cancellation after a partial folder publish did not prevent the root total and remaining callbacks.");
+
+            Console.WriteLine($"incremental-directory-tree-publish: requested-folders={folderCount}; " +
+                $"first-folder-published-before-root-completion=True; owner-thread={ownerThread}; " +
+                $"worker-thread={firstPublished.WorkerThread}; completed-callbacks={completions.Length}; " +
+                $"root-published-last={completions[^1].Path == rootPath}; cancellation-after-one-folder=True; " +
+                $"root-published-after-cancel=False; handles-released-after-cancel=True");
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     internal static void RunSiblingPercentageStrategyProbe()
     {
         const int folderCount = 64;

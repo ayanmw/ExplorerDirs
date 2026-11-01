@@ -156,6 +156,12 @@ if (args.Length == 1 && args[0] == "--recursive-directory-scan-allocation-probe"
     return;
 }
 
+if (args.Length == 1 && args[0] == "--recursive-directory-tree-incremental-publish-probe")
+{
+    ExplorerDirs.SettingsSmoke.RecursiveDirectoryScannerSmoke.RunIncrementalDirectoryTreePublishProbe();
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--recursive-directory-sibling-percentage-strategy-probe")
 {
     ExplorerDirs.SettingsSmoke.RecursiveDirectoryScannerSmoke.RunSiblingPercentageStrategyProbe();

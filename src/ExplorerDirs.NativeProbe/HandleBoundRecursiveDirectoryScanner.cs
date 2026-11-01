@@ -83,7 +83,8 @@ internal static class HandleBoundRecursiveDirectoryScanner
         string rootPath,
         IEnumerable<string> requestedPaths,
         CancellationToken cancellationToken,
-        Action<string, string>? beforeChildOpen = null)
+        Action<string, string>? beforeChildOpen = null,
+        Action<string, ShellListViewRowScanResult>? completedDirectory = null)
     {
         ArgumentNullException.ThrowIfNull(requestedPaths);
         cancellationToken.ThrowIfCancellationRequested();
@@ -104,11 +105,15 @@ internal static class HandleBoundRecursiveDirectoryScanner
             if ((root.Attributes & FileAttributeReparsePoint) != 0)
             {
                 if (requested.Contains(rootPath))
-                    results[rootPath] = new(root.Identity, new(0, 0, 0, 1));
+                {
+                    var skipped = new ShellListViewRowScanResult(root.Identity, new(0, 0, 0, 1));
+                    results[rootPath] = skipped;
+                    completedDirectory?.Invoke(rootPath, skipped);
+                }
                 return results;
             }
             ScanOpenedDirectory(root.Handle, root.Identity, rootPath, cancellationToken,
-                beforeChildOpen, requested, results);
+                beforeChildOpen, requested, results, completedDirectory);
         }
         return results;
     }
@@ -117,7 +122,8 @@ internal static class HandleBoundRecursiveDirectoryScanner
         SafeFileHandle rootHandle, ShellFileSystemIdentity rootIdentity, string originalPath,
         CancellationToken cancellationToken, Action<string, string>? beforeChildOpen,
         HashSet<string>? requestedPaths = null,
-        Dictionary<string, ShellListViewRowScanResult>? requestedResults = null)
+        Dictionary<string, ShellListViewRowScanResult>? requestedResults = null,
+        Action<string, ShellListViewRowScanResult>? completedDirectory = null)
     {
         var frames = new Stack<DirectoryFrame>();
         RecursiveDirectoryScanResult? completedRoot = null;
@@ -158,7 +164,9 @@ internal static class HandleBoundRecursiveDirectoryScanner
                         {
                             var identity = new ShellFileSystemIdentity(
                                 frame.Identity.VolumeSerialNumber, entry.FileIdLow, entry.FileIdHigh);
-                            requestedResults![normalizedChildPath] = new(identity, new(0, 0, 0, 1));
+                            var skipped = new ShellListViewRowScanResult(identity, new(0, 0, 0, 1));
+                            requestedResults![normalizedChildPath] = skipped;
+                            completedDirectory?.Invoke(normalizedChildPath, skipped);
                         }
                         continue;
                     }
@@ -230,8 +238,12 @@ internal static class HandleBoundRecursiveDirectoryScanner
             var completed = frames.Pop();
             var summary = completed.ToSummary();
             var normalizedPath = NormalizeHandlePath(completed.Path);
+            ShellListViewRowScanResult? published = null;
             if (requestedPaths?.Contains(normalizedPath) == true)
-                requestedResults![normalizedPath] = new(completed.Identity, summary);
+            {
+                published = new(completed.Identity, summary);
+                requestedResults![normalizedPath] = published;
+            }
             completed.Dispose();
             if (frames.TryPeek(out var parent))
             {
@@ -241,6 +253,7 @@ internal static class HandleBoundRecursiveDirectoryScanner
                 parent.Unreadable = checked(parent.Unreadable + summary.Unreadable);
             }
             else completedRoot = summary;
+            if (published is not null) completedDirectory?.Invoke(normalizedPath, published);
         }
     }
 

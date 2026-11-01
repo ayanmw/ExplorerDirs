@@ -2012,3 +2012,11 @@ NativeProbe Release 构建 0 警告/错误；Private Desktop `--ishellview-recur
 连续两次各做 1 次预热及 5 次计时，单次树扫描的中位数分别为 25 ms、48 ms，逐文件夹扫描为 47 ms、68 ms；单次树扫描托管分配均为 152,104 B，逐文件夹扫描均为 171,064 B。树扫描记录访问 1,217 项；逐文件夹扫描访问 1,152 项，因为它复用已知的根行，省去 65 个根项重新枚举。两轮方向一致但暖缓存耗时有波动；这里只能说明此本地夹具中一次遍历较快且分配较少，不能外推到首次冷读、机械盘、网络位置、访问拒绝或产品内存。Release SettingsSmoke 构建 0 警告/错误，定向探针两次 exit 0。产品视图未修改。
 
 当前证据支持优先采用单次目录树遍历生成所有同级递归快照，再显示精确百分比；仍需验证扫描中的逐行增量发布/取消对交互响应的影响，以及冷/慢存储行为，之后才能决定产品接线。测试命令：`dotnet run --project src/ExplorerDirs.SettingsSmoke/ExplorerDirs.SettingsSmoke.csproj -c Release --no-build -- --recursive-directory-sibling-percentage-strategy-probe`。
+
+### 2026-11-01：目录树扫描逐行回报与取消原型
+
+给 NativeProbe 复用的句柄绑定目录树扫描器增加可选 `completedDirectory` 回调。每个被请求目录的句柄扫描完成后，扫描器保存其身份/大小摘要、归并到父目录并释放该目录句柄，再从扫描线程回报结果；根目录最后回报。不可递归进入的 reparse 目录也会回报明确的不可读摘要。既有调用不传回调，原有返回字典路径保持不变。
+
+新增 `--recursive-directory-tree-incremental-publish-probe`：在 8 个同级目录夹具上暂停第一次目录完成回调，确认 owner 线程可在根目录扫描结束前取到完整目录摘要，再确认全部回调与最终字典一致、根目录为最后一项。第二轮在第一个同级目录完成时取消，确认只收到该目录的结果、不回报根总量，扫描句柄释放后夹具可以删除。SettingsSmoke Release 构建 0 警告/错误；定向 probe、既有递归扫描器 smoke、Shell ListView 行模型 smoke 均通过。
+
+边界：这是隔离扫描器 API 和队列消费模型验证；owner 线程取队列模拟 UI 投递，不是实际 Dispatcher，也未接产品扫描协调器、Shell 行刷新或可见列表，因此不能证明产品逐行绘制效果、滚动/排序稳定性、UI 响应时间或冷盘/网络取消延迟。百分比仍应等同级结果齐全后统一计算；本次只验证大小摘要可以先行发布。产品未修改。

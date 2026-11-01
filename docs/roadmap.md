@@ -5838,4 +5838,6 @@ peer SysListView32 现读取 Shell 文件夹的名称、大小、项目类型、
 
 2026-11-01 百分比分母扫描策略对照：同一生产扫描器比较一次树遍历与重用已知 Shell 行、逐个扫描同级文件夹。64 个同级目录暖缓存夹具中两者大小结果相同；两次 5 轮测量中树扫描中位数 25/48 ms、逐文件夹 47/68 ms，托管分配分别固定为 152,104/171,064 B。方向一致但只有本地暖缓存结果；下一步检查单次扫描的逐行增量发布和取消，不声称冷盘/网络性能。产品未接入。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01同级百分比分母的两种扫描策略对照)。
 
+2026-11-01 递归目录树逐行回报与取消：隔离句柄扫描器在每个请求目录完成后释放句柄并从后台回报大小摘要，根目录最后发布；队列探针证明 owner 可在根扫描结束前消费首个结果。8 个同级夹具的最终摘要完全对齐；在首目录完成时取消只保留该目录回报、不发布根总量，取消后夹具可删除。Release 构建、定向 probe、既有扫描器与行模型 smoke 通过。owner 队列仅模拟 UI 投递，产品扫描协调器和可见视图未接入。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01目录树扫描逐行回报与取消原型)。
+
 2026-11-01 ExplorerBrowser 注册 namespace 递归列排序：`IFolderView2.SetSortColumns` 拒绝 provider 自定义递归 Size key，标准 `PKEY_Size` 不调用递归比较器；隔离视图 `IShellView` 表头真实鼠标点击及背景排序菜单均已验证升降序正确，递归比较各 1 次、比较期间无递归扫描。WPF `HwndSource` 根宿主的 Private Desktop 全流程 exit 0、前台/last-input/临时注册及夹具清理守卫通过；NativeProbe 模块由隔离进程退出时回收。原生 `STATIC` 根宿主仍会在父窗口销毁阶段挂起，根因未明。该路径仅证明注册 namespace 原型排序可行；产品仍使用 ExplorerBrowser，递归列、菜单、操作及 UI 均未接入。详见 `docs/folder-size-column-investigation.md`。
