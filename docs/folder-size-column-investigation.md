@@ -1666,3 +1666,9 @@ RED 基线仅在递归函数内部无取消检查时失败：关闭前累计 32 
 相同夹具切换为按 view 合并批次后，2,084 个目录全部唯一扫描并回填，队列拒绝 0、重复扫描 0、Shell 更新通知 4、四视图 `EnumObjects` 增量各 1，四份选择/焦点均保留；缓存快照 2,084、估算载荷 687,680 B，进程 Private Bytes 为 95,899,648 B（没有同进程基线差值，不能将该进程值归因于缓存）。日志：`src/.state/native-probe-watchdog/20261101-163837-a5b3382e.stdout.log`、`20261101-163837-a5b3382e.stderr.log`。两次 Private Desktop watchdog 均确认前台 HWND 与 last-input tick 不变，隔离清理通过。
 
 结论：逐项模式在超过 2,048 个排队任务时会丢失被拒绝的列请求；Shell 后续重读并未保证所有视图重新请求这些行。view-batch 模式以每个 view 一个外层协调任务及至多一个子批次完成同一压力夹具，没有触及队列上限，因此目前更适合作为递归列原型的默认调度方向。逐项失败负载超出既有 500 目录上限，不代表常规 4×500 负载会拒绝；但并发其它任务或更大目录仍可能达到此边界。该结果仅在 NativeProbe 合成 provider/隐藏 DefView 中成立，未接入产品 ExplorerBrowser，也没有可见 UI、真实磁盘/网络或慢 I/O 证据。若保留逐项调度，仍须增加明确的有界拒绝重试机制；不能把重读列值当作已验证的恢复路径。
+
+### 2026-11-01：高行数批次排队期间关闭全部 view
+
+在四个不同根、每根 520 个目录（每目录一个文件）的隐藏 Shell view 中启用 view-batch，并让队列 worker 在扫描闸门处等待。四个 view 均排入批次后先销毁全部 view，再放行 worker；最终 4 个批次均结束，递归扫描数为 0、Shell 更新通知数为 0。Private Desktop watchdog exit 0，前台 HWND 与 last-input tick 不变，隔离桌面及临时注册/夹具清理通过。日志：`src/.state/native-probe-watchdog/20261101-164218-85ad1cc0.stdout.log`、`20261101-164218-85ad1cc0.stderr.log`。
+
+此结果将“已排队批次取消”从此前每 view 500 项扩展到 520 项，并确认取消发生在目录指标扫描开始之前；不覆盖已进入单次文件系统调用时的中断能力，也不是产品 ExplorerBrowser 或可见 UI 验收。
