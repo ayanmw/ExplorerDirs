@@ -2272,12 +2272,12 @@ NativeProbe Release build 0 警告/错误，探针 exit 0、`git diff --check` �
 
 `ExplorerDirs.HostProbe` Release build 通过（0 警告/错误），`--shell-provider-location` exit 0。输出：`product-host-navigation=True; is-filesystem=False; rows=2; target=session-root; fallback=default-root; parent-visible=False`。因此正式 ExplorerBrowserHost 的导航/枚举接口能消费原型 parsing name；仍未验证产品 provider 注册/卸载和便携部署、应用 SessionStore 跨重启接线、可配置递归列在产品 host 中显示/排序、异步扫描回填、菜单/拖放/通知的产品生命周期或可见 UI。本次仅扩展隔离 HostProbe，没有修改产品 host 或发布版。
 
-### 2026-11-02：产品 Host 的递归列值可读但排序未闭环
+### 2026-11-02：产品 Host 的递归列排序应用时机
 
-扩展隐藏 HostProbe，将两项不同大小的目录（5 B、29 B）通过真实产品 `ExplorerBrowserHost` 浏览，并从 host 的 `ViewState` 恢复 Name + Recursive Size 列和该列升序排序键。实际 `IFolderView2` 行序仍为 `folder-large → folder-small`；直接调用当前 `IShellFolder2.GetDetailsEx` 则按行读到 `29 → 5`。provider 的 `MapColumnToSCID(1)` 返回递归数据键 `{7e1f…}:1`，直接对大/小目录调用 `CompareIDs(1, large, small)` 返回 `+1`，证明该 provider ordinal 的递归值比较结果本身符合升序关系。产品 view 恢复的 Shell 排序键是 `{9e5e…}:1`；从该 view 的原生背景 `IContextMenu` 查询并执行 canonical `sortascending`，HRESULT 为 `S_OK`，但行序未改变，`CompareIDs` 总计数及 8 个列槽计数增量均为 0。最新连续两次运行复现一致，前序运行也一致。
+继续扩展隐藏 HostProbe，将 5 B 与 29 B 两个目录通过真实产品 `ExplorerBrowserHost` 浏览。首次枚举后，`CaptureViewState` 已读回升序 `{9e5e…}:1/+1`，但实际行序仍为 Shell 初始枚举序 `folder-large → folder-small`。provider 的 `MapColumnToSCID(1)` 返回递归数据键 `{7e1f…}:1`，直接调用 `CompareIDs(1, large, small)` 返回 `+1`；`GetDetailsEx` 能读回两值，provider 的列值与比较器合同正确。
 
-证据将问题限定在产品 ExplorerBrowser 当前显示列/排序命令到 provider ordinal 比较器的接线路径：递归属性可读，provider 列映射可查询，直接比较器有效，但 Shell 排序命令没有调用它。Shell sort key `{9e5e…}:1` 与 provider data key `{7e1f…}:1` 是不同职责的键；仍需把产品 host 的列槽和命令路由与已通过的 NativeProbe 原生 `IShellView` 标题交互逐项比对，当前不能断言根因是其中某一项。
+对当前 `IShellView` 调用一次 `Refresh` 后，HRESULT 为 `S_OK`，比较器调用增量为 1，行序变成 `folder-small → folder-large`。随后对已处于升序状态的 view 执行 `sortascending`，比较器没有增加；先执行 `sortdescending` 再执行 `sortascending` 时，两个方向变化均各调用一次比较器，行序分别为大→小和小→大。真实 `SysHeader32` 标题点击也能切换排序键方向并调用比较器。两次重复隐藏运行均得到相同结果。
 
-产品 `CaptureFileViewExportSnapshot` 另读到该递归列的导出值为空，列名回退为 `{9e5e…}:1`；该路径消费 Shell `IPropertyStore` 快速属性，当前 provider 没有把派生值映射到这一读取合同。这是应用导出快照读取路径的限制；没有可见 UI 验收，不能据此判断屏幕列是否为空。排序和值读取/显示/应用导出仍是不同合同。本验证未改产品 host、Shell provider 产品部署、配置或 release。
+因此前一条“排序命令没有进入 provider 比较器”的归因需更正：provider 列身份映射和排序命令路由都可工作；相同方向的命令是无操作。当前已复现的缺口是此隔离 namespace Host 的初始排序恢复：`SetSortColumns` 状态读回成功，但它本身没有把当前枚举行序重排；Shell view `Refresh` 能实现重排。这个证据仅来自注册的 synthetic namespace 与产品 ExplorerBrowserHost，不能推断普通文件系统目录也需要 refresh，也没有评估可见刷新闪烁。是否把 refresh 接入虚拟位置的恢复流程，需要先验证用户可见成本及仅对需要的恢复场景调用是否可行。
 
-`ExplorerDirs.HostProbe` Release 构建 0 警告/错误，`--shell-provider-location` 多次 exit 0；重复运行均确认目标根 B（非 fallback A）、2 项、递归列存在、GetDetailsEx 值为 29/5、provider 映射为 `{7e1f…}:1`、直接比较结果为 `+1`、升序键 `{9e5e…}:1` 可恢复，但原生排序命令不触发比较器且不改变行序、父窗口不可见。临时 CLSID/NameSpace 注册及夹具按探针 finally 清理。
+`CaptureFileViewExportSnapshot` 中递归列值为空仍是应用 `IPropertyStore` 快速读取合同的独立限制；没有可见 UI 验收，不能据此判断屏幕列显示。`ExplorerDirs.HostProbe` Release 构建 0 警告/错误；`--shell-provider-location` 连续两次 exit 0，父窗口不可见，临时 CLSID/NameSpace 与夹具由 finally 清理。产品代码及 release 未改。
