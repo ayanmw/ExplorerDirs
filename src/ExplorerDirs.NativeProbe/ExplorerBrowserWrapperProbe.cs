@@ -138,6 +138,7 @@ internal static class ExplorerBrowserWrapperProbe
         uint eventCookie = 0;
         uint initialized = 0;
         var events = new global::NavigationProbeEvents();
+        var selfHostedNavigationProbed = false;
         var browserSite = new ShellBrowserSite();
         object? browserObject = null;
         var classRegistrationCreated = false;
@@ -510,6 +511,7 @@ internal static class ExplorerBrowserWrapperProbe
                             {
                                 var selfHostedNavigation = ShellViewHostFilterProbe.ProbeRegisteredNamespaceNavigation(
                                     rootPidl, expectedChildRoot, nestedNavigationPidl);
+                                selfHostedNavigationProbed = true;
                                 Console.WriteLine($"explorerbrowser-registered-namespace: self-hosted-navigation={selfHostedNavigation}");
                             }
                             catch (Exception ex)
@@ -556,6 +558,21 @@ internal static class ExplorerBrowserWrapperProbe
                     Console.WriteLine($"explorerbrowser-registered-namespace: nested-pidl-matches=True; nested-row-count={nestedRowCount}; parent-pidl-matches=True; travel-log-back=True; travel-log-forward=True; child-column-visible-after-restore={recursiveColumnVisibleInChild}; forward-column-initially-visible={recursiveColumnInitiallyVisibleAfterForward}; shared-state-restore-after-forward={forwardStateRestored}; forward-column-visible-after-restore={recursiveColumnVisibleAfterForward}; nested-size-after-forward={nestedRecursiveSizeAfterForward}; recursive-column-and-value-after-restore={recursiveColumnAndValueAfterReapply}");
                     if (!recursiveColumnAndValueAfterReapply)
                         throw new InvalidOperationException("The recursive Size column and value were not restored after host reapplication following Shell TravelLog navigation.");
+
+                    if (!selfHostedNavigationProbed)
+                    {
+                        try
+                        {
+                            var selfHostedNavigation = ShellViewHostFilterProbe.ProbeRegisteredNamespaceNavigation(
+                                rootPidl, expectedChildRoot, nestedNavigationPidl);
+                            selfHostedNavigationProbed = true;
+                            Console.WriteLine($"explorerbrowser-registered-namespace: self-hosted-navigation={selfHostedNavigation}");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"explorerbrowser-registered-namespace: self-hosted-state-restore-probe-failure={ex.GetType().Name}: {ex.Message}");
+                        }
+                    }
                 }
                 finally
                 {

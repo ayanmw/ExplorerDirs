@@ -182,6 +182,9 @@ internal static class ShellViewHostFilterProbe
             }
             finally { Marshal.FreeCoTaskMem(nestedRowPidl); }
             Console.WriteLine($"ishellview-host-filter: registered-namespace-recursive-size={nestedRecursiveSize}; expected=10");
+            var savedRecursiveViewState = CaptureRecursiveSizeViewState(folder, folderView);
+            var initialRecursiveRestore = RestoreAndReadRecursiveSizeViewState(
+                folder, folderView, childCount, savedRecursiveViewState, "initial-child");
             Check(host.BrowseObject(nestedPidl, 0));
             var nestedCount = AdoptPendingView(expectedItemCount: 1);
             var currentPidlMatches = PidlExactlyEquals(host.CurrentPidl, nestedPidl);
@@ -197,6 +200,8 @@ internal static class ShellViewHostFilterProbe
             var backCount = AdoptPendingView(expectedItemCount: 2);
             var backRestoredChild = host.HistoryIndex == 1 &&
                 PidlExactlyEquals(host.CurrentPidl, childPidl) && backCount == 2;
+            var backRecursiveRestore = RestoreAndReadRecursiveSizeViewState(
+                folder, folderView, backCount, savedRecursiveViewState, "travel-log-back-child");
             Check(host.BrowseObject(0, SbspNavigateForward));
             var forwardCount = AdoptPendingView(expectedItemCount: 1);
             var forwardRestoredNested = host.HistoryIndex == 2 &&
@@ -205,7 +210,7 @@ internal static class ShellViewHostFilterProbe
                 throw new InvalidOperationException($"Self-hosted Shell history mismatch: back={backRestoredChild}; forward={forwardRestoredNested}; index={host.HistoryIndex}.");
             if (GetForegroundWindow() != foreground)
                 throw new InvalidOperationException("Self-hosted namespace navigation changed the foreground window.");
-            return $"root->child->nested=True; child-items={childCount}; nested-items={nestedCount}; nested-file={names[0]}; recursive-size={nestedRecursiveSize}; back-forward=True; history-index={host.HistoryIndex}";
+            return $"root->child->nested=True; child-items={childCount}; nested-items={nestedCount}; nested-file={names[0]}; recursive-size={nestedRecursiveSize}; back-forward=True; history-index={host.HistoryIndex}; recursive-state-initial={initialRecursiveRestore}; recursive-state-after-back={backRecursiveRestore}";
         }
         finally
         {
@@ -218,6 +223,125 @@ internal static class ShellViewHostFilterProbe
             if (viewPointer != 0) Marshal.Release(viewPointer);
             // On this isolated non-input Desktop, the owning parent HWND is reclaimed at thread/process exit.
             GC.KeepAlive(host);
+        }
+    }
+
+    private static ViewState CaptureRecursiveSizeViewState(nint folder, nint view)
+    {
+        var mapResult = At<MapColumnToScid>(folder, 19)(folder, 1, out var key);
+        Check(mapResult);
+        var captureResult = ShellColumnManager.Capture(view, out var columns);
+        Check(captureResult);
+        if (columns is null) throw new InvalidOperationException("Shell returned no display-column snapshot for the recursive-size state probe.");
+        var stateColumns = columns.Any(column => column.Key.FormatId == key.FormatId && column.Key.PropertyId == key.PropertyId)
+            ? columns
+            : columns.Append(new DisplayColumnState(new PropertyKeyState(key.FormatId, key.PropertyId), 160)).ToArray();
+        return new ViewState(4, -1,
+            [new SortColumnState(new PropertyKeyState(key.FormatId, key.PropertyId), 1)],
+            null, true, stateColumns);
+    }
+
+    private static string RestoreAndReadRecursiveSizeViewState(nint folder, nint view, int itemCount,
+        ViewState saved, string stage)
+    {
+        var failures = new List<string>();
+        var restored = ShellViewStateRestore.Restore(saved, new NativeShellViewStateTarget(view),
+            (step, result) => failures.Add($"{step}=0x{result:X8}"), () => true);
+        var columnCaptureResult = ShellColumnManager.Capture(view, out var columns);
+        var recursiveColumnVisible = columnCaptureResult >= 0 && columns is not null &&
+            columns.Any(column => column.Key == saved.SortColumns[0].Key);
+        var countResult = At<GetSortColumnCount>(view, 26)(view, out var sortCount);
+        var sortReadbackResult = countResult;
+        NativeSortColumn[] sorts = [];
+        if (countResult >= 0 && sortCount > 0)
+        {
+            sorts = new NativeSortColumn[sortCount];
+            sortReadbackResult = At<GetSortColumns>(view, 28)(view, sorts, sortCount);
+        }
+        var names = ReadVisibleItemNames(view, itemCount);
+        var values = ReadRecursiveSizeValues(folder, view, itemCount);
+        var sortMatches = sortReadbackResult >= 0 && sorts.Length == 1 &&
+            sorts[0].Key.FormatId == saved.SortColumns[0].Key.FormatId &&
+            sorts[0].Key.PropertyId == saved.SortColumns[0].Key.PropertyId &&
+            sorts[0].Direction == saved.SortColumns[0].Direction;
+        var orderBeforeShellCommand = string.Join('|', names);
+        var valuesBeforeShellCommand = string.Join('|', values);
+        var valueOrder = values.Select(entry =>
+        {
+            var separator = entry.LastIndexOf('=');
+            return separator < 0 || !ulong.TryParse(entry.AsSpan(separator + 1), out var bytes)
+                ? (Name: entry, Bytes: ulong.MaxValue)
+                : (Name: entry[..separator], Bytes: bytes);
+        }).ToArray();
+        var expectedNames = saved.SortColumns[0].Direction > 0
+            ? valueOrder.OrderBy(entry => entry.Bytes).Select(entry => entry.Name).ToArray()
+            : valueOrder.OrderByDescending(entry => entry.Bytes).Select(entry => entry.Name).ToArray();
+        var orderMatchesSavedSort = names.SequenceEqual(expectedNames,
+            StringComparer.OrdinalIgnoreCase);
+        var result = $"restored={restored}; failures=[{string.Join(',', failures)}]; columns-hr=0x{columnCaptureResult:X8}; recursive-column-visible={recursiveColumnVisible}; sort-count-hr=0x{countResult:X8}; sort-readback-hr=0x{sortReadbackResult:X8}; sort-matches={sortMatches}; order=[{orderBeforeShellCommand}]; recursive-values=[{valuesBeforeShellCommand}]; order-matches-saved-sort={orderMatchesSavedSort}";
+        Console.WriteLine($"ishellview-state-restore: stage={stage}; {result}");
+        return result;
+    }
+
+    private static string[] ReadRecursiveSizeValues(nint folder, nint view, int count)
+    {
+        var values = new string[count];
+        for (var index = 0; index < count; index++)
+        {
+            Check(At<GetItem>(view, 6)(view, index, out var pidl));
+            try
+            {
+                Check(ReadShellDetail(folder, pidl, 1, out var value));
+                values[index] = $"{ReadShellItemDisplayName(folder, pidl)}={value}";
+            }
+            finally { Marshal.FreeCoTaskMem(pidl); }
+        }
+        return values;
+    }
+
+    private static string ReadShellItemDisplayName(nint folder, nint pidl)
+    {
+        var itemId = ShellItemId;
+        Check(SHCreateItemWithParent(0, folder, pidl, ref itemId, out var item));
+        try
+        {
+            Check(At<GetItemDisplayName>(item, 5)(item, 0, out var name));
+            try { return Marshal.PtrToStringUni(name) ?? string.Empty; }
+            finally { Marshal.FreeCoTaskMem(name); }
+        }
+        finally { Marshal.Release(item); }
+    }
+
+    private sealed class NativeShellViewStateTarget(nint view) : IShellViewStateTarget
+    {
+        public int SetMode(uint mode, int iconSize) =>
+            At<SetViewModeAndIconSize>(view, 35)(view, mode, iconSize);
+
+        public int SetColumns(IReadOnlyList<DisplayColumnState> columns) =>
+            ShellColumnManager.Apply(view, columns);
+
+        public int SetSorting(IReadOnlyList<SortColumnState> columns)
+        {
+            var native = columns.Select(column => new NativeSortColumn
+            {
+                Key = new ShellColumnManager.NativeKey
+                {
+                    FormatId = column.Key.FormatId,
+                    PropertyId = column.Key.PropertyId
+                },
+                Direction = column.Direction
+            }).ToArray();
+            return At<SetSortColumns>(view, 27)(view, native, native.Length);
+        }
+
+        public int SetGrouping(PropertyKeyState? key, bool ascending)
+        {
+            var native = key is null ? default : new ShellColumnManager.NativeKey
+            {
+                FormatId = key.FormatId,
+                PropertyId = key.PropertyId
+            };
+            return At<SetGroupBy>(view, 17)(view, ref native, ascending ? 1 : 0);
         }
     }
 
@@ -4447,6 +4571,7 @@ internal static class ShellViewHostFilterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate nint HookProc(int code, nuint wParam, nint lParam);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate nint SubclassProc(nint window, uint message, nint wParam, nint lParam, nuint subclassId, nuint referenceData);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSortColumns(nint self, [Out] NativeSortColumn[] columns, int count);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int MapColumnToScid(nint self, uint column, out ShellColumnManager.NativeKey key);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAttributesOf(nint self, uint count, nint itemPidls, nint attributes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFocusedItem(nint self, out int index);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SelectItem(nint self, int index, uint flags);
