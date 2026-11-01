@@ -49,22 +49,7 @@ internal sealed class DirectoryTreeScanCoordinator : IDisposable
         }
 
         if (!IsCurrent(ticket)) return false;
-        var published = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        ownerContext.Post(_ =>
-        {
-            if (!IsCurrent(ticket))
-            {
-                published.TrySetResult(false);
-                return;
-            }
-            try
-            {
-                publish(result);
-                published.TrySetResult(true);
-            }
-            catch (Exception exception) { published.TrySetException(exception); }
-        }, null);
-        return await published.Task.ConfigureAwait(false);
+        return await PostToOwnerAsync(ticket, ownerContext, () => publish(result)).ConfigureAwait(false);
     }
 
     internal async Task<bool> RunLatestIncrementalAsync<TItem, TResult>(
@@ -84,7 +69,7 @@ internal sealed class DirectoryTreeScanCoordinator : IDisposable
             result = await Task.Run(() => scan(ticket.CancellationToken, item =>
             {
                 if (!IsCurrent(ticket)) throw new OperationCanceledException(ticket.CancellationToken);
-                if (!PostToOwnerAsync(() => publishItem(item)).GetAwaiter().GetResult())
+                if (!PostToOwnerAsync(ticket, ownerContext, () => publishItem(item)).GetAwaiter().GetResult())
                     throw new OperationCanceledException(ticket.CancellationToken);
             }), ticket.CancellationToken).ConfigureAwait(false);
         }
@@ -95,28 +80,31 @@ internal sealed class DirectoryTreeScanCoordinator : IDisposable
         }
 
         if (!IsCurrent(ticket)) return false;
-        try { return await PostToOwnerAsync(() => publishFinal(result)).ConfigureAwait(false); }
+        try { return await PostToOwnerAsync(ticket, ownerContext, () => publishFinal(result)).ConfigureAwait(false); }
         catch (Exception) when (!IsCurrent(ticket)) { return false; }
+    }
 
-        Task<bool> PostToOwnerAsync(Action publish)
+    private async Task<bool> PostToOwnerAsync(DirectoryTreeScanTicket ticket,
+        SynchronizationContext ownerContext, Action publish)
+    {
+        var published = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var retirement = ticket.CancellationToken.Register(static state =>
+            ((TaskCompletionSource<bool>)state!).TrySetResult(false), published);
+        ownerContext.Post(_ =>
         {
-            var published = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            ownerContext.Post(_ =>
+            if (!IsCurrent(ticket))
             {
-                if (!IsCurrent(ticket))
-                {
-                    published.TrySetResult(false);
-                    return;
-                }
-                try
-                {
-                    publish();
-                    published.TrySetResult(true);
-                }
-                catch (Exception exception) { published.TrySetException(exception); }
-            }, null);
-            return published.Task;
-        }
+                published.TrySetResult(false);
+                return;
+            }
+            try
+            {
+                publish();
+                published.TrySetResult(true);
+            }
+            catch (Exception exception) { published.TrySetException(exception); }
+        }, null);
+        return await published.Task.ConfigureAwait(false);
     }
 
     internal void CancelCurrent()

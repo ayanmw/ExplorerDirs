@@ -5848,4 +5848,6 @@ peer SysListView32 现读取 Shell 文件夹的名称、大小、项目类型、
 
 2026-11-01 peer ListView 递归值逐项回写：NativeProbe/SettingsSmoke Release build、无窗口 smoke 通过；Private Desktop 首轮确认 3 条 peer 行增量回写、最终对账及选区/焦点保持，守卫通过。第二轮功能断言也通过，但 last-input tick 变化导致隔离守卫失败，未继续重跑。重复运行安全性仍待查明；可见重绘效果待集中验收，产品 ExplorerBrowser 未改。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01peer-listview-增量递归值回写接线)。
 
+2026-11-01 递增扫描 owner 等待退休修复：队列回归复现 coordinator 取消后 worker 仍同步卡在未派发的 owner 回调；统一 owner 发布等待现在随 ticket 退休解除，迟到回调仍被门控丢弃。递归扫描 Release smoke 通过。仅 NativeProbe coordinator 生命周期，产品窗格关闭接线与 Private Desktop 重复运行守卫仍待验证。详见[调查记录](folder-size-column-investigation.md#2026-11-01递增-owner-发布在扫描退休时解除等待)。
+
 2026-11-01 ExplorerBrowser 注册 namespace 递归列排序：`IFolderView2.SetSortColumns` 拒绝 provider 自定义递归 Size key，标准 `PKEY_Size` 不调用递归比较器；隔离视图 `IShellView` 表头真实鼠标点击及背景排序菜单均已验证升降序正确，递归比较各 1 次、比较期间无递归扫描。WPF `HwndSource` 根宿主的 Private Desktop 全流程 exit 0、前台/last-input/临时注册及夹具清理守卫通过；NativeProbe 模块由隔离进程退出时回收。原生 `STATIC` 根宿主仍会在父窗口销毁阶段挂起，根因未明。该路径仅证明注册 namespace 原型排序可行；产品仍使用 ExplorerBrowser，递归列、菜单、操作及 UI 均未接入。详见 `docs/folder-size-column-investigation.md`。

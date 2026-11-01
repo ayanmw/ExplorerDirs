@@ -44,7 +44,9 @@ internal static class DirectoryTreeScanCoordinatorSmoke
             "disposing a scan owner cancels outstanding work and blocks stale publication");
 
         VerifyLatestAsyncPublication();
+        VerifyRetirementReleasesQueuedPublication();
         VerifyLatestIncrementalPublication();
+        VerifyRetirementReleasesQueuedIncrementalWorker();
         VerifyQueuedStaleIncrementalPublication();
         VerifyQueuedStalePublication();
         VerifyFilesystemChangeInvalidatesQueuedPublication();
@@ -99,6 +101,23 @@ internal static class DirectoryTreeScanCoordinatorSmoke
         if (failure is not null) throw new InvalidOperationException("Incremental owner publication smoke failed.", failure);
     }
 
+    private static void VerifyRetirementReleasesQueuedPublication()
+    {
+        using var owner = new ExplorerDirs.NativeProbe.DirectoryTreeScanCoordinator();
+        using var context = new QueuedSynchronizationContext();
+        var valuePublished = false;
+        var request = owner.RunLatestAsync(_ => 42, context, _ => valuePublished = true);
+        if (!context.WaitForPost(TimeSpan.FromSeconds(5)))
+            throw new TimeoutException("The completed scan did not reach its owner context before retirement.");
+
+        owner.CancelCurrent();
+        var retiredRequestReleased = request.Wait(TimeSpan.FromSeconds(2));
+        context.RunPostedCallback();
+        var requestPublished = request.GetAwaiter().GetResult();
+        Check(retiredRequestReleased && !requestPublished && !valuePublished,
+            "retiring a scan releases its pending publication without dispatching the queued owner callback");
+    }
+
     private static void VerifyQueuedStaleIncrementalPublication()
     {
         using var owner = new ExplorerDirs.NativeProbe.DirectoryTreeScanCoordinator();
@@ -118,6 +137,30 @@ internal static class DirectoryTreeScanCoordinatorSmoke
         context.RunPostedCallback();
         Check(!request.GetAwaiter().GetResult() && !progressPublished && !finalPublished && owner.IsCurrent(newerRequest),
             "a queued incremental value is discarded after its scan generation is retired");
+    }
+
+    private static void VerifyRetirementReleasesQueuedIncrementalWorker()
+    {
+        using var owner = new ExplorerDirs.NativeProbe.DirectoryTreeScanCoordinator();
+        using var context = new QueuedSynchronizationContext();
+        var itemPublished = false;
+        var finalPublished = false;
+        var request = owner.RunLatestIncrementalAsync<int, int>(
+            (_, publish) =>
+            {
+                publish(7);
+                return 42;
+            }, context, _ => itemPublished = true, _ => finalPublished = true);
+        if (!context.WaitForPost(TimeSpan.FromSeconds(5)))
+            throw new TimeoutException("The incremental result did not reach its owner context before retirement.");
+
+        owner.CancelCurrent();
+        var retiredWorkerReleased = request.Wait(TimeSpan.FromSeconds(2));
+        context.RunPostedCallback();
+        var publishedAfterRetirement = itemPublished || finalPublished;
+        var requestPublished = request.GetAwaiter().GetResult();
+        Check(retiredWorkerReleased && !requestPublished && !publishedAfterRetirement,
+            "retiring an incremental scan releases its worker without dispatching the queued owner callback");
     }
 
     private static void VerifyLatestAsyncPublication()
