@@ -2818,6 +2818,23 @@ internal static class ShellViewHostFilterProbe
                 (popup.InitResult != 0 && !popup.ForwardedToOwnerProc))
                 throw new InvalidOperationException($"The selected Shell context menu did not enter and leave the native popup loop cleanly: selected={popup.SelectedCommand}; init-count={popup.InitPopupCount}; init-hr=0x{popup.InitResult:X8}; forwarded={popup.ForwardedToOwnerProc}.");
             Console.WriteLine($"ishellview-peer-selected-context-menu-popup: selected-count={selectedCount}; query-hr=0x{queryHr:X8}; items={itemCount}; init-popup-count={popup.InitPopupCount}; init-hr=0x{popup.InitResult:X8}; context-menu3-query=0x{popup.ContextMenu3QueryHr:X8}; context-menu2-query=0x{popup.ContextMenu2QueryHr:X8}; context-menu3-message=0x{popup.ContextMenu3MessageHr:X8}; context-menu2-attempted={popup.ContextMenu2Attempted}; context-menu2-message=0x{popup.ContextMenu2MessageHr:X8}; forwarded-to-owner-proc={popup.ForwardedToOwnerProc}; popup-cancelled=True; command-invoked=False");
+
+            const int DefaultOnly = 0x0001;
+            var defaultMenu = CreatePopupMenu();
+            if (defaultMenu == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create the default-only Shell context menu.");
+            try
+            {
+                var defaultQueryHr = At<QueryContextMenu>(contextMenu, 3)(contextMenu, defaultMenu, 0, 1, 0x7fff, DefaultOnly);
+                Check(defaultQueryHr);
+                var defaultItemCount = GetMenuItemCount(defaultMenu);
+                if (defaultItemCount <= 0) throw new InvalidOperationException("CMF_DEFAULTONLY returned no Shell context menu item.");
+                var defaultPopup = TrackPopupMenuAndCancel(owner, defaultMenu, contextMenu);
+                if (defaultPopup.SelectedCommand != 0 || defaultPopup.InitPopupCount != 1 ||
+                    (defaultPopup.InitResult != 0 && !defaultPopup.ForwardedToOwnerProc))
+                    throw new InvalidOperationException($"The default-only Shell menu did not enter and leave its popup loop cleanly: selected={defaultPopup.SelectedCommand}; init-count={defaultPopup.InitPopupCount}; init-hr=0x{defaultPopup.InitResult:X8}; forwarded={defaultPopup.ForwardedToOwnerProc}.");
+                Console.WriteLine($"ishellview-peer-selected-context-menu-popup: mode=default-only; selected-count={selectedCount}; query-hr=0x{defaultQueryHr:X8}; items={defaultItemCount}; init-hr=0x{defaultPopup.InitResult:X8}; context-menu3-message=0x{defaultPopup.ContextMenu3MessageHr:X8}; forwarded-to-owner-proc={defaultPopup.ForwardedToOwnerProc}; popup-cancelled=True; command-invoked=False");
+            }
+            finally { _ = DestroyMenu(defaultMenu); }
         }
         finally { _ = DestroyMenu(menu); }
     }
