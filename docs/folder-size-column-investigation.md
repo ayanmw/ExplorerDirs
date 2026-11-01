@@ -1688,3 +1688,11 @@ RED 基线仅在递归函数内部无取消检查时失败：关闭前累计 32 
 直接对合成子目录 PIDL 发 `SHCNE_UPDATEDIR` 会改变 DefView 行集合；将 `UPDATEDIR` 一概扩大为子树缓存失效则复现反馈风暴（8 个目录、四视图场景扫描 224 次，基线 36 次，23 次通知，值未收敛）。该扩大规则已撤销，现有缓存失效实现未因此改变。下一步应在 NativeProbe 中增加仅测试用的精确缓存键失效入口，锁定一个已知在途扫描并验证旧提交被拒绝、释放 reservation 后重试；再单独验证真实 Shell 通知 PIDL 到缓存键的映射，避免把 DefView 行集合变化误判为缓存行为。
 
 以上组合实验均未通过成功合同，不能算作产品功能或异步通知竞态的完整验证。产品 ExplorerBrowser、release 与 NativeProbe 默认 view-batch 策略均未因该实验更改。
+
+### 2026-11-01：精确缓存键失效与在途结果拒绝验证
+
+NativeProbe 新增只供隔离试验使用的精确 reservation 检查/失效入口：入口在共享缓存锁内确认目标键仍有扫描 reservation，并原子设置失效标记；不对祖先、后代或整棵目录子树做清除。Private Desktop 四个不同根视图中，闸门释放后等待 `folder-000` 扫描开始，修改夹具文件使目标目录从 1 B 变为 38 B，再失效该确切键。旧 worker 的提交被缓存拒绝，基线 20 个扫描仅 19 个成功发布；其余批次完成后显式 `RefreshView`，Shell 重新请求并扫描目标，最终 38 B 进入共享缓存，成功发布数回到 20。最终总扫描 21（比基线多一次重试），通知 5，峰值 worker 2，四视图列值齐备，选区/焦点在探针重扫后重新设置时均通过。Private Desktop 前台/输入守卫与临时 namespace/夹具清理通过。
+
+RED 阶段因预期缺少原生 probe 导出失败；接入后曾发现 `RefreshView` 会暂时清空 ListView，探针现等待行数恢复才检查。刷新会丢掉首视图原选择，因此最终检查是在重扫后重新设置选择/焦点；此结果不证明刷新本身保留 selection。日志：`src/.state/native-probe-watchdog/20261101-171503-08c9db85.stdout.log`。原生 adapter `/W4 /WX` 和 NativeProbe Release（0 警告/错误）构建通过，Private Desktop watchdog exit 0。
+
+边界：此精确入口由探针直接指定缓存键，不证明 Windows Shell 通知可从其 PIDL/事件可靠解析成同一个键；也不覆盖真实文件系统 provider、ExplorerBrowser 产品接线、可见刷新体验或菜单/文件操作。递归大小列仍仅为 NativeProbe 原型，不进入产品或 release。下一步根据通知的变化类型和 PIDL 精确追踪路径映射；若通知仍无法给出稳定 key，则评估以目录身份与 generation token 代替路径键的失效合同，再继续高负载 view-batch 回归。

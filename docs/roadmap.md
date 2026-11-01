@@ -5733,6 +5733,10 @@ Q-Dir 对照确认 Type 列的递归 counts 也需要复用后台扫描值。Nat
 
 NativeProbe 隐藏 Shell 异步按需扫描现默认按 view 合并，显式 `EXPLORER_DIRS_NATIVEPROBE_ASYNC_BATCH_BY_VIEW=0` 保留逐项 A/B。默认四根×500 目录实验完成 2,004/2,004 唯一扫描，零拒绝/重复，四视图值、通知及选择焦点通过；逐项四根×520 的强制压力实验仍复现 34 项队列拒绝。该默认只适用于隔离原型，产品 ExplorerBrowser 未接线。详见[调查记录](folder-size-column-investigation.md#2026-11-01隐藏-shell-递归列原型默认使用-view-batch)。
 
-### 2026-11-01：在途批次遇到 Shell 目录通知的下一验证门槛
 
-组合探针尚未证明真实 Shell 通知可使正在扫描的快照失效并重试：深层文件更新被视图回调折叠为 `SHCNE_UPDATEDIR`，通知 PIDL 与在途缓存键的对应关系尚未锁定。粗粒度地让 UPDATEDIR 清空整棵子树会造成重复枚举和扫描反馈，已撤销。下一步先在 NativeProbe 增加一个仅用于受控试验的精确缓存键失效入口，验证批次中旧结果拒绝和 reservation 释放后的重试；然后用精确路径追踪确认真实 Shell 通知映射，再回到高负载 view-batch 与选择/焦点合同。未完成该门槛前，递归大小列继续留在 NativeProbe，不进入产品或 release。详见[调查记录](folder-size-column-investigation.md#2026-11-01异步批次期间的真实-shell-目录通知验证边界)。
+
+### 2026-11-01：精确缓存键失效原型验证
+
+NativeProbe 已完成受控精确失效合同：四个不同根的异步 Shell 视图中，指定正在扫描的 `folder-000` 被标记为过期后，旧 worker 提交遭拒；reservation 释放后通过显式刷新重扫，目标值由 1 B 更新为 38 B。总扫描 21 次（基线 20 次）、通知 5 次、峰值 worker 2，四视图列值齐备；前台/输入守卫和隔离清理通过。刷新会短暂清空列表并移除首视图当前选区，探针在重扫后重新设置该选区，因此不能据此声称刷新保留选区。
+
+这只验证探针直接指定精确缓存键时的原子失效和重试；真实 Shell 通知的 PIDL 尚未证明能稳定映射到该键。递归大小列仍是 NativeProbe 原型，未接入产品或 release。下一步追踪通知类型和 PIDL 到物理路径/目录 identity 的对应关系。详见[调查记录](folder-size-column-investigation.md#2026-11-01精确缓存键失效与在途结果拒绝验证)。

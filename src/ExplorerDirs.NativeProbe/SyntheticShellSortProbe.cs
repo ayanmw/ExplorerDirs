@@ -363,10 +363,12 @@ public static class SyntheticShellSortProbe
         var asyncCancelSingleViewProbe = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_CANCEL_SINGLE_VIEW") == "1";
         var asyncCancelInFlightProbe = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_CANCEL_IN_FLIGHT") == "1";
         var asyncPartialRequestProbe = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_PARTIAL_REQUEST") == "1";
+        var asyncExactInvalidationProbe = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_EXACT_INVALIDATION") == "1";
         // Diagnostic only: hold both workers to expose queue rejection under distinct per-pane roots.
         var asyncQueueSaturationProbe = asyncSharedViewDistinctRoots && asyncQueueSaturationRequested;
         var asyncQueueGateProbe = asyncQueueSaturationProbe || (asyncSharedViewDistinctRoots && asyncParentBatchProbe) ||
-            asyncCancelAfterQueueProbe || asyncCancelSingleViewProbe || asyncCancelInFlightProbe || asyncPartialRequestProbe;
+            asyncCancelAfterQueueProbe || asyncCancelSingleViewProbe || asyncCancelInFlightProbe || asyncPartialRequestProbe ||
+            asyncExactInvalidationProbe;
         if (asyncSharedViewProbe && asyncSharedViewCount is not (2 or 4))
             throw new ArgumentOutOfRangeException(nameof(asyncSharedViewCountText), "The shared recursive-size view probe accepts two or four active views.");
         if (asyncSharedViewRootMode is not ("same" or "distinct") ||
@@ -384,8 +386,11 @@ public static class SyntheticShellSortProbe
             throw new ArgumentException("In-flight cancellation requires four distinct-root batches and an injected per-entry delay.", nameof(asyncCancelInFlightProbe));
         if (asyncPartialRequestProbe && (!asyncParentBatchProbe || !asyncSharedViewProbe || asyncSharedViewCount != 4))
             throw new ArgumentException("Partial-row demand requires the four-view batch probe.", nameof(asyncPartialRequestProbe));
+        if (asyncExactInvalidationProbe && (!asyncParentBatchProbe || !asyncSharedViewProbe || asyncSharedViewCount != 4 ||
+            !asyncSharedViewDistinctRoots || asyncScanDelayMs < 500))
+            throw new ArgumentException("Exact invalidation requires four distinct-root view batches and at least 500 ms scan delay.", nameof(asyncExactInvalidationProbe));
         if ((asyncCancelAfterQueueProbe ? 1 : 0) + (asyncCancelSingleViewProbe ? 1 : 0) +
-            (asyncCancelInFlightProbe ? 1 : 0) + (asyncPartialRequestProbe ? 1 : 0) > 1)
+            (asyncCancelInFlightProbe ? 1 : 0) + (asyncPartialRequestProbe ? 1 : 0) + (asyncExactInvalidationProbe ? 1 : 0) > 1)
             throw new ArgumentException("Cancellation and demand-observation probe scenarios are mutually exclusive.");
         if (asyncSharedViewProbe && (!recursiveDirectorySizeSortOnly || largeViewSortProbe || twoViewDistinctLocations || onDemandFolderCount < 2))
             throw new ArgumentException("The async shared-view probe requires the recursive-size view fixture, a single shared root, and no separate large-view sort strategy.");
@@ -812,12 +817,13 @@ public static class SyntheticShellSortProbe
                         _ when asyncMinimalFixture && name.StartsWith("folder-", StringComparison.OrdinalIgnoreCase) => "1",
                         _ => "10"
                     };
-                    bool AllAsyncColumnValuesReady(string[] names, string[] sizes)
+                    bool AllAsyncColumnValuesReady(string[] names, string[] sizes, bool sharedRootView = false)
                     {
                         if (sizes.Length != names.Length) return false;
                         for (var index = 0; index < names.Length; index++)
                         {
-                            var expectedSize = ExpectedAsyncColumnSize(names[index]);
+                            var expectedSize = asyncExactInvalidationProbe && !sharedRootView && names[index] == "folder-000"
+                                ? "38" : ExpectedAsyncColumnSize(names[index]);
                             if (!string.Equals(sizes[index], expectedSize, StringComparison.Ordinal)) return false;
                         }
                         return true;
@@ -825,9 +831,9 @@ public static class SyntheticShellSortProbe
                     bool AllSharedAsyncColumnValuesReady()
                     {
                         if (!asyncSharedViewProbe) return true;
-                        if (!AllAsyncColumnValuesReady(sharedInitialNames, sharedInitialSizes)) return false;
+                        if (!AllAsyncColumnValuesReady(sharedInitialNames, sharedInitialSizes, sharedRootView: true)) return false;
                         for (var index = 0; index < additionalInitialNames.Length; index++)
-                            if (!AllAsyncColumnValuesReady(additionalInitialNames[index], additionalInitialSizes[index])) return false;
+                            if (!AllAsyncColumnValuesReady(additionalInitialNames[index], additionalInitialSizes[index], sharedRootView: true)) return false;
                         return true;
                     }
                     string AsyncColumnSummary(string[] names, string[] sizes)
@@ -913,6 +919,61 @@ public static class SyntheticShellSortProbe
                                 NativeLibrary.GetExport(module, "ClearSyntheticAsyncRecursiveSizeQueueGateForProbe"))();
                             asyncQueueGateCreated = false;
                             return 0;
+                        }
+                        if (asyncExactInvalidationProbe)
+                        {
+                            Marshal.GetDelegateForFunctionPointer<NativeVoidCall>(
+                                NativeLibrary.GetExport(module, "ReleaseSyntheticAsyncRecursiveSizeQueueGateForProbe"))();
+                            var hasReservation = Marshal.GetDelegateForFunctionPointer<HasRecursiveSizeScanReservationForChild>(
+                                NativeLibrary.GetExport(module, "HasSyntheticRecursiveSizeScanReservationForChildProbe"));
+                            var invalidateReservation = Marshal.GetDelegateForFunctionPointer<InvalidateRecursiveSizeScanForChild>(
+                                NativeLibrary.GetExport(module, "InvalidateSyntheticRecursiveSizeScanForChildProbe"));
+                            var hasRecursiveSnapshot = Marshal.GetDelegateForFunctionPointer<HasRecursiveSizeSnapshot>(
+                                NativeLibrary.GetExport(module, "HasSyntheticRecursiveSizeSnapshotForViewProbe"));
+                            var reservationDeadline = Environment.TickCount64 + 10_000;
+                            while (!hasReservation(view, "folder-000") && Environment.TickCount64 < reservationDeadline)
+                                Pump(10);
+                            if (!hasReservation(view, "folder-000"))
+                                throw new TimeoutException("The main view never reserved the targeted folder-000 recursive-size scan.");
+
+                            var completedBeforeInvalidation = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeScanCompletedCountForProbe");
+                            File.WriteAllBytes(Path.Combine(firstPaneFolder, "folder-000", "item-00.bin"), new byte[38]);
+                            Check(invalidateReservation(view, "folder-000"));
+                            Console.WriteLine($"synthetic-async-recursive-size-exact-invalidation: target=folder-000; reservation-observed=True; completed-before={completedBeforeInvalidation}; changed-bytes=38");
+
+                            var initialBatchesDeadline = Environment.TickCount64 + 15_000;
+                            var getFinishedBatches = Marshal.GetDelegateForFunctionPointer<NativeLibraryUnloadContractSmoke>(
+                                NativeLibrary.GetExport(module, "GetSyntheticAsyncRecursiveSizeScanFinishedCountForProbe"));
+                            while (getFinishedBatches() < asyncSharedViewCount && Environment.TickCount64 < initialBatchesDeadline)
+                                Pump(25);
+                            if (getFinishedBatches() < asyncSharedViewCount || hasRecursiveSnapshot(view, "folder-000"))
+                                throw new IOException("The invalidated in-flight result was published or its initial view batches did not finish.");
+
+                            var completedAfterInvalidation = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeScanCompletedCountForProbe");
+                            if (completedAfterInvalidation != expectedAsyncScanCount - 1)
+                                throw new IOException($"Expected one stale scan to be refused before retry: successful-publishes={completedAfterInvalidation}/{expectedAsyncScanCount - 1}.");
+                            Check(At<RefreshView>(view, 8)(view));
+                            var retryDeadline = Environment.TickCount64 + 20_000;
+                            while (Environment.TickCount64 < retryDeadline)
+                            {
+                                Pump(25);
+                                // RefreshView temporarily empties the native list while the Shell re-enumerates it.
+                                if (SendMessageW(sizeListView, LvmGetItemCount, 0, 0) != expectedInitialCount) continue;
+                                initialNames = ReadNames(sizeListView, module, expectedCount: expectedInitialCount);
+                                initialSizes = ReadColumnTexts(sizeListView, module, 1, expectedCount: expectedInitialCount);
+                                var targetIndex = Array.IndexOf(initialNames, "folder-000");
+                                if (AllAsyncColumnValuesReady(initialNames, initialSizes) && targetIndex >= 0 &&
+                                    hasRecursiveSnapshot(view, "folder-000") &&
+                                    ReadCounter(module, "GetSyntheticAsyncRecursiveSizeScanCompletedCountForProbe") >= expectedAsyncScanCount)
+                                    break;
+                            }
+                            var finalTargetIndex = Array.IndexOf(initialNames, "folder-000");
+                            if (!AllAsyncColumnValuesReady(initialNames, initialSizes) || finalTargetIndex < 0 ||
+                                !hasRecursiveSnapshot(view, "folder-000") ||
+                                ReadCounter(module, "GetSyntheticAsyncRecursiveSizeScanCompletedCountForProbe") < expectedAsyncScanCount)
+                                throw new TimeoutException($"The exact-key refresh did not retry the invalidated folder scan to its updated value: rows={initialNames.Length}; target={((finalTargetIndex >= 0 && finalTargetIndex < initialSizes.Length) ? initialSizes[finalTargetIndex] : "<missing>")}; cached={hasRecursiveSnapshot(view, "folder-000")}; completed={ReadCounter(module, "GetSyntheticAsyncRecursiveSizeScanCompletedCountForProbe")}/{expectedAsyncScanCount}; scans={ReadCounter(module, "GetSyntheticOnDemandSizeScanCount")}; details={ReadCounter(module, "GetSyntheticSizeDetailsOfItemCount")}; notifications={ReadCounter(module, "GetSyntheticAsyncRecursiveSizeNotificationCountForProbe")};");
+                            SetListViewSelectionAndFocus(sizeListView, "folder-000", initialNames);
+                            Console.WriteLine($"synthetic-async-recursive-size-exact-invalidation: stale-result-published=False; retry-value={initialSizes[finalTargetIndex]}; successful-publishes-after-retry={ReadCounter(module, "GetSyntheticAsyncRecursiveSizeScanCompletedCountForProbe")}");
                         }
                         if (asyncCancelInFlightProbe)
                         {
@@ -1110,8 +1171,11 @@ public static class SyntheticShellSortProbe
                             .Concat(additionalInitialNames.Select((names, index) => AsyncColumnSummary(names, additionalInitialSizes[index]))))
                         : "none";
                     Console.WriteLine($"synthetic-async-recursive-size-shell-view: shell-notification-requery={asyncViewRequeryObserved}; all-column-values-ready={allAsyncColumnValuesReady}; child-size={(childIndexForAsync >= 0 ? initialSizes[childIndexForAsync] : "<missing>")}; shared-columns=[{asyncSharedColumnSummaries}]; folders={onDemandFolderCount}; scans={asyncScans}; scan-delay-ms={asyncScanDelayMs}; queue-rejected-scans={asyncQueueRejectedScans}; notifications={asyncNotificationCount}; peak-workers={asyncPeakWorkers}; enum-delta={asyncEnumDelta}; details-of-size={ReadCounter(module, "GetSyntheticSizeDetailsOfItemCount")}");
-                    if (!asyncViewRequeryObserved || !allAsyncColumnValuesReady || asyncScans != expectedAsyncScanCount || asyncNotificationCount > (asyncSharedViewProbe ? 64 : 16) || asyncPeakWorkers > 2)
-                        throw new IOException($"The hidden Shell view did not converge bounded asynchronous size rows: all-values-ready={allAsyncColumnValuesReady}; shared-values-ready={allSharedAsyncColumnValuesReady}; scans={asyncScans}/{expectedAsyncScanCount}; queue-rejected-scans={asyncQueueRejectedScans}; notifications={asyncNotificationCount}; peak-workers={asyncPeakWorkers}; folders={onDemandFolderCount}.");
+                    var scanCountMatchesScenario = asyncExactInvalidationProbe
+                        ? asyncScans > expectedAsyncScanCount
+                        : asyncScans == expectedAsyncScanCount;
+                    if (!asyncViewRequeryObserved || !allAsyncColumnValuesReady || !scanCountMatchesScenario || asyncNotificationCount > (asyncSharedViewProbe ? 64 : 16) || asyncPeakWorkers > 2)
+                        throw new IOException($"The hidden Shell view did not converge bounded asynchronous size rows: all-values-ready={allAsyncColumnValuesReady}; shared-values-ready={allSharedAsyncColumnValuesReady}; scans={asyncScans}; expected-baseline={expectedAsyncScanCount}; exact-invalidation-retry-required={asyncExactInvalidationProbe}; queue-rejected-scans={asyncQueueRejectedScans}; notifications={asyncNotificationCount}; peak-workers={asyncPeakWorkers}; folders={onDemandFolderCount}.");
                     if (asyncQueueSaturationProbe && asyncNotificationCount != asyncSharedViewCount)
                         throw new IOException($"The four-root pressure run did not coalesce to exactly one update per view: notifications={asyncNotificationCount}/{asyncSharedViewCount}.");
                     if (asyncQueueGateCreated)
@@ -4522,6 +4586,8 @@ public static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int NotifySingleRefresh(nint view);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int PublishRecursiveSizeSnapshot(nint view, [MarshalAs(UnmanagedType.LPWStr)] string childName, ulong bytes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] [return: MarshalAs(UnmanagedType.Bool)] private delegate bool HasRecursiveSizeSnapshot(nint view, [MarshalAs(UnmanagedType.LPWStr)] string childName);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] [return: MarshalAs(UnmanagedType.Bool)] private delegate bool HasRecursiveSizeScanReservationForChild(nint view, [MarshalAs(UnmanagedType.LPWStr)] string childName);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int InvalidateRecursiveSizeScanForChild(nint view, [MarshalAs(UnmanagedType.LPWStr)] string childName);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RenameItems(nint self, nint dataObject, [MarshalAs(UnmanagedType.LPWStr)] string newName);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DeleteItems(nint self, nint dataObject);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int NewItem(nint self, nint destination, uint attributes, [MarshalAs(UnmanagedType.LPWStr)] string name, nint template, nint progressSink);

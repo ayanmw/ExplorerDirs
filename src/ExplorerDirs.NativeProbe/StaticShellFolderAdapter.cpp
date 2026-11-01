@@ -1528,6 +1528,20 @@ namespace
                 if (matchesChangedPath(entry.first)) entry.second = true;
             return removed;
         }
+        bool InvalidateReservedPathExact(PCWSTR parsingName)
+        {
+            if (!parsingName || !*parsingName) return false;
+            std::wstring exact;
+            try { exact.assign(parsingName); }
+            catch (const std::bad_alloc&) { return false; }
+            std::lock_guard<std::mutex> lock(_mutex);
+            const auto reservation = _scansInProgress.find(exact);
+            if (reservation == _scansInProgress.end()) return false;
+            // Keep this NativeProbe seam exact-key and atomic so the probe cannot repeat broad subtree feedback.
+            reservation->second = true;
+            _sizes.erase(exact);
+            return true;
+        }
         bool TryGet(const std::wstring& parsingName, const SyntheticFileIdentity& identity, ULONGLONG* bytes,
             ULONGLONG* files = nullptr, ULONGLONG* folders = nullptr) const
         {
@@ -1579,6 +1593,11 @@ namespace
         {
             std::lock_guard<std::mutex> lock(_mutex);
             _scansInProgress.erase(parsingName);
+        }
+        bool HasReservation(const std::wstring& parsingName) const
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            return _scansInProgress.find(parsingName) != _scansInProgress.end();
         }
         size_t Count() const
         {
@@ -2485,6 +2504,34 @@ namespace
             const bool exists = SUCCEEDED(result) && _recursiveSizeStore->TryGet(parsingName, child->identity, &bytes);
             CoTaskMemFree(childItem);
             return exists ? TRUE : FALSE;
+        }
+        BOOL HasRecursiveSizeScanReservationForChildProbe(PCWSTR childName)
+        {
+            if (!childName || !*childName || !_recursiveSizeStore) return FALSE;
+            PITEMID_CHILD childItem = nullptr;
+            auto result = ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(childName), nullptr, &childItem, nullptr);
+            if (FAILED(result)) return FALSE;
+            const auto* child = SyntheticData(childItem);
+            std::wstring parsingName;
+            if (!child || !(child->attributes & FILE_ATTRIBUTE_DIRECTORY)) result = E_INVALIDARG;
+            else result = GetAbsoluteParsingName(child, &parsingName);
+            const bool reserved = SUCCEEDED(result) && _recursiveSizeStore->HasReservation(parsingName);
+            CoTaskMemFree(childItem);
+            return reserved ? TRUE : FALSE;
+        }
+        HRESULT InvalidateRecursiveSizeScanForChildProbe(PCWSTR childName)
+        {
+            if (!childName || !*childName || !_recursiveSizeStore) return E_INVALIDARG;
+            PITEMID_CHILD childItem = nullptr;
+            auto result = ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(childName), nullptr, &childItem, nullptr);
+            if (FAILED(result)) return result;
+            const auto* child = SyntheticData(childItem);
+            std::wstring parsingName;
+            if (!child || !(child->attributes & FILE_ATTRIBUTE_DIRECTORY)) result = E_INVALIDARG;
+            else result = GetAbsoluteParsingName(child, &parsingName);
+            const bool invalidated = SUCCEEDED(result) && _recursiveSizeStore->InvalidateReservedPathExact(parsingName.c_str());
+            CoTaskMemFree(childItem);
+            return FAILED(result) ? result : (invalidated ? S_OK : S_FALSE);
         }
         HRESULT STDMETHODCALLTYPE GetClassID(CLSID* value) override
         {
@@ -6198,6 +6245,32 @@ extern "C" __declspec(dllexport) BOOL WINAPI HasSyntheticRecursiveSizeSnapshotFo
         return folder->HasRecursiveSizeSnapshotForChildProbe(childName);
     }
     return FALSE;
+}
+
+extern "C" __declspec(dllexport) BOOL WINAPI HasSyntheticRecursiveSizeScanReservationForChildProbe(
+    IShellView* view, PCWSTR childName)
+{
+    if (!view || !childName || !*childName) return FALSE;
+    for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
+    {
+        auto* folder = static_cast<SyntheticSortFolder*>(InterlockedCompareExchangePointer(&g_syntheticSortViewHolds[index], nullptr, nullptr));
+        if (!folder || !folder->OwnsShellView(view)) continue;
+        return folder->HasRecursiveSizeScanReservationForChildProbe(childName);
+    }
+    return FALSE;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI InvalidateSyntheticRecursiveSizeScanForChildProbe(
+    IShellView* view, PCWSTR childName)
+{
+    if (!view || !childName || !*childName) return E_INVALIDARG;
+    for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
+    {
+        auto* folder = static_cast<SyntheticSortFolder*>(InterlockedCompareExchangePointer(&g_syntheticSortViewHolds[index], nullptr, nullptr));
+        if (!folder || !folder->OwnsShellView(view)) continue;
+        return folder->InvalidateRecursiveSizeScanForChildProbe(childName);
+    }
+    return E_INVALIDARG;
 }
 
 extern "C" __declspec(dllexport) LONG WINAPI ScheduleSyntheticSortRefreshesForProbe()
