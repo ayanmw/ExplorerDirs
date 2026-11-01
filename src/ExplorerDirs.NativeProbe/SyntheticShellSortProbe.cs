@@ -100,6 +100,16 @@ public static class SyntheticShellSortProbe
             expectedFileSizeText: "0" + decimalSeparator + "004 KB");
     }
 
+    internal static int RunRecursiveDirectorySizeSortWithGroupedBytesWpfHost()
+    {
+        var groupSeparator = System.Globalization.CultureInfo.CurrentCulture.NumberFormat.NumberGroupSeparator;
+        return Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
+            useWpfParent: true, humanSizeText: true, sizeDisplayUnit: 1, sizeDisplayThousands: true,
+            syntheticChildSizeOverride: 1234567,
+            expectedDirectorySizeText: "1" + groupSeparator + "234" + groupSeparator + "567 B",
+            expectedFileSizeText: "4 B");
+    }
+
     internal static int RunRelativePercentColumnMetadata(uint type)
     {
         if (type is not (0u or 1u or 2u)) throw new ArgumentOutOfRangeException(nameof(type));
@@ -131,7 +141,8 @@ public static class SyntheticShellSortProbe
         bool focusRecoveryExperiment = false, bool factorySnapshotCacheOnly = false,
         uint? relativePercentColumnType = null, bool humanSizeText = false,
         int sizeDisplayUnit = 0, int sizeDisplayDecimals = 2, bool sizeDisplayThousands = false,
-        string? expectedDirectorySizeText = null, string? expectedFileSizeText = null)
+        string? expectedDirectorySizeText = null, string? expectedFileSizeText = null,
+        long? syntheticChildSizeOverride = null)
     {
         if (relativePercentColumnType is not null && !recursiveDirectorySizeSortOnly)
             throw new ArgumentException("The relative-percent metadata probe requires the isolated recursive-size view.", nameof(relativePercentColumnType));
@@ -258,6 +269,9 @@ public static class SyntheticShellSortProbe
                 "SetSyntheticHumanSizeTextForProbe"))(humanSizeText ? 1 : 0));
             Check(Marshal.GetDelegateForFunctionPointer<SetSizeDisplayOptions>(NativeLibrary.GetExport(module,
                 "SetSyntheticSizeDisplayOptionsForProbe"))(sizeDisplayUnit, sizeDisplayDecimals, sizeDisplayThousands ? 1 : 0));
+            if (syntheticChildSizeOverride is { } overrideSize)
+                Check(Marshal.GetDelegateForFunctionPointer<SetSyntheticSizeOverrideDelegate>(NativeLibrary.GetExport(module,
+                    "SetSyntheticChildSizeOverrideForProbe"))(overrideSize));
             Check(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
                 "SetSyntheticSlowCustomSizeColumnForProbe"))(slowCustomSizeColumn ? 1 : 0));
             if (relativePercentColumnType is { } percentColumnType)
@@ -1123,6 +1137,9 @@ public static class SyntheticShellSortProbe
                 _ = Marshal.GetDelegateForFunctionPointer<SetSizeDisplayOptions>(NativeLibrary.GetExport(module,
                     "SetSyntheticSizeDisplayOptionsForProbe"))(0, 2, 0);
             }
+            if (module != 0 && syntheticChildSizeOverride is not null)
+                _ = Marshal.GetDelegateForFunctionPointer<SetSyntheticSizeOverrideDelegate>(
+                    NativeLibrary.GetExport(module, "SetSyntheticChildSizeOverrideForProbe"))(-1);
             if (module != 0 && exerciseUpdateNotifications)
                 _ = Marshal.GetDelegateForFunctionPointer<SetSyntheticSizeOverrideDelegate>(
                     NativeLibrary.GetExport(module, "SetSyntheticChildSizeOverrideForProbe"))(-1);

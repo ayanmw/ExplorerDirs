@@ -91,6 +91,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunSyntheticRecursiveDirectorySizeSortWithFormattedColumnWpfHost();
         if (args.Length == 1 && args[0] == "--synthetic-recursive-directory-size-fixed-kilobyte-column-wpf-host-private-desktop")
             return PrivateDesktopShellProbe.RunSyntheticRecursiveDirectorySizeSortWithFixedKilobyteColumnWpfHost();
+        if (args.Length == 1 && args[0] == "--synthetic-recursive-directory-size-grouped-bytes-wpf-host-private-desktop")
+            return PrivateDesktopShellProbe.RunSyntheticRecursiveDirectorySizeSortWithGroupedBytesWpfHost();
         if (args.Length == 1 && args[0] == "--synthetic-relative-percent-column-int-private-desktop")
             return PrivateDesktopShellProbe.RunRelativePercentColumnMetadata(0x2);
         if (args.Length == 1 && args[0] == "--synthetic-relative-percent-column-string-private-desktop")

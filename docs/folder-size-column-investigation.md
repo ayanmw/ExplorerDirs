@@ -1280,3 +1280,9 @@ NativeProbe 增加三种状态模式，仅对隔离合成 view 的列 3（Relati
 继续将单位/精度参数从 NativeProbe 传入 WPF Private Desktop synthetic `IShellView`。独立隐藏 view 采用固定 KB、最多 3 位小数，在 `GetDetailsOf` 列文本中读到 `child=0.01 KB`、`small.bin=0.004 KB`；读取同一份原始整数快照后，列头及背景菜单升序仍为 `small.bin|child`、降序为 `child|small.bin`，比较回调各运行一次。NativeProbe Release build 0 警告/错误，Private Desktop watchdog exit 0，前台、输入与隔离清理守卫通过。
 
 这补足固定单位/精度在隐藏 DefView 读取路径的证据，但不采集像素、不显示窗口，也没有核验千位格式在用户可见控件中的绘制。仍未接入 ExplorerBrowser 产品或 INI/UI 配置；Q-Dir 实际显示习惯和偏好默认值需由用户验收决定。
+
+### 2026-11-01：千位分隔在隐藏 `IShellView` 列文本中的验证
+
+Private Desktop 隐藏 view 探针将 `child` 的递归大小快照覆盖为 1,234,567 B，设置固定 Bytes 与系统千位分隔后，列文本读回 `1,234,567 B`，同一视图的原始 4 B 文件仍读作 `4 B`。升序保持 `small.bin|child`，降序保持 `child|small.bin`；比较回调各一次。探针先在未接入大小覆盖的夹具上因预期文本不匹配而失败，加入 NativeProbe-only 覆盖后通过。NativeProbe Release build 0 警告/错误，Private Desktop watchdog exit 0，前台、输入与隔离清理守卫通过。
+
+该结果证明系统分组符进入隐藏 DefView 的列文本读取路径，不证明可见绘制或 ExplorerBrowser 产品行为；不同区域格式仍需在对应系统配置上验证。覆盖仅是测试夹具，不改变产品数据源或设置。
