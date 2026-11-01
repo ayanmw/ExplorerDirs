@@ -14,6 +14,10 @@ internal static class ExplorerBrowserWrapperProbe
     private static readonly Guid ShellFolder2Id = new("93F2F68C-1D1B-11D3-A30E-00C04F79ABD1");
     private static readonly Guid ShellViewId = new("000214E3-0000-0000-C000-000000000046");
     private static readonly Guid ContextMenuId = new("000214E4-0000-0000-C000-000000000046");
+    private static readonly Guid DataObjectId = new("0000010E-0000-0000-C000-000000000046");
+    private static readonly Guid FileOperationClassId = new("3AD05575-8857-4850-9277-11B85BDB8E09");
+    private static readonly Guid FileOperationInterfaceId = new("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+    private static readonly Guid ShellItemId = new("43826D1E-E718-42EE-BC55-A1E261C37BFE");
     private static readonly Guid FolderView2Id = new("1AF3A467-214F-4298-908E-06B03E0B39F9");
     private static readonly Guid UnknownId = new("00000000-0000-0000-C000-000000000046");
     private static readonly Guid PersistFolder2Id = new("1AC3D9F0-175C-11D1-95BE-00609797EA4F");
@@ -365,6 +369,13 @@ internal static class ExplorerBrowserWrapperProbe
                 Console.WriteLine($"explorerbrowser-registered-namespace: child-pidl-matches={childIdentityMatches}; child-row-count={childRowCount}; return-to-root={rootReturnMatches}; root-row-count-after-notification={rootRowCountAfterRename}");
             }
             finally { Marshal.FreeCoTaskMem(expectedChildRoot); }
+
+            var fileOperationResults = ExerciseWrappedDataObjectFileOperations(viewFolder, fixture);
+            Console.WriteLine($"explorerbrowser-registered-namespace: wrapped-IDataObject-copy={fileOperationResults.Copy}; move={fileOperationResults.Move}; copy-source-preserved={fileOperationResults.CopySourcePreserved}; move-source-removed={fileOperationResults.MoveSourceRemoved}; destinations-verified={fileOperationResults.DestinationsVerified}; ui-suppressed=True");
+            if (!fileOperationResults.Copy || !fileOperationResults.Move ||
+                !fileOperationResults.CopySourcePreserved || !fileOperationResults.MoveSourceRemoved ||
+                !fileOperationResults.DestinationsVerified)
+                throw new InvalidOperationException("IFileOperation could not copy and move files supplied by the wrapped namespace IDataObject.");
             return 0;
         }
         finally
@@ -580,6 +591,74 @@ internal static class ExplorerBrowserWrapperProbe
         }
     }
 
+    private static (bool Copy, bool Move, bool CopySourcePreserved, bool MoveSourceRemoved, bool DestinationsVerified)
+        ExerciseWrappedDataObjectFileOperations(nint folder, string fixture)
+    {
+        if (Thread.CurrentThread.GetApartmentState() != ApartmentState.STA)
+            throw new InvalidOperationException("IFileOperation requires the isolated Shell probe to run in an STA.");
+        var destinationPath = Path.Combine(fixture, "file-operation-destination");
+        Directory.CreateDirectory(destinationPath);
+        var copySourcePath = Path.Combine(fixture, "copy-source.txt");
+        var moveSourcePath = Path.Combine(fixture, "move-source.txt");
+        const string copyContents = "copied through namespace IDataObject";
+        const string moveContents = "moved through namespace IDataObject";
+        File.WriteAllText(copySourcePath, copyContents);
+        File.WriteAllText(moveSourcePath, moveContents);
+        Marshal.ThrowExceptionForHR(SHCreateItemFromParsingName(destinationPath, 0, in ShellItemId, out var destination));
+        try
+        {
+            var copyData = GetDataObjectForItem(folder, "copy-source.txt");
+            bool copy;
+            try { copy = RunFileOperation(copyData, destination, move: false); }
+            finally { Marshal.Release(copyData); }
+
+            var moveData = GetDataObjectForItem(folder, "move-source.txt");
+            bool move;
+            try { move = RunFileOperation(moveData, destination, move: true); }
+            finally { Marshal.Release(moveData); }
+
+            var copySourcePreserved = File.Exists(copySourcePath);
+            var moveSourceRemoved = !File.Exists(moveSourcePath);
+            var copyDestinationPath = Path.Combine(destinationPath, "copy-source.txt");
+            var moveDestinationPath = Path.Combine(destinationPath, "move-source.txt");
+            var destinationsVerified = File.Exists(copyDestinationPath) && File.ReadAllText(copyDestinationPath) == copyContents &&
+                File.Exists(moveDestinationPath) && File.ReadAllText(moveDestinationPath) == moveContents;
+            return (copy, move, copySourcePreserved, moveSourceRemoved, destinationsVerified);
+        }
+        finally { Marshal.Release(destination); }
+    }
+
+    private static nint GetDataObjectForItem(nint folder, string name)
+    {
+        Marshal.ThrowExceptionForHR(ParseDisplayName(folder, name, out var item));
+        try
+        {
+            Marshal.ThrowExceptionForHR(GetUiObjectOf(folder, item, DataObjectId, out var dataObject));
+            if (dataObject == 0) throw new InvalidOperationException($"The wrapped namespace returned no IDataObject for '{name}'.");
+            return dataObject;
+        }
+        finally { Marshal.FreeCoTaskMem(item); }
+    }
+
+    private static bool RunFileOperation(nint dataObject, nint destination, bool move)
+    {
+        var operationClass = FileOperationClassId;
+        var operationInterface = FileOperationInterfaceId;
+        Marshal.ThrowExceptionForHR(CoCreateInstance(ref operationClass, 0, 1, ref operationInterface, out var operation));
+        try
+        {
+            // FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI; the destination is unique and pre-created.
+            Marshal.ThrowExceptionForHR(At<SetOperationFlags>(operation, 5)(operation, 0x0004 | 0x0010 | 0x0400));
+            Marshal.ThrowExceptionForHR(move
+                ? At<TransferItems>(operation, 15)(operation, dataObject, destination)
+                : At<TransferItems>(operation, 17)(operation, dataObject, destination));
+            Marshal.ThrowExceptionForHR(At<PerformOperations>(operation, 21)(operation));
+            Marshal.ThrowExceptionForHR(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
+            return aborted == 0;
+        }
+        finally { Marshal.Release(operation); }
+    }
+
     private static void ReadActiveFolder(nint browser, ref nint shellView, ref nint folderView, ref nint viewFolder, ref nint persist)
     {
         var shellViewId = ShellViewId;
@@ -733,6 +812,10 @@ internal static class ExplorerBrowserWrapperProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryContextMenu(nint self, nint menu, uint index, uint first, uint last, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCommandString(nint self, uint command, uint flags, nint reserved, nint buffer, uint bufferLength);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int InvokeCommand(nint self, ref NativeInvokeInfo info);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetOperationFlags(nint self, uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int TransferItems(nint self, nint items, nint destination);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetFolderClassId(ref Guid classId);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int SetBackingPath([MarshalAs(UnmanagedType.LPWStr)] string path);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetProbeFlag(int enabled);
@@ -742,6 +825,7 @@ internal static class ExplorerBrowserWrapperProbe
 
     [DllImport("ole32.dll")] private static extern int CoCreateInstance(ref Guid clsid, nint outer, uint context, ref Guid iid, out nint instance);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SHParseDisplayName(string name, nint bindContext, out nint pidl, uint attributesIn, out uint attributesOut);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SHCreateItemFromParsingName(string name, nint bindContext, in Guid iid, out nint item);
     [DllImport("shell32.dll")] private static extern int SHBindToObject(nint parent, nint pidl, nint bindContext, ref Guid iid, out nint value);
     [DllImport("shell32.dll")] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);
     [DllImport("shell32.dll")] private static extern void SHChangeNotify(uint eventId, uint flags, nint item1, nint item2);

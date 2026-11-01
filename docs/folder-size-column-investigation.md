@@ -1598,3 +1598,9 @@ Private Desktop 探针在已注册 namespace 的 `child` 目录下新增 7 B 文
 在同一临时注册 namespace 探针中，先经包装文件项取得原生 `IContextMenu` 并确认其 canonical `delete` 动词，再调用 `IContextMenu::InvokeCommand`，传入该命令 offset 和 `CMIC_MASK_FLAG_NO_UI | CMIC_MASK_SHIFT_DOWN`。随机临时夹具中的 `context-delete.txt` 被 backing 文件系统实际删除；无确认窗口出现。随后已有根列表新增项通知、子目录创建通知与递归大小回填、目录进入/返回仍通过，前台/输入守卫和临时注册清理通过。
 
 这证明文件项 context menu 的一个破坏性命令能穿过包装 namespace 到达真实 backing 文件系统；它不等同于菜单展示或鼠标命中验证，也未证明其他命令（打开、复制、粘贴、属性、新建、撤销/重做）及背景菜单命令路由。只操作每轮新建的临时文件，ExplorerBrowser 产品与 release 未改。
+
+### 2026-11-01：包装 namespace IDataObject 的 Shell 复制与移动
+
+在注册 namespace 的 ExplorerBrowser 探针中，对包装 provider 的 `GetUIObjectOf` 请求 `IDataObject`，分别为临时 `copy-source.txt` 与 `move-source.txt` 创建数据对象；将该对象直接传给 Windows `IFileOperation::CopyItems`/`MoveItems`，并调用 `PerformOperations` 与 `GetAnyOperationsAborted`。两项均报告未取消；目标文件内容逐字节/文本读回一致，复制源保留，移动源消失。`IFileOperation` 使用 STA 和 `FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI`，目标目录位于随机临时夹具，未使用剪贴板或显示 UI。
+
+这证明包装 namespace 的文件项 `IDataObject` 可供标准 Shell 文件操作接口完成复制与移动；不验证 ExplorerBrowser 菜单中的复制/粘贴命令、拖放、冲突处理、多选或真实文件夹 PIDL/对象身份。Private Desktop 前台/输入守卫与临时注册清理通过，产品及 release 未修改。

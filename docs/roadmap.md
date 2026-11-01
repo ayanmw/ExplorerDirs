@@ -5714,3 +5714,7 @@ Q-Dir 对照确认 Type 列的递归 counts 也需要复用后台扫描值。Nat
 ### 2026-11-01：注册 namespace 原生 Delete 命令转发
 
 文件项原生 `IContextMenu` 的 canonical `delete` 动词经 `InvokeCommand` 成功删除了随机临时 backing 夹具文件；调用使用 Shift+Delete 和无确认 UI 标志，验证了命令确实执行且没有触碰用户数据。递归列回填、根列表通知、层级导航/返回与临时资源清理一并通过。该结果不涵盖其他文件命令、背景菜单命令或可见菜单命中路由，也不是产品接线/可见验收。详见[调查记录](folder-size-column-investigation.md#2026-11-01注册-namespace-原生文件删除命令执行)。
+
+### 2026-11-01：包装 namespace IDataObject 复制与移动
+
+注册 namespace 的文件项 `IDataObject` 已可直接交给 `IFileOperation::CopyItems` 与 `MoveItems`：隔离夹具中复制后源仍在、移动后源消失，两份目标内容均读回正确，操作未取消且无 UI。Private Desktop 前台/输入和临时注册清理通过。此证据不涵盖 Explorer 菜单复制/粘贴、拖放、多选或真实 PIDL 包装；产品与 release 未变。详见[调查记录](folder-size-column-investigation.md#2026-11-01包装-namespace-idataobject-的-shell-复制与移动)。
