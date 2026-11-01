@@ -1680,3 +1680,11 @@ RED 基线仅在递归函数内部无取消检查时失败：关闭前累计 32 
 默认环境下运行四个不同根、每根 500 个目录、缓存容量 2,048 的隐藏 Shell view：2,004 个目录唯一扫描完成，队列拒绝 0、重复扫描 0、每 view 一次通知，四份列值均为 502/502，选择/焦点全部保留。Private Desktop watchdog exit 0，前台/last-input 与隔离清理守卫通过。日志：`src/.state/native-probe-watchdog/20261101-164532-858ca37e.stdout.log`、`20261101-164532-858ca37e.stderr.log`。
 
 逐项 A/B 明确设置 `EXPLORER_DIRS_NATIVEPROBE_ASYNC_BATCH_BY_VIEW=0`，四根各 520 个目录、缓存 4,096 时，在释放 worker 前拒绝 34 项并按预期停在容量门槛。队列排空后的缺值影响已由前节的延续诊断确认。日志：`src/.state/native-probe-watchdog/20261101-164612-22d0d270.stdout.log`、`20261101-164612-22d0d270.stderr.log`。两种结果均为隐藏合成 `IShellView` 原型证据；产品 ExplorerBrowser 与发布包未修改。
+
+### 2026-11-01：异步批次期间的真实 Shell 目录通知验证边界
+
+尝试在四个隐藏 DefView 的批次 worker 已预留扫描后，对正在变化的嵌套文件发送 `SHChangeNotify`，并要求证明旧扫描被丢弃、同一目录随后重扫。文件项 `SHCNE_UPDATEITEM` 到达 `IShellView` 时记录为 `SFVM_FSNOTIFY` 的 `SHCNE_UPDATEDIR`，但目前探针无法将回调携带的 PIDL 与确切的在途递归缓存键配对：最终值虽读到 38 B，扫描次数仍等于未变更基线，因此不能证明失效竞态已覆盖。
+
+直接对合成子目录 PIDL 发 `SHCNE_UPDATEDIR` 会改变 DefView 行集合；将 `UPDATEDIR` 一概扩大为子树缓存失效则复现反馈风暴（8 个目录、四视图场景扫描 224 次，基线 36 次，23 次通知，值未收敛）。该扩大规则已撤销，现有缓存失效实现未因此改变。下一步应在 NativeProbe 中增加仅测试用的精确缓存键失效入口，锁定一个已知在途扫描并验证旧提交被拒绝、释放 reservation 后重试；再单独验证真实 Shell 通知 PIDL 到缓存键的映射，避免把 DefView 行集合变化误判为缓存行为。
+
+以上组合实验均未通过成功合同，不能算作产品功能或异步通知竞态的完整验证。产品 ExplorerBrowser、release 与 NativeProbe 默认 view-batch 策略均未因该实验更改。
