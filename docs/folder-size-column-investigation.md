@@ -2189,3 +2189,9 @@ NativeProbe 现在直接链接生产 `QdrViewWriter` 与 `QdrImporter` 源码，
 为评估进入多窗格阶段的差距，检查 NativeProbe 自定义文件夹 provider 的实例化链：`SetSyntheticSortBackingPath` 写入全局 `g_syntheticSortBackingPath`；`DllGetClassObject` 仅接受全局 `g_syntheticFolderClassId`；Shell 根文件夹 `Initialize` 从该全局路径绑定文件系统对象。子文件夹实例随后继承父实例 `_backingPath`，所以已有多视图测试能验证多个 view 共用同一物理树时的缓存/列行为，但不能证明两个不同物理根目录能并行映射。
 
 要验证真实多窗格路线，下一步原型需给 namespace 根提供稳定且独立的物理路径身份（而非临时改写全局路径），并同时打开两个不同临时根目录的 ExplorerBrowser，交叉导航后分别核对 parsing name、枚举内容、递归列值及会话恢复。当前 Shell 注册探针每次只注册一个临时 CLSID；逐窗格注册 CLSID 可以做诊断，却不是合适的产品方案。产品架构与 release 未修改。
+
+### 2026-11-02：双根 provider 实例与递归值隔离 smoke
+
+为验证 per-root provider 实例是否可独立承载数据，在 NativeProbe 增加按 CLSID 配置 backing path 的隔离入口。一个无窗口 smoke 同时创建并保留两个 `IShellFolder2` 根实例，再依次枚举它们；夹具在两根中都放置同名 `shared-folder`，其内容分别为 13 B 和 29 B，并各自有独有文件名。两根只枚举到自己的独有文件，递归大小列也分别读回 13 B/29 B，没有共享路径或缓存串值。NativeProbe Release 与 C++ adapter Release 构建均为 0 警告/错误；双根 smoke、原有 Shell-folder-tree smoke、按需递归大小列 smoke 均通过。
+
+该切片证明 provider 可在同进程同时持有不同路径的根对象，但根身份目前由不同 CLSID 指定；未创建 ExplorerBrowser/IShellView 窗口，未验证 Shell 类注册、两窗格实际导航、Back/Forward、跨重建状态、文件操作或绿色部署。因此它不是可直接采用的产品身份设计。下一步应验证单一稳定 provider CLSID 下，是否能把物理根路径编码进 Shell 绝对 PIDL/解析名，并保留多标签路径身份；再决定是否进入 ExplorerBrowser 双窗格宿主验证。

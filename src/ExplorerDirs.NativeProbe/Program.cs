@@ -20,6 +20,8 @@ internal static class Program
             return VirtualZipColorRuleProbe.Run();
         if (args.Length == 1 && args[0] == "--search-identity")
             return SearchFolderProbe.Run();
+        if (args.Length == 1 && args[0] == "--synthetic-multi-root-provider-smoke")
+            return MultiRootProviderProbe.Run();
         if (args.Length == 1 && args[0] == "--search-virtual-scopes")
             return SearchFolderProbe.ProbeVirtualScopes();
         if (args.Length == 2 && args[0] == "--search-enumerate-uri")

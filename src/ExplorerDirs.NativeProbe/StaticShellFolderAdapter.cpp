@@ -138,6 +138,15 @@ namespace
     PVOID volatile g_syntheticSortViewHolds[kSyntheticSortViewHoldCount]{};
     CLSID g_syntheticFolderClassId =
     { 0xA17D2A61, 0x4C0B, 0x4B22, { 0x8E, 0x36, 0x35, 0xD9, 0x2C, 0xBC, 0x11, 0x70 } };
+    struct SyntheticRootClassIdLess
+    {
+        bool operator()(const CLSID& left, const CLSID& right) const
+        {
+            return memcmp(&left, &right, sizeof(CLSID)) < 0;
+        }
+    };
+    std::mutex g_syntheticRootConfigurationMutex;
+    std::map<CLSID, std::wstring, SyntheticRootClassIdLess> g_syntheticRootBackingPaths;
     // This adapter is loaded only by the opt-in NativeProbe. It forwards normal
     // filesystem PIDLs and Shell operations while adding deterministic test columns.
     constexpr PROPERTYKEY kStaticSizeKey =
@@ -1975,6 +1984,17 @@ namespace
     volatile LONG g_syntheticColumnMetadataTraceCount = 0;
     std::wstring g_syntheticSortBackingPath;
 
+    bool TryGetSyntheticRootBackingPath(REFCLSID classId, std::wstring* path)
+    {
+        if (!path) return false;
+        std::lock_guard<std::mutex> lock(g_syntheticRootConfigurationMutex);
+        const auto found = g_syntheticRootBackingPaths.find(classId);
+        if (found == g_syntheticRootBackingPaths.end()) return false;
+        try { *path = found->second; }
+        catch (const std::bad_alloc&) { return false; }
+        return !path->empty();
+    }
+
     void RecordSyntheticColumnMetadata(UINT kind, UINT column, SHCOLSTATEF state, HRESULT result, const WCHAR* text)
     {
         const auto traceIndex = InterlockedIncrement(&g_syntheticColumnMetadataTraceCount) - 1;
@@ -2508,8 +2528,10 @@ namespace
     class SyntheticSortFolder final : public IShellFolder2, public IPersistFolder2, public IShellFolderViewCB
     {
     public:
-        explicit SyntheticSortFolder(SyntheticRecursiveSizeSnapshotStore* recursiveSizeStore = nullptr)
-            : _recursiveSizeStore(recursiveSizeStore ? recursiveSizeStore : new (std::nothrow) SyntheticRecursiveSizeSnapshotStore(
+        explicit SyntheticSortFolder(SyntheticRecursiveSizeSnapshotStore* recursiveSizeStore = nullptr,
+            REFCLSID classId = g_syntheticFolderClassId, std::wstring configuredBackingPath = {})
+            : _classId(classId), _configuredBackingPath(std::move(configuredBackingPath)),
+              _recursiveSizeStore(recursiveSizeStore ? recursiveSizeStore : new (std::nothrow) SyntheticRecursiveSizeSnapshotStore(
                 static_cast<size_t>(InterlockedCompareExchange(&g_syntheticRecursiveSizeCacheCapacityForProbe, 0, 0))))
         {
             if (recursiveSizeStore) _recursiveSizeStore->AddRef();
@@ -2641,7 +2663,7 @@ namespace
         HRESULT STDMETHODCALLTYPE GetClassID(CLSID* value) override
         {
             if (!value) return E_POINTER;
-            *value = g_syntheticFolderClassId;
+            *value = _classId;
             return S_OK;
         }
         HRESULT STDMETHODCALLTYPE Initialize(PCIDLIST_ABSOLUTE value) override
@@ -2651,10 +2673,12 @@ namespace
             if (!_recursiveSizeStore) return E_OUTOFMEMORY;
             auto* copy = ILCloneFull(value);
             if (!copy) return E_OUTOFMEMORY;
-            if (g_syntheticSortBackingPath.empty()) { CoTaskMemFree(copy); return E_UNEXPECTED; }
+            const auto& configuredBackingPath = _configuredBackingPath.empty()
+                ? g_syntheticSortBackingPath : _configuredBackingPath;
+            if (configuredBackingPath.empty()) { CoTaskMemFree(copy); return E_UNEXPECTED; }
             PIDLIST_ABSOLUTE backingPidl = nullptr;
             TraceSyntheticSortStage("synthetic-sort: backing-SHParseDisplayName-enter");
-            auto result = SHParseDisplayName(g_syntheticSortBackingPath.c_str(), nullptr, &backingPidl, 0, nullptr);
+            auto result = SHParseDisplayName(configuredBackingPath.c_str(), nullptr, &backingPidl, 0, nullptr);
             TraceSyntheticSortStage("synthetic-sort: backing-SHParseDisplayName-return");
             if (FAILED(result)) { CoTaskMemFree(copy); return result; }
             auto* backingRoot = ILCloneFull(backingPidl);
@@ -2678,7 +2702,7 @@ namespace
             _backingRoot = backingRoot;
             if (_inner) _inner->Release();
             _inner = backingFolder;
-            try { _backingPath = g_syntheticSortBackingPath; }
+            try { _backingPath = configuredBackingPath; }
             catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
             return S_OK;
         }
@@ -2970,7 +2994,7 @@ namespace
                 backingChild->Release();
                 return E_OUTOFMEMORY;
             }
-            auto* nested = new (std::nothrow) SyntheticSortFolder(_recursiveSizeStore);
+            auto* nested = new (std::nothrow) SyntheticSortFolder(_recursiveSizeStore, _classId);
             if (!nested)
             {
                 CoTaskMemFree(nestedRoot);
@@ -4341,6 +4365,8 @@ namespace
         }
         ~SyntheticSortFolder() { ReleaseViewHold(); if (_root) CoTaskMemFree(_root); if (_backingRoot) CoTaskMemFree(_backingRoot); if (_inner) _inner->Release(); if (_recursiveSizeStore) _recursiveSizeStore->Release(); InterlockedDecrement(&g_syntheticLiveObjects); }
         volatile LONG _references = 1;
+        CLSID _classId = g_syntheticFolderClassId;
+        std::wstring _configuredBackingPath;
         volatile LONG _refreshAgain = 0;
         PIDLIST_ABSOLUTE _root = nullptr;
         PIDLIST_ABSOLUTE _backingRoot = nullptr;
@@ -4369,8 +4395,10 @@ namespace
     class SyntheticFolderClassFactory final : public IClassFactory
     {
     public:
-        explicit SyntheticFolderClassFactory(SyntheticRecursiveSizeSnapshotStore* recursiveSizeStore = nullptr)
-            : _recursiveSizeStore(recursiveSizeStore)
+        explicit SyntheticFolderClassFactory(SyntheticRecursiveSizeSnapshotStore* recursiveSizeStore = nullptr,
+            REFCLSID classId = g_syntheticFolderClassId, std::wstring configuredBackingPath = {})
+            : _classId(classId), _configuredBackingPath(std::move(configuredBackingPath)),
+              _recursiveSizeStore(recursiveSizeStore)
         {
             if (_recursiveSizeStore) _recursiveSizeStore->AddRef();
             InterlockedIncrement(&g_syntheticLiveObjects);
@@ -4400,7 +4428,9 @@ namespace
         {
             if (outer) return CLASS_E_NOAGGREGATION;
             InterlockedIncrement(&g_syntheticClassFactoryCreateCount);
-            auto* folder = new (std::nothrow) SyntheticSortFolder(_recursiveSizeStore);
+            SyntheticSortFolder* folder = nullptr;
+            try { folder = new (std::nothrow) SyntheticSortFolder(_recursiveSizeStore, _classId, _configuredBackingPath); }
+            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
             if (!folder) return E_OUTOFMEMORY;
             const auto result = folder->QueryInterface(iid, value);
             folder->Release();
@@ -4418,6 +4448,8 @@ namespace
         }
     private:
         volatile LONG _references = 1;
+        CLSID _classId = g_syntheticFolderClassId;
+        std::wstring _configuredBackingPath;
         SyntheticRecursiveSizeSnapshotStore* _recursiveSizeStore = nullptr;
     };
 
@@ -4459,13 +4491,24 @@ STDAPI DllGetClassObject(REFCLSID classId, REFIID iid, void** value)
     HRESULT result = CLASS_E_CLASSNOTAVAILABLE;
     if (value) *value = nullptr;
     if (!value) result = E_POINTER;
-    else if (classId == g_syntheticFolderClassId)
+    else
     {
+        std::wstring configuredBackingPath;
+        const bool configuredRoot = TryGetSyntheticRootBackingPath(classId, &configuredBackingPath);
+        const bool legacyRoot = classId == g_syntheticFolderClassId && !g_syntheticSortBackingPath.empty();
+        if (!configuredRoot && !legacyRoot)
+        {
+            InterlockedDecrement(&g_syntheticClassObjectCalls);
+            return CLASS_E_CLASSNOTAVAILABLE;
+        }
+        if (legacyRoot && !configuredRoot) configuredBackingPath = g_syntheticSortBackingPath;
         auto* store = AcquireSharedRecursiveSizeStore();
         if (!store) result = E_OUTOFMEMORY;
         else
         {
-            auto* factory = new (std::nothrow) SyntheticFolderClassFactory(store);
+            SyntheticFolderClassFactory* factory = nullptr;
+            try { factory = new (std::nothrow) SyntheticFolderClassFactory(store, classId, std::move(configuredBackingPath)); }
+            catch (const std::bad_alloc&) { factory = nullptr; }
             store->Release();
             if (!factory) result = E_OUTOFMEMORY;
             else
@@ -4476,6 +4519,134 @@ STDAPI DllGetClassObject(REFCLSID classId, REFIID iid, void** value)
         }
     }
     InterlockedDecrement(&g_syntheticClassObjectCalls);
+    return result;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI ConfigureSyntheticNamespaceRootForProbe(
+    const CLSID* classId, PCWSTR backingPath)
+{
+    if (!classId || !backingPath || !*backingPath) return E_INVALIDARG;
+    try
+    {
+        std::lock_guard<std::mutex> lock(g_syntheticRootConfigurationMutex);
+        g_syntheticRootBackingPaths.insert_or_assign(*classId, backingPath);
+    }
+    catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+    return S_OK;
+}
+
+namespace
+{
+    HRESULT CreateConfiguredRootForProbe(REFCLSID classId, IShellFolder2** value)
+    {
+        if (!value) return E_POINTER;
+        *value = nullptr;
+        IClassFactory* factory = nullptr;
+        auto result = DllGetClassObject(classId, IID_PPV_ARGS(&factory));
+        if (FAILED(result)) return result;
+        IShellFolder2* folder = nullptr;
+        result = factory->CreateInstance(nullptr, IID_PPV_ARGS(&folder));
+        factory->Release();
+        if (FAILED(result)) return result;
+
+        IPersistFolder2* persist = nullptr;
+        result = folder->QueryInterface(IID_PPV_ARGS(&persist));
+        if (FAILED(result)) { folder->Release(); return result; }
+        auto* root = static_cast<PIDLIST_ABSOLUTE>(CoTaskMemAlloc(sizeof(USHORT)));
+        if (!root) { persist->Release(); folder->Release(); return E_OUTOFMEMORY; }
+        root->mkid.cb = 0;
+        result = persist->Initialize(root);
+        CoTaskMemFree(root);
+        if (FAILED(result)) { persist->Release(); folder->Release(); return result; }
+
+        CLSID actualClassId{};
+        result = persist->GetClassID(&actualClassId);
+        persist->Release();
+        if (FAILED(result) || actualClassId != classId)
+        {
+            folder->Release();
+            return FAILED(result) ? result : E_UNEXPECTED;
+        }
+        *value = folder;
+        return S_OK;
+    }
+
+    HRESULT VerifyConfiguredRootForProbe(IShellFolder2* folder, PCWSTR expectedName, PCWSTR forbiddenName,
+        ULONGLONG expectedRecursiveBytes)
+    {
+        if (!folder || !expectedName || !forbiddenName) return E_INVALIDARG;
+        IEnumIDList* items = nullptr;
+        auto result = folder->EnumObjects(nullptr, SHCONTF_FOLDERS | SHCONTF_NONFOLDERS, &items);
+        if (FAILED(result) || !items)
+        {
+            if (items) items->Release();
+            return FAILED(result) ? result : E_UNEXPECTED;
+        }
+        bool expectedFound = false;
+        bool forbiddenFound = false;
+        bool recursiveValueMatches = false;
+        while (true)
+        {
+            PITEMID_CHILD item = nullptr;
+            ULONG fetched = 0;
+            const auto next = items->Next(1, &item, &fetched);
+            if (next == S_FALSE) break;
+            if (FAILED(next) || fetched != 1)
+            {
+                if (item) CoTaskMemFree(item);
+                result = FAILED(next) ? next : E_UNEXPECTED;
+                break;
+            }
+            const auto* child = SyntheticData(item);
+            if (!child) result = E_INVALIDARG;
+            else
+            {
+                expectedFound = expectedFound || _wcsicmp(child->name, expectedName) == 0;
+                forbiddenFound = forbiddenFound || _wcsicmp(child->name, forbiddenName) == 0;
+                if (_wcsicmp(child->name, L"shared-folder") == 0)
+                {
+                    SHELLDETAILS details{};
+                    result = folder->GetDetailsOf(item, 1, &details);
+                    if (SUCCEEDED(result) && details.str.uType == STRRET_WSTR && details.str.pOleStr)
+                        recursiveValueMatches = wcscmp(details.str.pOleStr, std::to_wstring(expectedRecursiveBytes).c_str()) == 0;
+                    if (details.str.uType == STRRET_WSTR && details.str.pOleStr) CoTaskMemFree(details.str.pOleStr);
+                    if (SUCCEEDED(result) && !recursiveValueMatches) result = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+                }
+            }
+            CoTaskMemFree(item);
+            if (FAILED(result)) break;
+        }
+        items->Release();
+        return SUCCEEDED(result) && expectedFound && !forbiddenFound && recursiveValueMatches ? S_OK :
+            FAILED(result) ? result : HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+    }
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticMultiRootProviderSmoke(
+    const CLSID* firstClassId, PCWSTR firstExpectedName, PCWSTR firstForbiddenName, ULONGLONG firstRecursiveBytes,
+    const CLSID* secondClassId, PCWSTR secondExpectedName, PCWSTR secondForbiddenName, ULONGLONG secondRecursiveBytes)
+{
+    if (!firstClassId || !secondClassId || !firstExpectedName || !firstForbiddenName ||
+        !secondExpectedName || !secondForbiddenName || *firstClassId == *secondClassId)
+        return E_INVALIDARG;
+    IShellFolder2* first = nullptr;
+    IShellFolder2* second = nullptr;
+    auto result = CreateConfiguredRootForProbe(*firstClassId, &first);
+    if (SUCCEEDED(result)) result = CreateConfiguredRootForProbe(*secondClassId, &second);
+    // Keep both configured roots alive while enumerating to detect accidental shared-path state.
+    if (SUCCEEDED(result))
+        result = VerifyConfiguredRootForProbe(first, firstExpectedName, firstForbiddenName, firstRecursiveBytes);
+    if (SUCCEEDED(result))
+        result = VerifyConfiguredRootForProbe(second, secondExpectedName, secondForbiddenName, secondRecursiveBytes);
+    if (second) second->Release();
+    if (first) first->Release();
+    if (SUCCEEDED(result))
+    {
+        char message[192]{};
+        sprintf_s(message, "synthetic-multi-root-provider: independent-roots=True; first=%ls:%lluB; second=%ls:%lluB",
+            firstExpectedName, firstRecursiveBytes, secondExpectedName, secondRecursiveBytes);
+        TraceSyntheticSortStage(message);
+    }
     return result;
 }
 
