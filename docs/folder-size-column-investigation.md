@@ -1849,6 +1849,12 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 
 本轮只验证 NativeProbe 的视口请求调度策略与取消令牌，不是实际 `WM_VSCROLL`、鼠标滚轮、滚动条或键盘滚动消息的事件接线；视口变化仍由探针显式模拟。未测试慢盘/网络中的已开始扫描取消、并发上限、可见绘制、产品 UI 或 ExplorerBrowser 接线。
 
+### 2026-11-01：原生列表滚动消息驱动递归值请求
+
+给 peer `SysListView32` 安装窗口子类，观察 `LVM_ENSUREVISIBLE`、`WM_VSCROLL`、`WM_MOUSEWHEEL` 与键盘消息处理后的 `LVM_GETTOPINDEX`/每页行数变化；只有视口实际变化才重新排队可见目录请求。隔离探针先将 `size-10` 滚入视口，再发送 `WM_VSCROLL/SB_LINEDOWN`；隐藏 ListView 的首行确实从该目录移到 `size-100`，观察器取消待执行的旧请求，最终仅启动一项 `size-100` 扫描。Release apphost Private Desktop 连续三次通过，后续通知失效、重扫、行 ID、选区焦点、前台和隔离清理合同均通过。
+
+同一隐藏控件收到合成 `WM_MOUSEWHEEL` 后视口未变化；这说明隐藏控件不能用来证明滚轮生效。当前证据验证了原生 `WM_VSCROLL` 到视口观察器、去抖与请求取消的链路，不代表物理鼠标/滚轮输入、滚动条拖动、可见 ListView 或 ExplorerBrowser 产品接线。慢目录中已启动扫描的取消与并发上限也未验证。
+
 ### 2026-11-01：自控 Shell 行复用产品所选项命令适配器
 
 在同一隐藏真实 `IShellView` 行投影中保留每行相对 PIDL；从选中 `size-10` 行的相对 PIDL 调用真实父 `IShellFolder.GetUIObjectOf(IContextMenu)`，再将 COM 菜单交给产品 `NativeShellCommandMenu`。产品适配器识别并确认 `cut/copy/delete/rename/properties` 均启用；未显示 popup、未调用动词，也未接触系统剪贴板。此前已通过的按需递归扫描、排序、通知失效和焦点合同继续通过。NativeProbe Release build 0 警告/错误，Private Desktop 探针 exit 0，前台/last-input 与隔离清理守卫通过。

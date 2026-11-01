@@ -1510,10 +1510,6 @@ internal static class ShellViewHostFilterProbe
             var selectedRow = projection.Rows.Single(row => row.Name == "size-10");
             var secondarySelectedRow = projection.Rows.Single(row => row.Name == "size-2");
             var selectedIndex = projection.Rows.IndexOf(selectedRow);
-            _ = SendMessageW(listView, LvmEnsureVisible, selectedIndex, 0);
-            var visibleFolderRows = GetVisibleRecursiveFolderRows(listView, projection.Rows);
-            if (!visibleFolderRows.Any(row => row.Id == selectedRow.Id))
-                throw new InvalidOperationException("The selected recursive-size fixture was not within the peer ListView viewport.");
             SetPeerListItemState(listView, selectedIndex, 0x0003, 0x0003);
             VerifyPeerShellCommandMenu(shellView, shellFolder, parent, [selectedRow.RelativePidl], ["cut", "copy", "delete", "rename", "properties"]);
             SetPeerListItemState(listView, projection.Rows.IndexOf(secondarySelectedRow), 0x0002, 0x0002);
@@ -1529,18 +1525,26 @@ internal static class ShellViewHostFilterProbe
             var ownerThread = Environment.CurrentManagedThreadId;
             using var cancellation = new CancellationTokenSource();
             CancellationTokenSource? pendingViewportRequest = null;
+            Task<(IReadOnlyDictionary<string, ShellListViewRowScanResult> Rows, int WorkerThread, string[] Paths)>? latestViewportRequest = null;
+            Task<(IReadOnlyDictionary<string, ShellListViewRowScanResult> Rows, int WorkerThread, string[] Paths)>? supersededViewportRequest = null;
             var startedViewportScans = 0;
+            var viewportChangeEvents = 0;
             Task<(IReadOnlyDictionary<string, ShellListViewRowScanResult> Rows, int WorkerThread, string[] Paths)> ScheduleVisibleScan()
             {
-                pendingViewportRequest?.Cancel();
-                pendingViewportRequest?.Dispose();
+                if (pendingViewportRequest is not null)
+                {
+                    pendingViewportRequest.Cancel();
+                    pendingViewportRequest.Dispose();
+                    if (latestViewportRequest is not null)
+                        supersededViewportRequest = latestViewportRequest;
+                }
                 pendingViewportRequest = CancellationTokenSource.CreateLinkedTokenSource(cancellation.Token);
                 var requestToken = pendingViewportRequest.Token;
                 var visibleRows = GetVisibleRecursiveFolderRows(listView, projection.Rows);
                 var paths = visibleRows.Select(row => Path.GetFullPath(row.FileSystemPath!)).ToArray();
                 if (paths.Length == 0)
                     throw new InvalidOperationException("The current peer ListView viewport contains no recursive-size folders to request.");
-                return Task.Run(async () =>
+                latestViewportRequest = Task.Run(async () =>
                 {
                     await Task.Delay(120, requestToken);
                     Interlocked.Increment(ref startedViewportScans);
@@ -1548,17 +1552,32 @@ internal static class ShellViewHostFilterProbe
                     var rows = HandleBoundRecursiveDirectoryScanner.Scan(paths, requestToken);
                     return (Rows: rows, WorkerThread: workerThread, Paths: paths);
                 }, requestToken);
+                return latestViewportRequest;
             }
 
-            var supersededViewportRequest = ScheduleVisibleScan();
+            using var viewportObserver = new PeerListViewViewportObserver(listView, () =>
+            {
+                viewportChangeEvents++;
+                _ = ScheduleVisibleScan();
+            });
+            _ = SendMessageW(listView, LvmEnsureVisible, selectedIndex, 0);
+            var initialVisibleRows = GetVisibleRecursiveFolderRows(listView, projection.Rows);
+            if (!initialVisibleRows.Any(row => row.Id == selectedRow.Id))
+                throw new InvalidOperationException("The selected recursive-size fixture was not within the peer ListView viewport.");
+            var topBeforeLineScroll = GetPeerListTopIndex(listView);
+            _ = SendMessageW(listView, 0x0115, 1, 0); // WM_VSCROLL / SB_LINEDOWN
+            var lineScrollMovedViewport = GetPeerListTopIndex(listView) != topBeforeLineScroll;
+            var topBeforeWheel = GetPeerListTopIndex(listView);
+            _ = SendMessageW(listView, 0x020A, (nint)0x00780000, 0); // WM_MOUSEWHEEL / +WHEEL_DELTA
+            var wheelMovedViewport = GetPeerListTopIndex(listView) != topBeforeWheel;
             Thread.Sleep(20);
             var finalVisibleIndex = projection.Rows.IndexOf(projection.Rows.Single(row => row.Name == "size-100"));
             _ = SendMessageW(listView, LvmEnsureVisible, finalVisibleIndex, 0);
             var finalVisibleRows = GetVisibleRecursiveFolderRows(listView, projection.Rows);
-            if (!finalVisibleRows.Any(row => row.Name == "size-100") ||
-                finalVisibleRows.Any(row => row.Id == selectedRow.Id))
-                throw new InvalidOperationException("The simulated rapid viewport change did not move from size-10 to size-100.");
-            var scan = ScheduleVisibleScan();
+            if (!lineScrollMovedViewport || !finalVisibleRows.Any(row => row.Name == "size-100") ||
+                finalVisibleRows.Any(row => row.Id == selectedRow.Id) || viewportChangeEvents < 2)
+                throw new InvalidOperationException("The native line-scroll message did not move the viewport and replace the pending size-10 request with size-100.");
+            var scan = latestViewportRequest ?? throw new InvalidOperationException("The peer ListView viewport observer did not schedule a recursive-size request.");
             while (!scan.IsCompleted)
             {
                 Application.DoEvents();
@@ -1569,7 +1588,7 @@ internal static class ShellViewHostFilterProbe
             }
             try
             {
-                _ = supersededViewportRequest.GetAwaiter().GetResult();
+                _ = (supersededViewportRequest ?? throw new InvalidOperationException("The viewport observer did not supersede its first request.")).GetAwaiter().GetResult();
                 throw new InvalidOperationException("A superseded viewport request completed instead of being canceled before its scan began.");
             }
             catch (OperationCanceledException) { }
@@ -1647,7 +1666,7 @@ internal static class ShellViewHostFilterProbe
             if (!sortedIds.SequenceEqual(expectedOrder.Select(row => row.Id)) || selectedState != 0x0003)
                 throw new InvalidOperationException($"Recursive-size sort order or selected row identity was lost: ids=[{string.Join(',', sortedIds)}], expected=[{string.Join(',', expectedOrder.Select(row => row.Id))}], selected-state=0x{selectedState:X}.");
             pendingViewportRequest?.Dispose();
-            Console.WriteLine($"ishellview-peer-recursive-size: shell-rows={projection.Rows.Count}; superseded-viewport-request-canceled={supersededViewportRequest.IsCanceled}; viewport-updates-coalesced={2 - startedViewportScans}; visible-folder-rows-requested={completed.Paths.Length}; viewport-top-index={GetPeerListTopIndex(listView)}; viewport-count-per-page={GetPeerListCountPerPage(listView)}; only-final-visible-rows-scanned=True; other-rows-pending={otherFolderRowsRemainPending}; worker-thread={completed.WorkerThread}; owner-thread={ownerThread}; rows-retained-during-scan=True; bytes=[size-2:2,size-10:10,size-100:100]; numeric-order=[{string.Join(',', sortedRows)}]; selected-focused-id={selectedRow.Id}; selection-focus-preserved=True; foreground-unchanged={GetForegroundWindow() == foreground}; product-view-changed=False");
+            Console.WriteLine($"ishellview-peer-recursive-size: shell-rows={projection.Rows.Count}; wm-vscroll-moved-viewport={lineScrollMovedViewport}; wm-mousewheel-moved-viewport={wheelMovedViewport}; native-viewport-events={viewportChangeEvents}; superseded-viewport-request-canceled={supersededViewportRequest!.IsCanceled}; viewport-updates-coalesced={viewportChangeEvents - startedViewportScans}; visible-folder-rows-requested={completed.Paths.Length}; viewport-top-index={GetPeerListTopIndex(listView)}; viewport-count-per-page={GetPeerListCountPerPage(listView)}; only-final-visible-rows-scanned=True; other-rows-pending={otherFolderRowsRemainPending}; worker-thread={completed.WorkerThread}; owner-thread={ownerThread}; rows-retained-during-scan=True; bytes=[size-2:2,size-10:10,size-100:100]; numeric-order=[{string.Join(',', sortedRows)}]; selected-focused-id={selectedRow.Id}; selection-focus-preserved=True; foreground-unchanged={GetForegroundWindow() == foreground}; product-view-changed=False");
 
             var changedDirectory = Path.GetFullPath(projection.Rows.Single(row => row.Name == "size-10").FileSystemPath!);
             var changedPayload = Path.Combine(changedDirectory, "payload.bin");
@@ -1913,6 +1932,55 @@ internal static class ShellViewHostFilterProbe
         return rows.Skip(topIndex).Take(end - topIndex)
             .Where(row => row.FileSystemPath is not null && Directory.Exists(row.FileSystemPath))
             .ToArray();
+    }
+
+    private sealed class PeerListViewViewportObserver : IDisposable
+    {
+        private const uint WmVScroll = 0x0115;
+        private const uint WmMouseWheel = 0x020A;
+        private const uint WmKeyDown = 0x0100;
+        private readonly nint _listView;
+        private readonly Action _viewportChanged;
+        private readonly SubclassProc _callback;
+        private int _topIndex;
+        private int _countPerPage;
+        private bool _disposed;
+
+        internal PeerListViewViewportObserver(nint listView, Action viewportChanged)
+        {
+            _listView = listView;
+            _viewportChanged = viewportChanged;
+            _topIndex = GetPeerListTopIndex(listView);
+            _countPerPage = GetPeerListCountPerPage(listView);
+            _callback = OnMessage;
+            if (!SetWindowSubclass(listView, _callback, 1, 0))
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not observe peer ListView viewport changes.");
+        }
+
+        private nint OnMessage(nint window, uint message, nint wParam, nint lParam, nuint subclassId, nuint referenceData)
+        {
+            var result = DefSubclassProc(window, message, wParam, lParam);
+            if (message is LvmEnsureVisible or WmVScroll or WmMouseWheel or WmKeyDown)
+            {
+                var topIndex = GetPeerListTopIndex(_listView);
+                var countPerPage = GetPeerListCountPerPage(_listView);
+                if (topIndex != _topIndex || countPerPage != _countPerPage)
+                {
+                    _topIndex = topIndex;
+                    _countPerPage = countPerPage;
+                    _viewportChanged();
+                }
+            }
+            return result;
+        }
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _ = RemoveWindowSubclass(_listView, _callback, 1);
+            GC.KeepAlive(_callback);
+        }
     }
 
     private static void PopulatePeerList(nint listView, IReadOnlyList<PeerShellRow> rows, bool groupByType = false)

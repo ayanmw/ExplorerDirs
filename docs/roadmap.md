@@ -5808,3 +5808,5 @@ peer SysListView32 现读取 Shell 文件夹的名称、大小、项目类型、
 2026-11-01 递归大小视口请求切片：NativeProbe peer ListView 通过 `LVM_GETTOPINDEX`/`LVM_GETCOUNTPERPAGE` 取得每页一行的视口范围，仅请求当前可见目录；三次 Release apphost Private Desktop 运行均确认其它目录仍未计算，行身份、选区、焦点及后续通知重扫合同通过。此为显式滚入视口后对请求集合做过滤，未验证滚动消息自动调度、快速滚动取消/节流、可见 UI 或产品接线。详见[调查记录](folder-size-column-investigation.md#2026-11-01-递归列请求按当前视口筛选)。
 
 2026-11-01 递归大小视口调度取消切片：对 peer ListView 两次连续视口变化进行 120 ms 去抖；首个待运行请求在扫描开始前取消，只对最终视口目录启动一次 worker。三次 Release apphost Private Desktop 运行通过，未开始扫描的目录值保持空，行/ID、后续通知重扫及选区焦点合同通过。仅 NativeProbe 调度策略，视口变化为探针显式模拟，尚未接真实滚动输入事件、慢盘运行时取消/并发限制、产品 UI 或 ExplorerBrowser。详见[调查记录](folder-size-column-investigation.md#2026-11-01-视口请求去抖与过期请求取消)。
+
+2026-11-01 原生滚动消息驱动递归列请求：peer ListView 子类观察首行变化，三次 Private Desktop 运行中 `WM_VSCROLL/SB_LINEDOWN` 改变视口并取消旧的待执行目录请求，仅扫描新可见目录；隐藏控件上的 `WM_MOUSEWHEEL` 未改变视口，因此滚轮路径未证实。Release 构建、后续通知重扫、选择焦点与隔离守卫通过。仍未验证物理输入、可见滚动条/滚轮、已启动慢扫描取消/并发及产品 ExplorerBrowser 接线。详见[调查记录](folder-size-column-investigation.md#2026-11-01-原生列表滚动消息驱动递归值请求)。
