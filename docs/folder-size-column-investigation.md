@@ -2289,3 +2289,9 @@ NativeProbe Release build 0 警告/错误，探针 exit 0、`git diff --check` �
 将前述 HostProbe 的失败断言保留为回归门槛：产品 `CaptureFileViewExportSnapshot` 原先导出递归大小列为空字符串，而当前 Shell 视图的 `IShellFolder2.GetDetailsOf` 能提供可见表头与每行文本。导出现在只对没有 `PROPERTYKEY` 显示描述的列启用受限回退：读取当前 SysListView32 表头及列视觉顺序，将可见自定义表头唯一映射到 `GetDetailsOf(NULL, ordinal)`，再依 `IFolderView2` 当前行序逐项读取对应 STRRET 文本。普通有属性描述的列仍由既有快速 `IPropertyStore` 路径读取；快速筛选打开时仍走原捕获路径，避免把视图背后的未过滤条目当成可见行。
 
 HostProbe Release build 0 警告/错误；`--shell-provider-location` exit 0，产品导出列为 `Recursive Size|名称`、值为 `5|29`，与 Shell 行序 `folder-small|folder-large` 对应；普通文件系统 `PKEY_Size` 刷新前排序对照通过。此证据覆盖隐藏 ExplorerBrowserHost 与合成 provider，不包含可见 UI 导出验收、打印、快速筛选下的派生列值、普通第三方 Shell provider 或大目录耗时。若 Shell 视图没有对应原生详细列表表头、可见列与 Shell ordinal 不能唯一匹配，捕获退回既有属性导出路径，不猜测列位置。此改动仅补齐导出消费路径，并不代表逐行递归大小列已在产品普通物理目录中启用。
+
+### 2026-11-02：初始递归列排序的轻量重排接口评估
+
+在产品 HostProbe 的合成注册 namespace 上尝试用 `IShellFolderView::Rearrange` 替代完整刷新：以 provider `GetDetailsOf` ordinal 调用时接口返回 `S_OK`，但行序仍是 `folder-large → folder-small`，比较器也未被触发；把参数换成 `IColumnManager` 可见列索引后，后续 `IFolderView2.GetItem` 读行出现 `E_FAIL`，探针无法继续读取属性。撤回了产品宿主接线，避免将不稳定的旧接口用于用户视图。
+
+恢复基线 HostProbe 后可重复确认：初始恢复键读回升序，但刷新前仍为大→小；完整 `IShellView.Refresh` 返回 `S_OK`、触发一次 provider 比较器并重排为小→大。普通文件系统 `PKEY_Size` 初次读行前已经正确升序。故当前差异仍限定在合成 provider 产品 Host。微软文档指出 `Rearrange` 的排序规则由文件夹定义，系统仅保证低 16 位传列规则，并建议调用方改用 `GetSortColumns`；该 API 不适合作为 ExplorerBrowser 产品宿主的通用修复。当前仅把它记录为原型失败结果，后续应验证 provider 自己的初始排序合同或评估受限完整刷新，不改变普通目录路径。

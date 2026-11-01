@@ -155,6 +155,8 @@ internal static class ShellProviderLocationProbe
             var columnCompareCountsBefore = Enumerable.Range(0, 8).Select(index => getCompareCountForColumn((uint)index)).ToArray();
             var orderBeforeRefresh = ReadExportRows(capture.Invoke(host, null)!).Rows
                 .Select(row => Path.GetFileName(row[nameColumnIndex]) ?? row[nameColumnIndex]).ToArray();
+            if (!orderBeforeRefresh.SequenceEqual(["folder-large", "folder-small"], StringComparer.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"The custom-provider initial-order baseline changed unexpectedly: [{string.Join('|', orderBeforeRefresh)}].");
             var refreshCompareCountBefore = getCompareCount();
             // In the registered provider host, restored sort state may precede the first actual row reorder.
             var shellRefreshResult = RefreshCurrentShellView(hostType, host);
@@ -163,6 +165,8 @@ internal static class ShellProviderLocationProbe
             var orderAfterRefresh = ReadExportRows(capture.Invoke(host, null)!).Rows
                 .Select(row => Path.GetFileName(row[nameColumnIndex]) ?? row[nameColumnIndex]).ToArray();
             var refreshCompareCountAfter = getCompareCount();
+            if (!orderAfterRefresh.SequenceEqual(["folder-small", "folder-large"], StringComparer.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"A full Shell view refresh did not apply the recursive-size order: [{string.Join('|', orderAfterRefresh)}].");
             var ascendingCommandCompareCountBefore = getCompareCount();
             var sortCommandResult = InvokeBackgroundShellVerb(hostType, host, "sortascending");
             if (sortCommandResult < 0) Marshal.ThrowExceptionForHR(sortCommandResult);
