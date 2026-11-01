@@ -277,6 +277,47 @@ internal static class ShellProviderLocationProbe
                 .Select(index => getCompareCountForColumn((uint)index) - headerColumnCountsBefore[index]).ToArray();
             Console.WriteLine($"shell-provider-location: product-host-navigation=True; is-filesystem=False; rows={total}; saved-visible-columns=[{string.Join('|', displayColumnsBeforeHeaderOrder)}]; visible-columns-after-header-action=[{string.Join('|', CaptureDisplayColumns(hostType, host))}]; logical-header-texts=[{string.Join('|', logicalHeaderTexts)}]; initial-visual-header-order=[{string.Join('|', initialVisualHeaderOrder)}]; visual-header-order=[{string.Join('|', nativeHeaderOrder)}]; recursive-header-index={recursiveHeaderIndex}; getdetailsof-headers=[{string.Join('|', mappedShellExport.ShellHeaders)}]; mapped-export-columns=[{string.Join('|', mappedShellExport.Columns)}]; mapped-export-ordinals=[{string.Join('|', mappedShellExport.Ordinals)}]; mapped-export-rows=[{string.Join('|', mappedShellExport.Rows.Select(row => string.Join('|', row)))}]; getdetailsof-header='{recursiveDisplay.Header}'; getdetailsof-values=[{string.Join('|', recursiveDisplay.Values)}]; export-columns=[{string.Join('|', columnNames)}]; export-values=[{string.Join('|', rows.Select(row => row[sizeColumnIndex]))}]; order-before-shell-refresh=[{string.Join('|', orderBeforeRefresh)}]; order-after-shell-refresh=[{string.Join('|', orderAfterRefresh)}]; shell-refresh-hr=0x{shellRefreshResult:X8}; refresh-compare-delta={refreshCompareCountAfter - refreshCompareCountBefore}; displayed-order-after-two-header-clicks=[{string.Join('|', namesInShellOrder)}]; order-after-first-header-click=[{string.Join('|', headerFirstOrder)}]; header-sort-state-after-first-click=[{string.Join('|', headerFirstSorts)}]; order-after-sortascending=[{string.Join('|', orderAfterAscendingCommand)}]; order-after-sortdescending=[{string.Join('|', orderAfterDescendingCommand)}]; sort-state-after-sortdescending=[{string.Join('|', descendingCommandSorts)}]; order-after-next-sortascending=[{string.Join('|', orderAfterAscendingAgainCommand)}]; sort-state-after-next-sortascending=[{string.Join('|', ascendingAgainCommandSorts)}]; direct-recursive-values=[{string.Join('|', directRecursiveValues)}]; fixture-values-correct={recursiveValuesMatchFixture}; provider-map-column-to-scid={providerColumnContract.DataKey.FormatId:B}:{providerColumnContract.DataKey.PropertyId}; direct-provider-compare={providerColumnContract.CompareResult}; restored-sort-state=[{string.Join('|', actualSorts)}]; shell-sort-command-hr=0x{sortCommandResult:X8}; shell-command-compare-delta={commandCompareCount - ascendingCommandCompareCountBefore}; descending-command-hr=0x{descendingCommandResult:X8}; descending-command-compare-delta={descendingCommandCompareCount - commandCompareCount}; ascending-again-command-hr=0x{ascendingAgainCommandResult:X8}; ascending-again-command-compare-delta={ascendingAgainCommandCompareCount - descendingCommandCompareCount}; header-window={sortHeaderWindow}; first-header-compare-delta={headerFirstCompareCount - headerCompareCountBefore}; second-header-compare-delta={compareCountAfterSort - headerFirstCompareCount}; compare-delta-by-column=[{string.Join('|', columnCompareDeltas)}]; header-compare-delta-by-column=[{string.Join('|', headerCompareDeltas)}]; shell-sort-applied={sortApplied}; target=session-root; fallback=default-root; parent-visible={IsWindowVisible(source.Handle)}");
             if (IsWindowVisible(source.Handle)) throw new InvalidOperationException("The hidden Shell provider HostProbe parent became visible.");
+            var nestedPath = Path.Combine(pathB, "folder-small");
+            var nestedIdentity = $"::{{{classId:D}}}\\edpath:{EncodePath(nestedPath)}";
+            hostType.GetMethod("Navigate")!.Invoke(host, [nestedIdentity]);
+            var navigatedState = hostType.GetProperty("CurrentPath")!;
+            var hasNavigated = hostType.GetField("_hasNavigated", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var shellViewWindow = hostType.GetField("_viewWindow", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            object? nestedCounts = null;
+            try
+            {
+                WaitUntil(() =>
+                {
+                    nestedCounts = readCounts.Invoke(host, [false, false]);
+                    return string.Equals((string?)navigatedState.GetValue(host), nestedIdentity, StringComparison.OrdinalIgnoreCase) &&
+                        Equals(hasNavigated.GetValue(host), true) && (nint)shellViewWindow.GetValue(host)! != 0 &&
+                        nestedCounts is not null && (int)nestedCounts.GetType().GetProperty("Total")!.GetValue(nestedCounts)! == 1;
+                }, TimeSpan.FromSeconds(15), "the production host did not browse from the registered path root into its physical child folder");
+            }
+            catch (TimeoutException ex)
+            {
+                var actualPathAfterTimeout = currentPathProperty.GetValue(host);
+                var rowsAfterTimeout = nestedCounts?.GetType().GetProperty("Total")!.GetValue(nestedCounts);
+                throw new TimeoutException($"Nested navigation state: expected='{nestedIdentity}', actual='{actualPathAfterTimeout}', hasNavigated={hasNavigated.GetValue(host)}, viewWindow={shellViewWindow.GetValue(host)}, rows={rowsAfterTimeout}.", ex);
+            }
+            var nestedValues = ReadRecursiveValues(hostType, host, 1);
+            if (nestedValues.Length != 1 || !TryReadBytes(nestedValues[0], out var nestedBytes) || nestedBytes != 5)
+                throw new InvalidOperationException($"The nested path root returned an unexpected child size: [{string.Join('|', nestedValues)}].");
+            if (!(bool)hostType.GetMethod("GoBack")!.Invoke(host, null)!)
+                throw new InvalidOperationException("The product host did not accept Back from the nested physical folder.");
+            object? restoredCounts = null;
+            WaitUntil(() =>
+            {
+                restoredCounts = readCounts.Invoke(host, [false, false]);
+                return string.Equals((string?)navigatedState.GetValue(host), targetIdentity, StringComparison.OrdinalIgnoreCase) && restoredCounts is not null &&
+                    (int)restoredCounts.GetType().GetProperty("Total")!.GetValue(restoredCounts)! == expectedRows;
+            }, TimeSpan.FromSeconds(15), "Back did not restore the registered parent path root and its mixed rows");
+            var restoredValues = ReadRecursiveValues(hostType, host, expectedRows);
+            var restoredValuesMatch = restoredValues.Select(value => TryReadBytes(value, out var bytes) ? bytes : ulong.MaxValue)
+                .Order().SequenceEqual([5UL, 12UL, 29UL]);
+            if (!restoredValuesMatch)
+                throw new InvalidOperationException($"Back restored the parent path but not its recursive values: [{string.Join('|', restoredValues)}].");
+            Console.WriteLine($"shell-provider-nested-navigation: child-folder=True; nested-rows={nestedCounts!.GetType().GetProperty("Total")!.GetValue(nestedCounts)}; child-size={nestedBytes}; back-to-parent=True; restored-rows={restoredCounts!.GetType().GetProperty("Total")!.GetValue(restoredCounts)}; restored-values=[{string.Join('|', restoredValues)}]; parent-visible={IsWindowVisible(source.Handle)}");
             return RunFilesystemSortRestoreProbe();
         }
         finally

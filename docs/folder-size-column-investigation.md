@@ -2315,3 +2315,9 @@ HostProbe 为保存升序及降序分别构造初始会话，均验证首次完�
 扩展隐藏 HostProbe 的测试专用开关：文件夹仍显示递归大小（5 B、29 B），但比较时将文件夹大小视为相等；普通文件继续使用原生大小值（12 B）。升序结果为 `folder-large → folder-small → file-middle.bin`，降序为 `file-middle.bin → folder-large → folder-small`；两文件夹直接比较结果相等。正常递归大小排序的升序/降序回归也通过，普通文件系统 `PKEY_Size` 排序控制通过。
 
 HostProbe Release 构建通过，四种隐藏合成视图场景（正常/忽略文件夹大小 × 升序/降序）均退出码 0。该开关只存在于 NativeProbe 合成 provider 测试适配器，不是产品选项；验证了产品 `ExplorerBrowserHost` 消费这种排序语义的原型，但不证明普通磁盘目录自定义列可用、配置可保存或用户可见 UI 行为。没有启动产品窗口，也没有更新 release。Q-Dir 的官方说明称文件夹大小因导航性能问题默认不参与排序，并提供“忽略文件夹大小排序”选项。[Q-Dir FAQ 63](https://softwareok.com/?faq=63&seite=faq-Q-DIR) · [Q-Dir 文件夹大小列说明](https://www.softwareok.com/?seite=freeware%2Fq-dir%2FFile_and_folder_size_Column_with_percentage)
+
+### 2026-11-02：产品 Host 的注册路径根进入子目录并回退
+
+在递归列 HostProbe 完成根目录列/排序断言后，调用生产 `ExplorerBrowserHost.Navigate` 进入同一 provider 下的物理子目录，再调用生产 `GoBack` 返回父级。正常递归排序与“文件夹大小忽略排序”的反向场景均通过：子目录视图读到 `payload.bin` 1 行、5 B；Back 回到父目录后恢复 3 行，递归值集合仍为 5/12/29 B。普通 filesystem `PKEY_Size` 排序对照也通过；两个测试父 HWND 均不可见，未启动产品窗口。
+
+首次运行的超时是 HostProbe 的大小写敏感字符串断言：Shell 将 CLSID 规范化成大写，但 `CurrentPath`、新 view HWND 和 1 行子目录枚举均已成功。将路径身份比较改为 `OrdinalIgnoreCase` 后，两次隐藏 HostProbe 通过。结果证明产品 Host 可通过已注册路径身份进入一个物理子目录并用 TravelLog 回到父级；不代表鼠标双击输入、所有层级/特殊目录、父子目录各自独立视图设置、普通文件夹直接使用派生列、便携注册生命周期或可见 UI 已通过。产品与 release 未修改。
