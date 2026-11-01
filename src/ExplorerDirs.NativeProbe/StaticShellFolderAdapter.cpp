@@ -1,5 +1,11 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+
+#if defined(EXPLORERDIRS_NATIVEPROBE)
+#define ED_PROBE_EXPORT __declspec(dllexport)
+#else
+#define ED_PROBE_EXPORT
+#endif
 #include <shlobj.h>
 #include <shobjidl.h>
 #include <shellapi.h>
@@ -23,7 +29,7 @@
 #include <iomanip>
 #include <sstream>
 
-extern "C" __declspec(dllexport) void WINAPI ResetSyntheticSortCounters();
+extern "C" ED_PROBE_EXPORT void WINAPI ResetSyntheticSortCounters();
 
 namespace
 {
@@ -1098,11 +1104,11 @@ namespace
 // No-window contract exports let the managed probe validate the exact PIDL envelope
 // before it is used by the isolated adapter. The payload is an owned copy of the
 // complete original PIDL, including its terminator.
-extern "C" __declspec(dllexport) HRESULT WINAPI WrapStaticShellChildPidl(
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI WrapStaticShellChildPidl(
     PCUIDLIST_RELATIVE source, PIDLIST_RELATIVE* wrapped)
 { return WrapChildPidl(source, wrapped); }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI UnwrapStaticShellChildPidl(
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI UnwrapStaticShellChildPidl(
     PCUIDLIST_RELATIVE wrapped, PIDLIST_RELATIVE* original)
 {
     if (!wrapped || !original) return E_POINTER;
@@ -1118,12 +1124,12 @@ extern "C" __declspec(dllexport) HRESULT WINAPI UnwrapStaticShellChildPidl(
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetStaticShellColumnComparisonCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetStaticShellColumnComparisonCount()
 {
     return InterlockedCompareExchange(&g_staticColumnComparisons, 0, 0);
 }
 
-extern "C" __declspec(dllexport) void WINAPI ResetStaticShellColumnProbeCounters()
+extern "C" ED_PROBE_EXPORT void WINAPI ResetStaticShellColumnProbeCounters()
 {
     InterlockedExchange(&g_staticColumnComparisons, 0);
     InterlockedExchange(&g_allComparisons, 0);
@@ -1158,168 +1164,168 @@ extern "C" __declspec(dllexport) void WINAPI ResetStaticShellColumnProbeCounters
     InterlockedExchange(&g_propertyStoreValueRequests, 0);
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetPropertyStoreFactoryBindRequestCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetPropertyStoreFactoryBindRequestCount()
 {
     return InterlockedCompareExchange(&g_propertyStoreFactoryBindRequests, 0, 0);
 }
-extern "C" __declspec(dllexport) LONG WINAPI GetPropertyStoreFactoryCreateRequestCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetPropertyStoreFactoryCreateRequestCount()
 {
     return InterlockedCompareExchange(&g_propertyStoreFactoryCreateRequests, 0, 0);
 }
-extern "C" __declspec(dllexport) LONG WINAPI GetPropertyStoreValueRequestCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetPropertyStoreValueRequestCount()
 {
     return InterlockedCompareExchange(&g_propertyStoreValueRequests, 0, 0);
 }
-extern "C" __declspec(dllexport) void WINAPI SetStaticShellPropertyStoreFactoryProbe(BOOL enabled)
+extern "C" ED_PROBE_EXPORT void WINAPI SetStaticShellPropertyStoreFactoryProbe(BOOL enabled)
 {
     InterlockedExchange(&g_propertyStoreFactoryProbeEnabled, enabled ? 1 : 0);
 }
 
-extern "C" __declspec(dllexport) void WINAPI SetStaticShellLegacyDetailsCallbackProbe(BOOL enabled)
+extern "C" ED_PROBE_EXPORT void WINAPI SetStaticShellLegacyDetailsCallbackProbe(BOOL enabled)
 {
     InterlockedExchange(&g_legacyDetailsCallbackEnabled, enabled ? 1 : 0);
 }
-extern "C" __declspec(dllexport) void WINAPI SetStaticShellSortCallbackProbe(BOOL enabled)
+extern "C" ED_PROBE_EXPORT void WINAPI SetStaticShellSortCallbackProbe(BOOL enabled)
 {
     InterlockedExchange(&g_sortCallbackProbeEnabled, enabled ? 1 : 0);
 }
-extern "C" __declspec(dllexport) LONG WINAPI GetStaticShellSortCallbackColumnClickCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetStaticShellSortCallbackColumnClickCount()
 {
     return InterlockedCompareExchange(&g_sortCallbackColumnClickRequests, 0, 0);
 }
-extern "C" __declspec(dllexport) LONG WINAPI GetStaticShellSortCallbackLastColumn()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetStaticShellSortCallbackLastColumn()
 {
     return InterlockedCompareExchange(&g_sortCallbackLastColumn, 0, 0);
 }
-extern "C" __declspec(dllexport) LONG WINAPI GetStaticShellSortCallbackGetDefaultsCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetStaticShellSortCallbackGetDefaultsCount()
 {
     return InterlockedCompareExchange(&g_sortCallbackGetDefaultsRequests, 0, 0);
 }
-extern "C" __declspec(dllexport) LONG WINAPI GetStaticShellLegacyDetailsCallbackRequestCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetStaticShellLegacyDetailsCallbackRequestCount()
 {
     return InterlockedCompareExchange(&g_legacyDetailsCallbackRequests, 0, 0);
 }
-extern "C" __declspec(dllexport) LONG WINAPI GetStaticShellLegacyDetailsCallbackHeaderRequestCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetStaticShellLegacyDetailsCallbackHeaderRequestCount()
 {
     return InterlockedCompareExchange(&g_legacyDetailsCallbackHeaderRequests, 0, 0);
 }
-extern "C" __declspec(dllexport) LONG WINAPI GetStaticShellLegacyDetailsCallbackItemRequestCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetStaticShellLegacyDetailsCallbackItemRequestCount()
 {
     return InterlockedCompareExchange(&g_legacyDetailsCallbackItemRequests, 0, 0);
 }
-extern "C" __declspec(dllexport) LONG WINAPI GetStaticShellLegacyDetailsCallbackLastColumn()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetStaticShellLegacyDetailsCallbackLastColumn()
 {
     return InterlockedCompareExchange(&g_legacyDetailsCallbackLastColumn, 0, 0);
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetAllShellColumnComparisonCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetAllShellColumnComparisonCount()
 {
     return InterlockedCompareExchange(&g_allComparisons, 0, 0);
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetLastShellColumnComparisonIndex()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetLastShellColumnComparisonIndex()
 {
     return InterlockedCompareExchange(&g_lastCompareColumn, 0, 0);
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetCustomShellDetailsExCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetCustomShellDetailsExCount()
 {
     return InterlockedCompareExchange(&g_customDetailsEx, 0, 0);
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetStandardSizeShellDetailsExCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetStandardSizeShellDetailsExCount()
 {
     return InterlockedCompareExchange(&g_standardSizeDetailsEx, 0, 0);
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetStandardSizeShellComparisonCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetStandardSizeShellComparisonCount()
 {
     return InterlockedCompareExchange(&g_standardSizeComparisons, 0, 0);
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetStandardSizeShellDetailsOfCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetStandardSizeShellDetailsOfCount()
 {
     return InterlockedCompareExchange(&g_standardSizeDetailsOf, 0, 0);
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetCustomShellDetailsOfCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetCustomShellDetailsOfCount()
 {
     return InterlockedCompareExchange(&g_customDetailsOf, 0, 0);
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetCustomShellItemDetailsOfCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetCustomShellItemDetailsOfCount()
 {
     return InterlockedCompareExchange(&g_customItemDetailsOf, 0, 0);
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetCustomShellHeaderDetailsOfCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetCustomShellHeaderDetailsOfCount()
 {
     return InterlockedCompareExchange(&g_customHeaderDetailsOf, 0, 0);
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetDocumentByteCountShellComparisonCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetDocumentByteCountShellComparisonCount()
 {
     return InterlockedCompareExchange(&g_documentByteCountComparisons, 0, 0);
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetDocumentByteCountShellDetailsExCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetDocumentByteCountShellDetailsExCount()
 {
     return InterlockedCompareExchange(&g_documentByteCountDetailsEx, 0, 0);
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetDocumentByteCountShellDetailsOfCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetDocumentByteCountShellDetailsOfCount()
 {
     return InterlockedCompareExchange(&g_documentByteCountDetailsOf, 0, 0);
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetMapColumnToScidRequestCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetMapColumnToScidRequestCount()
 {
     return InterlockedCompareExchange(&g_mapColumnToScidRequests, 0, 0);
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetDefaultColumnRequestCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetDefaultColumnRequestCount()
 {
     return InterlockedCompareExchange(&g_defaultColumnRequests, 0, 0);
 }
 
-extern "C" __declspec(dllexport) void WINAPI SetDefaultColumnSortProbe(BOOL enabled)
+extern "C" ED_PROBE_EXPORT void WINAPI SetDefaultColumnSortProbe(BOOL enabled)
 {
     InterlockedExchange(&g_defaultColumnSortProbeEnabled, enabled ? 1 : 0);
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetPropertyStoreQueryInterfaceRequestCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetPropertyStoreQueryInterfaceRequestCount()
 {
     return InterlockedCompareExchange(&g_propertyStoreQueryInterfaceRequests, 0, 0);
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetPropertyStoreBindToObjectRequestCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetPropertyStoreBindToObjectRequestCount()
 {
     return InterlockedCompareExchange(&g_propertyStoreBindToObjectRequests, 0, 0);
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetPropertyStoreBindToStorageRequestCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetPropertyStoreBindToStorageRequestCount()
 {
     return InterlockedCompareExchange(&g_propertyStoreBindToStorageRequests, 0, 0);
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetPropertyStoreUiObjectRequestCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetPropertyStoreUiObjectRequestCount()
 {
     return InterlockedCompareExchange(&g_propertyStoreUiObjectRequests, 0, 0);
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetStaticShellPersistClassRequestCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetStaticShellPersistClassRequestCount()
 {
     return InterlockedCompareExchange(&g_persistClassIdRequests, 0, 0);
 }
-extern "C" __declspec(dllexport) LONG WINAPI GetStaticShellPersistRootRequestCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetStaticShellPersistRootRequestCount()
 {
     return InterlockedCompareExchange(&g_persistRootRequests, 0, 0);
 }
-extern "C" __declspec(dllexport) UINT WINAPI GetStaticShellDetailsSize()
+extern "C" ED_PROBE_EXPORT UINT WINAPI GetStaticShellDetailsSize()
 {
     return static_cast<UINT>(sizeof(SHELLDETAILS));
 }
-extern "C" __declspec(dllexport) HRESULT WINAPI CreateStaticShellFolderAdapter(
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI CreateStaticShellFolderAdapter(
     IShellFolder2* folder, IShellFolder2** adapter)
 {
     if (!folder || !adapter) return E_POINTER;
@@ -1331,7 +1337,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI CreateStaticShellFolderAdapter(
 }
 
 // Isolated A/B control only: ordinary Shell-folder methods still delegate, but no raw inner interface escapes.
-extern "C" __declspec(dllexport) HRESULT WINAPI CreateStrictShellFolderAdapter(
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI CreateStrictShellFolderAdapter(
     IShellFolder2* folder, IShellFolder2** adapter)
 {
     if (!folder || !adapter) return E_POINTER;
@@ -1341,7 +1347,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI CreateStrictShellFolderAdapter(
     *adapter = instance;
     return S_OK;
 }
-extern "C" __declspec(dllexport) HRESULT WINAPI CreateClassIdentityShellFolderAdapter(
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI CreateClassIdentityShellFolderAdapter(
     IShellFolder2* folder, IShellFolder2** adapter)
 {
     if (!folder || !adapter) return E_POINTER;
@@ -1351,7 +1357,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI CreateClassIdentityShellFolderAd
     *adapter = instance;
     return S_OK;
 }
-extern "C" __declspec(dllexport) HRESULT WINAPI CreateWrappedPidlShellFolderAdapter(
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI CreateWrappedPidlShellFolderAdapter(
     IShellFolder2* folder, IShellFolder2** adapter)
 {
     if (!folder || !adapter) return E_POINTER;
@@ -1361,11 +1367,11 @@ extern "C" __declspec(dllexport) HRESULT WINAPI CreateWrappedPidlShellFolderAdap
     *adapter = instance;
     return S_OK;
 }
-extern "C" __declspec(dllexport) void WINAPI FailNextWrappedEnumeratorCacheInsertForProbe()
+extern "C" ED_PROBE_EXPORT void WINAPI FailNextWrappedEnumeratorCacheInsertForProbe()
 {
     InterlockedExchange(&g_failNextWrappedEnumeratorCacheInsert, 1);
 }
-extern "C" __declspec(dllexport) HRESULT WINAPI VerifyStaticShellViewFolder(
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI VerifyStaticShellViewFolder(
     IShellView* view, IShellFolder2* adapter, BOOL* matches)
 {
     if (!view || !adapter || !matches) return E_POINTER;
@@ -1797,7 +1803,13 @@ namespace
     volatile LONG g_syntheticFilesystemAttributeCount = 0;
     volatile LONG g_syntheticMaskFilesystemAttributes = 0;
     volatile LONG g_syntheticOwnAttributesForProbe = 0;
+#if defined(EXPLORERDIRS_NATIVEPROBE)
     volatile LONG g_syntheticCustomSizeColumnForProbe = 0;
+#else
+    // The product build exposes recursive size as its default Shell size column;
+    // the probe build keeps the physical-size baseline available for A/B tests.
+    volatile LONG g_syntheticCustomSizeColumnForProbe = 1;
+#endif
     volatile LONG g_syntheticIgnoreRecursiveFolderSizeSortForProbe = 0;
     volatile LONG g_syntheticHumanSizeTextForProbe = 0;
     volatile LONG g_syntheticSizeDisplayUnitForProbe = 0;
@@ -4874,7 +4886,7 @@ STDAPI DllGetClassObject(REFCLSID classId, REFIID iid, void** value)
     return result;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI ConfigureSyntheticNamespaceRootForProbe(
+extern "C" HRESULT WINAPI ConfigureShellNamespaceRoot(
     const CLSID* classId, PCWSTR backingPath)
 {
     if (!classId || !backingPath || !*backingPath) return E_INVALIDARG;
@@ -4887,7 +4899,15 @@ extern "C" __declspec(dllexport) HRESULT WINAPI ConfigureSyntheticNamespaceRootF
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI RegisterSyntheticClassFactoryInProcForProbe(
+#if defined(EXPLORERDIRS_NATIVEPROBE)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI ConfigureSyntheticNamespaceRootForProbe(
+    const CLSID* classId, PCWSTR backingPath)
+{
+    return ConfigureShellNamespaceRoot(classId, backingPath);
+}
+#endif
+
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI RegisterSyntheticClassFactoryInProcForProbe(
     const CLSID* classId, DWORD* cookie)
 {
     if (!classId || !cookie) return E_POINTER;
@@ -4901,7 +4921,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RegisterSyntheticClassFactoryInP
     return result;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI RevokeSyntheticClassFactoryForProbe(DWORD cookie)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI RevokeSyntheticClassFactoryForProbe(DWORD cookie)
 {
     return cookie ? CoRevokeClassObject(cookie) : E_INVALIDARG;
 }
@@ -4993,7 +5013,7 @@ namespace
     }
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticMultiRootProviderSmoke(
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI RunSyntheticMultiRootProviderSmoke(
     const CLSID* firstClassId, PCWSTR firstExpectedName, PCWSTR firstForbiddenName, ULONGLONG firstRecursiveBytes,
     const CLSID* secondClassId, PCWSTR secondExpectedName, PCWSTR secondForbiddenName, ULONGLONG secondRecursiveBytes)
 {
@@ -5021,14 +5041,14 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticMultiRootProviderSmo
     return result;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI VerifySyntheticFolderContentsForProbe(
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI VerifySyntheticFolderContentsForProbe(
     IShellFolder2* folder, PCWSTR expectedName, PCWSTR forbiddenName, ULONGLONG recursiveBytes)
 {
     if (!folder || !expectedName || !forbiddenName) return E_INVALIDARG;
     return VerifyConfiguredRootForProbe(folder, expectedName, forbiddenName, recursiveBytes);
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticSingleClassMultiRootPidlSmoke(
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI RunSyntheticSingleClassMultiRootPidlSmoke(
     PCWSTR firstPath, PCWSTR firstExpectedName, PCWSTR firstForbiddenName, ULONGLONG firstRecursiveBytes,
     PCWSTR secondPath, PCWSTR secondExpectedName, PCWSTR secondForbiddenName, ULONGLONG secondRecursiveBytes)
 {
@@ -5179,7 +5199,7 @@ STDAPI DllCanUnloadNow()
     return result;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticRecursiveSizeCacheUnloadLifecycleSmoke()
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI RunSyntheticRecursiveSizeCacheUnloadLifecycleSmoke()
 {
     if (DllCanUnloadNow() != S_OK) return E_UNEXPECTED;
 
@@ -5210,7 +5230,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticRecursiveSizeCacheUn
     return reopenedEmpty && finalUnload == S_OK ? S_OK : E_FAIL;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticDllUnloadContractSmoke()
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI RunSyntheticDllUnloadContractSmoke()
 {
     const auto before = DllCanUnloadNow();
     auto* enumerator = new (std::nothrow) SyntheticChildEnumerator({});
@@ -5232,7 +5252,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticDllUnloadContractSmo
         whileFactoryAlive == S_FALSE && afterFactory == S_OK ? S_OK : E_FAIL;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI CreateSyntheticSortShellView(PCIDLIST_ABSOLUTE rootPidl, IShellFolder2** folder, IShellView** view)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI CreateSyntheticSortShellView(PCIDLIST_ABSOLUTE rootPidl, IShellFolder2** folder, IShellView** view)
 {
     TraceSyntheticSortStage("synthetic-sort: export-enter");
     if (!rootPidl || !folder || !view) return E_POINTER;
@@ -5254,7 +5274,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI CreateSyntheticSortShellView(PCI
     return result;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI CreateSyntheticSortShellViewDirectForProbe(
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI CreateSyntheticSortShellViewDirectForProbe(
     PCIDLIST_ABSOLUTE rootPidl, const CLSID* classId, IShellFolder2** folder, IShellView** view)
 {
     if (!rootPidl || !classId || !folder || !view) return E_INVALIDARG;
@@ -5275,7 +5295,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI CreateSyntheticSortShellViewDire
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI VerifySyntheticShellActivatedRecursiveSizeSnapshotCache(
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI VerifySyntheticShellActivatedRecursiveSizeSnapshotCache(
     PCIDLIST_ABSOLUTE rootPidl, ULONGLONG sentinelBytes)
 {
     if (!rootPidl || sentinelBytes == 0) return E_INVALIDARG;
@@ -5322,7 +5342,7 @@ cleanup:
     return result;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticSortBackingPath(PCWSTR path)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI SetSyntheticSortBackingPath(PCWSTR path)
 {
     if (!path || !*path) return E_INVALIDARG;
     try { g_syntheticSortBackingPath.assign(path); }
@@ -5330,7 +5350,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticSortBackingPath(PCWS
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI MeasureSyntheticFolderEnumerationScanCostForProbe(
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI MeasureSyntheticFolderEnumerationScanCostForProbe(
     PCWSTR backingPath, LONG recursiveSizeEnabled, LONG* directRows, LONG* metricCalls,
     LONG* entriesVisited, ULONGLONG* elapsedMicroseconds)
 {
@@ -5399,7 +5419,7 @@ cleanup:
     return result;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticFolderClassIdForProbe(const CLSID* classId)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI SetSyntheticFolderClassIdForProbe(const CLSID* classId)
 {
     if (!classId) return E_POINTER;
     if (InterlockedCompareExchange(&g_syntheticLiveObjects, 0, 0) != 0 ||
@@ -5409,7 +5429,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticFolderClassIdForProb
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSmoke(PCWSTR backingPath)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI RunSyntheticFolderTreeContractSmoke(PCWSTR backingPath)
 {
     if (!backingPath || !*backingPath) return E_INVALIDARG;
     InterlockedExchange(&g_syntheticExtendedMetadataColumnsForProbe, 1);
@@ -6306,7 +6326,7 @@ cleanup:
     return result;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticOnDemandRecursiveSizeColumnSmoke(PCWSTR backingPath)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI RunSyntheticOnDemandRecursiveSizeColumnSmoke(PCWSTR backingPath)
 {
     if (!backingPath || !*backingPath) return E_INVALIDARG;
     const auto previousDemandSetting = InterlockedExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, 1);
@@ -6399,7 +6419,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticOnDemandRecursiveSiz
     return result;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticAsyncOnDemandRecursiveSizeColumnSmoke(PCWSTR backingPath, LONG requestCount)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI RunSyntheticAsyncOnDemandRecursiveSizeColumnSmoke(PCWSTR backingPath, LONG requestCount)
 {
     if (!backingPath || !*backingPath || requestCount < 1 || requestCount > 2048) return E_INVALIDARG;
     const bool batchByView = InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeBatchByViewForProbe, 0, 0) != 0;
@@ -6597,7 +6617,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticAsyncOnDemandRecursi
     return result;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeIdentityProjectionSmoke(
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI RunSyntheticFolderRecursiveSizeIdentityProjectionSmoke(
     PCWSTR backingPath, PCWSTR parsingName, ULONGLONG volumeSerial, ULONGLONG fileIdLow,
     ULONGLONG fileIdHigh, LONGLONG scannedBytes)
 {
@@ -6685,7 +6705,7 @@ cleanup_recursive_size_projection:
     return result;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeIdentityCacheSmoke(
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI RunSyntheticFolderRecursiveSizeIdentityCacheSmoke(
     PCWSTR backingPath, PCWSTR childParsingName, PCWSTR otherParsingName,
     ULONGLONG childVolumeSerial, ULONGLONG childFileIdLow, ULONGLONG childFileIdHigh,
     ULONGLONG otherVolumeSerial, ULONGLONG otherFileIdLow, ULONGLONG otherFileIdHigh,
@@ -6970,7 +6990,7 @@ cleanup_recursive_size_update:
     return result;
 }
 
-extern "C" __declspec(dllexport) void WINAPI ResetSyntheticSortCounters()
+extern "C" ED_PROBE_EXPORT void WINAPI ResetSyntheticSortCounters()
 {
     InterlockedExchange(&g_syntheticCompareCount, 0);
     for (auto& count : g_syntheticCompareByColumn) InterlockedExchange(&count, 0);
@@ -7010,25 +7030,25 @@ extern "C" __declspec(dllexport) void WINAPI ResetSyntheticSortCounters()
         InterlockedExchange(&entry.sequence, 0);
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticMapColumnToScidCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticMapColumnToScidCount()
 {
     return InterlockedCompareExchange(&g_syntheticMapColumnToScidCount, 0, 0);
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticMapColumnToScidColumnCount(UINT column)
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticMapColumnToScidColumnCount(UINT column)
 {
     if (column >= ARRAYSIZE(g_syntheticMapColumnToScidByColumn)) return -1;
     return InterlockedCompareExchange(&g_syntheticMapColumnToScidByColumn[column], 0, 0);
 }
 
-extern "C" __declspec(dllexport) void WINAPI ResetSyntheticMapColumnTrace()
+extern "C" ED_PROBE_EXPORT void WINAPI ResetSyntheticMapColumnTrace()
 {
     InterlockedExchange(&g_syntheticMapColumnTraceCount, 0);
     for (auto& entry : g_syntheticMapColumnTrace)
         InterlockedExchange(&entry.sequence, 0);
 }
 
-extern "C" __declspec(dllexport) void WINAPI ResetSyntheticColumnDiagnostics()
+extern "C" ED_PROBE_EXPORT void WINAPI ResetSyntheticColumnDiagnostics()
 {
     InterlockedExchange(&g_syntheticMapColumnToScidCount, 0);
     for (size_t column = 0; column < ARRAYSIZE(g_syntheticMapColumnToScidByColumn); ++column)
@@ -7039,13 +7059,13 @@ extern "C" __declspec(dllexport) void WINAPI ResetSyntheticColumnDiagnostics()
         InterlockedExchange(&entry.sequence, 0);
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticMapColumnTraceCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticMapColumnTraceCount()
 {
     const auto count = InterlockedCompareExchange(&g_syntheticMapColumnTraceCount, 0, 0);
     return count < kSyntheticMapColumnTraceCapacity ? count : kSyntheticMapColumnTraceCapacity;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI ReadSyntheticMapColumnTrace(
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI ReadSyntheticMapColumnTrace(
     UINT index, UINT* column, SHCOLUMNID* key, HRESULT* result)
 {
     if (!column || !key || !result) return E_POINTER;
@@ -7059,13 +7079,13 @@ extern "C" __declspec(dllexport) HRESULT WINAPI ReadSyntheticMapColumnTrace(
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticColumnMetadataTraceCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticColumnMetadataTraceCount()
 {
     const auto count = InterlockedCompareExchange(&g_syntheticColumnMetadataTraceCount, 0, 0);
     return count < kSyntheticColumnMetadataTraceCapacity ? count : kSyntheticColumnMetadataTraceCapacity;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI ReadSyntheticColumnMetadataTrace(
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI ReadSyntheticColumnMetadataTrace(
     UINT index, UINT* kind, UINT* column, SHCOLSTATEF* state, HRESULT* result, WCHAR* text, UINT textCapacity)
 {
     if (!kind || !column || !state || !result || !text || textCapacity == 0) return E_POINTER;
@@ -7080,7 +7100,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI ReadSyntheticColumnMetadataTrace
     return StringCchCopyW(text, textCapacity, entry.text);
 }
 
-extern "C" __declspec(dllexport) void WINAPI ReleaseSyntheticSortViewHold()
+extern "C" ED_PROBE_EXPORT void WINAPI ReleaseSyntheticSortViewHold()
 {
     for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
     {
@@ -7093,7 +7113,7 @@ extern "C" __declspec(dllexport) void WINAPI ReleaseSyntheticSortViewHold()
     }
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI RetireSyntheticSortViewHoldForProbe(IShellView* view)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI RetireSyntheticSortViewHoldForProbe(IShellView* view)
 {
     if (!view) return E_POINTER;
     for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
@@ -7112,7 +7132,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RetireSyntheticSortViewHoldForPr
     return E_INVALIDARG;
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSortViewHoldCountForProbe()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticSortViewHoldCountForProbe()
 {
     LONG count = 0;
     for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
@@ -7120,7 +7140,7 @@ extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSortViewHoldCountForPro
     return count;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI CancelSyntheticSortRefreshForProbe(IShellView* view)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI CancelSyntheticSortRefreshForProbe(IShellView* view)
 {
     if (!view) return E_POINTER;
     for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
@@ -7132,7 +7152,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI CancelSyntheticSortRefreshForPro
     return E_INVALIDARG;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI CancelSyntheticBackingDirectoryUpdateForProbe(IShellView* view)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI CancelSyntheticBackingDirectoryUpdateForProbe(IShellView* view)
 {
     if (!view) return E_POINTER;
     for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
@@ -7144,12 +7164,12 @@ extern "C" __declspec(dllexport) HRESULT WINAPI CancelSyntheticBackingDirectoryU
     return E_INVALIDARG;
 }
 
-extern "C" __declspec(dllexport) BOOL WINAPI ShouldTranslateSyntheticChildNotificationForProbe(UINT event)
+extern "C" ED_PROBE_EXPORT BOOL WINAPI ShouldTranslateSyntheticChildNotificationForProbe(UINT event)
 {
     return ShouldTranslateSyntheticChildNotification(static_cast<LONG>(event)) ? TRUE : FALSE;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI ScheduleSyntheticBackingDirectoryUpdateForProbe(IShellView* view)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI ScheduleSyntheticBackingDirectoryUpdateForProbe(IShellView* view)
 {
     if (!view) return E_POINTER;
     for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
@@ -7161,7 +7181,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI ScheduleSyntheticBackingDirector
     return E_INVALIDARG;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI ScheduleSyntheticSortRefreshForProbe(IShellView* view)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI ScheduleSyntheticSortRefreshForProbe(IShellView* view)
 {
     if (!view) return E_POINTER;
     for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
@@ -7173,7 +7193,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI ScheduleSyntheticSortRefreshForP
     return E_INVALIDARG;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI NotifySyntheticSortRefreshForProbe(IShellView* view)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI NotifySyntheticSortRefreshForProbe(IShellView* view)
 {
     if (!view) return E_POINTER;
     for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
@@ -7185,7 +7205,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI NotifySyntheticSortRefreshForPro
     return E_INVALIDARG;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI PublishSyntheticRecursiveSizeSnapshotForViewProbe(
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI PublishSyntheticRecursiveSizeSnapshotForViewProbe(
     IShellView* view, PCWSTR childName, ULONGLONG bytes)
 {
     if (!view || !childName || !*childName) return E_INVALIDARG;
@@ -7198,7 +7218,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI PublishSyntheticRecursiveSizeSna
     return E_INVALIDARG;
 }
 
-extern "C" __declspec(dllexport) BOOL WINAPI HasSyntheticRecursiveSizeSnapshotForViewProbe(
+extern "C" ED_PROBE_EXPORT BOOL WINAPI HasSyntheticRecursiveSizeSnapshotForViewProbe(
     IShellView* view, PCWSTR childName)
 {
     if (!view || !childName || !*childName) return FALSE;
@@ -7211,7 +7231,7 @@ extern "C" __declspec(dllexport) BOOL WINAPI HasSyntheticRecursiveSizeSnapshotFo
     return FALSE;
 }
 
-extern "C" __declspec(dllexport) BOOL WINAPI HasSyntheticRecursiveSizeScanReservationForChildProbe(
+extern "C" ED_PROBE_EXPORT BOOL WINAPI HasSyntheticRecursiveSizeScanReservationForChildProbe(
     IShellView* view, PCWSTR childName)
 {
     if (!view || !childName || !*childName) return FALSE;
@@ -7224,7 +7244,7 @@ extern "C" __declspec(dllexport) BOOL WINAPI HasSyntheticRecursiveSizeScanReserv
     return FALSE;
 }
 
-extern "C" __declspec(dllexport) BOOL WINAPI HasSyntheticAsyncRecursiveSizeScanPendingForViewProbe(
+extern "C" ED_PROBE_EXPORT BOOL WINAPI HasSyntheticAsyncRecursiveSizeScanPendingForViewProbe(
     IShellView* view, PCWSTR childName)
 {
     if (!view || !childName || !*childName) return FALSE;
@@ -7237,7 +7257,7 @@ extern "C" __declspec(dllexport) BOOL WINAPI HasSyntheticAsyncRecursiveSizeScanP
     return FALSE;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI InvalidateSyntheticRecursiveSizeScanForChildProbe(
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI InvalidateSyntheticRecursiveSizeScanForChildProbe(
     IShellView* view, PCWSTR childName)
 {
     if (!view || !childName || !*childName) return E_INVALIDARG;
@@ -7250,7 +7270,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI InvalidateSyntheticRecursiveSize
     return E_INVALIDARG;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI InvalidateSyntheticRecursiveSizeSnapshotForChildProbe(
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI InvalidateSyntheticRecursiveSizeSnapshotForChildProbe(
     IShellView* view, PCWSTR childName)
 {
     if (!view || !childName || !*childName) return E_INVALIDARG;
@@ -7263,7 +7283,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI InvalidateSyntheticRecursiveSize
     return E_INVALIDARG;
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI ScheduleSyntheticSortRefreshesForProbe()
+extern "C" ED_PROBE_EXPORT LONG WINAPI ScheduleSyntheticSortRefreshesForProbe()
 {
     LONG scheduled = 0;
     for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
@@ -7277,75 +7297,75 @@ extern "C" __declspec(dllexport) LONG WINAPI ScheduleSyntheticSortRefreshesForPr
     return scheduled;
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticDeferredRefreshCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticDeferredRefreshCount()
 { return InterlockedCompareExchange(&g_syntheticDeferredRefreshCount, 0, 0); }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticChildNotificationTranslationForProbe(BOOL enabled)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI SetSyntheticChildNotificationTranslationForProbe(BOOL enabled)
 {
     InterlockedExchange(&g_syntheticTranslateChildNotificationsForProbe, enabled ? 1 : 0);
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticChildNotificationTranslationQueuedCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticChildNotificationTranslationQueuedCount()
 { return InterlockedCompareExchange(&g_syntheticChildNotificationTranslationQueued, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticChildNotificationTranslationSentCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticChildNotificationTranslationSentCount()
 { return InterlockedCompareExchange(&g_syntheticChildNotificationTranslationSent, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAttributeNotificationTranslationCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticAttributeNotificationTranslationCount()
 { return InterlockedCompareExchange(&g_syntheticAttributeNotificationTranslationCount, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSortCompareCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticSortCompareCount()
 { return InterlockedCompareExchange(&g_syntheticCompareCount, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSortCompareCountForColumn(UINT column)
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticSortCompareCountForColumn(UINT column)
 { return column < ARRAYSIZE(g_syntheticCompareByColumn) ? InterlockedCompareExchange(&g_syntheticCompareByColumn[column], 0, 0) : -1; }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSizeCompareCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticSizeCompareCount()
 { return InterlockedCompareExchange(&g_syntheticSizeCompareCount, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticDirectoryMetricsDuringCompareCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticDirectoryMetricsDuringCompareCount()
 { return InterlockedCompareExchange(&g_syntheticDirectoryMetricsDuringCompareCount, 0, 0); }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticRecursiveSizeScanOnDemandForProbe(BOOL enabled)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI SetSyntheticRecursiveSizeScanOnDemandForProbe(BOOL enabled)
 {
     InterlockedExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, enabled ? 1 : 0);
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticAsyncRecursiveSizeScanForProbe(BOOL enabled)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI SetSyntheticAsyncRecursiveSizeScanForProbe(BOOL enabled)
 {
     InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanForProbe, enabled ? 1 : 0);
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticAsyncRecursiveSizeItemNotificationForProbe(BOOL enabled)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI SetSyntheticAsyncRecursiveSizeItemNotificationForProbe(BOOL enabled)
 {
     InterlockedExchange(&g_syntheticAsyncRecursiveSizeItemNotificationForProbe, enabled ? 1 : 0);
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticAsyncRecursiveSizeBatchByViewForProbe(BOOL enabled)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI SetSyntheticAsyncRecursiveSizeBatchByViewForProbe(BOOL enabled)
 {
     InterlockedExchange(&g_syntheticAsyncRecursiveSizeBatchByViewForProbe, enabled ? 1 : 0);
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticAsyncRecursiveSizeScanDelayForProbe(LONG delayMilliseconds)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI SetSyntheticAsyncRecursiveSizeScanDelayForProbe(LONG delayMilliseconds)
 {
     if (delayMilliseconds < 0 || delayMilliseconds > 1000) return E_INVALIDARG;
     InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanDelayMsForProbe, delayMilliseconds);
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticAsyncRecursiveSizeEntryDelayForProbe(LONG delayMilliseconds)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI SetSyntheticAsyncRecursiveSizeEntryDelayForProbe(LONG delayMilliseconds)
 {
     if (delayMilliseconds < 0 || delayMilliseconds > 1000) return E_INVALIDARG;
     InterlockedExchange(&g_syntheticAsyncRecursiveSizeEntryDelayMsForProbe, delayMilliseconds);
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticRecursiveSizeCacheCapacityForProbe(LONG capacity)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI SetSyntheticRecursiveSizeCacheCapacityForProbe(LONG capacity)
 {
     // The larger bound lets isolated stress probes compare cache churn without changing product defaults.
     if (capacity < 1 || capacity > 8192) return E_INVALIDARG;
@@ -7360,7 +7380,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticRecursiveSizeCacheCa
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticRecursiveSizeCacheSnapshotCountForProbe()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticRecursiveSizeCacheSnapshotCountForProbe()
 {
     AcquireSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
     auto* store = g_sharedRecursiveSizeStore;
@@ -7372,7 +7392,7 @@ extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticRecursiveSizeCacheSnaps
     return static_cast<LONG>(count);
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticRecursiveSizeCachePayloadBytesForProbe()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticRecursiveSizeCachePayloadBytesForProbe()
 {
     AcquireSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
     auto* store = g_sharedRecursiveSizeStore;
@@ -7384,7 +7404,7 @@ extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticRecursiveSizeCachePaylo
     return static_cast<LONG>(bytes);
 }
 
-extern "C" __declspec(dllexport) LONG64 WINAPI GetSyntheticRecursiveSizeCacheLookupHitsForProbe()
+extern "C" ED_PROBE_EXPORT LONG64 WINAPI GetSyntheticRecursiveSizeCacheLookupHitsForProbe()
 {
     AcquireSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
     auto* store = g_sharedRecursiveSizeStore;
@@ -7396,7 +7416,7 @@ extern "C" __declspec(dllexport) LONG64 WINAPI GetSyntheticRecursiveSizeCacheLoo
     return static_cast<LONG64>(count);
 }
 
-extern "C" __declspec(dllexport) LONG64 WINAPI GetSyntheticRecursiveSizeCacheLookupMissesForProbe()
+extern "C" ED_PROBE_EXPORT LONG64 WINAPI GetSyntheticRecursiveSizeCacheLookupMissesForProbe()
 {
     AcquireSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
     auto* store = g_sharedRecursiveSizeStore;
@@ -7408,7 +7428,7 @@ extern "C" __declspec(dllexport) LONG64 WINAPI GetSyntheticRecursiveSizeCacheLoo
     return static_cast<LONG64>(count);
 }
 
-extern "C" __declspec(dllexport) LONG64 WINAPI GetSyntheticRecursiveSizeCacheEvictionsForProbe()
+extern "C" ED_PROBE_EXPORT LONG64 WINAPI GetSyntheticRecursiveSizeCacheEvictionsForProbe()
 {
     AcquireSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
     auto* store = g_sharedRecursiveSizeStore;
@@ -7420,7 +7440,7 @@ extern "C" __declspec(dllexport) LONG64 WINAPI GetSyntheticRecursiveSizeCacheEvi
     return static_cast<LONG64>(count);
 }
 
-extern "C" __declspec(dllexport) LONG64 WINAPI GetSyntheticRecursiveSizeCacheEvictionSearchStepsForProbe()
+extern "C" ED_PROBE_EXPORT LONG64 WINAPI GetSyntheticRecursiveSizeCacheEvictionSearchStepsForProbe()
 {
     AcquireSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
     auto* store = g_sharedRecursiveSizeStore;
@@ -7432,7 +7452,7 @@ extern "C" __declspec(dllexport) LONG64 WINAPI GetSyntheticRecursiveSizeCacheEvi
     return static_cast<LONG64>(count);
 }
 
-extern "C" __declspec(dllexport) LONG64 WINAPI GetSyntheticRecursiveSizeCacheEvictionSearchMicrosecondsForProbe()
+extern "C" ED_PROBE_EXPORT LONG64 WINAPI GetSyntheticRecursiveSizeCacheEvictionSearchMicrosecondsForProbe()
 {
     AcquireSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
     auto* store = g_sharedRecursiveSizeStore;
@@ -7444,7 +7464,7 @@ extern "C" __declspec(dllexport) LONG64 WINAPI GetSyntheticRecursiveSizeCacheEvi
     return static_cast<LONG64>(elapsed);
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticRecursiveSizeCacheIndexedHeapAuxiliaryBytesEstimateForProbe()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticRecursiveSizeCacheIndexedHeapAuxiliaryBytesEstimateForProbe()
 {
     AcquireSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
     auto* store = g_sharedRecursiveSizeStore;
@@ -7456,7 +7476,7 @@ extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticRecursiveSizeCacheIndex
     return static_cast<LONG>(bytes);
 }
 
-extern "C" __declspec(dllexport) void WINAPI ResetSyntheticOnDemandSizeMetricsForProbe()
+extern "C" ED_PROBE_EXPORT void WINAPI ResetSyntheticOnDemandSizeMetricsForProbe()
 {
     InterlockedExchange(&g_syntheticDirectoryMetricsCallCount, 0);
     InterlockedExchange(&g_syntheticDirectoryMetricsEntryCount, 0);
@@ -7482,49 +7502,49 @@ extern "C" __declspec(dllexport) void WINAPI ResetSyntheticOnDemandSizeMetricsFo
     }
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticDirectoryMetricsCallCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticDirectoryMetricsCallCount()
 { return InterlockedCompareExchange(&g_syntheticDirectoryMetricsCallCount, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticDirectoryMetricsEntryCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticDirectoryMetricsEntryCount()
 { return InterlockedCompareExchange(&g_syntheticDirectoryMetricsEntryCount, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticOnDemandSizeScanCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticOnDemandSizeScanCount()
 { return InterlockedCompareExchange(&g_syntheticOnDemandSizeScanCount, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG64 WINAPI GetSyntheticOnDemandSizeScanMicroseconds()
+extern "C" ED_PROBE_EXPORT LONG64 WINAPI GetSyntheticOnDemandSizeScanMicroseconds()
 { return InterlockedCompareExchange64(&g_syntheticOnDemandSizeScanMicroseconds, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizePeakWorkerCountForProbe()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticAsyncRecursiveSizePeakWorkerCountForProbe()
 { return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizePeakWorkersForProbe, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizeNotificationCountForProbe()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticAsyncRecursiveSizeNotificationCountForProbe()
 { return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeNotificationsSentForProbe, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizeItemNotificationCountForProbe()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticAsyncRecursiveSizeItemNotificationCountForProbe()
 { return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeItemNotificationsSentForProbe, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizeDirectoryNotificationCountForProbe()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticAsyncRecursiveSizeDirectoryNotificationCountForProbe()
 { return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeDirectoryNotificationsSentForProbe, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizeNotificationInvalidatedReservationCountForProbe()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticAsyncRecursiveSizeNotificationInvalidatedReservationCountForProbe()
 { return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeNotificationInvalidatedReservationsForProbe, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizeQueueRejectedScanCountForProbe()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticAsyncRecursiveSizeQueueRejectedScanCountForProbe()
 { return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeQueueRejectedScanCountForProbe, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizeBatchRequestedEntriesForProbe()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticAsyncRecursiveSizeBatchRequestedEntriesForProbe()
 { return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeBatchRequestedEntriesForProbe, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizeScanFinishedCountForProbe()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticAsyncRecursiveSizeScanFinishedCountForProbe()
 { return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizeScanStartedCountForProbe()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticAsyncRecursiveSizeScanStartedCountForProbe()
 { return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanStartedForProbe, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizeScanCompletedCountForProbe()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticAsyncRecursiveSizeScanCompletedCountForProbe()
 { return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanCompletedForProbe, 0, 0); }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI BeginSyntheticAsyncRecursiveSizeQueueGateForProbe()
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI BeginSyntheticAsyncRecursiveSizeQueueGateForProbe()
 {
     if (g_syntheticAsyncRecursiveSizeScanGateForProbe) return HRESULT_FROM_WIN32(ERROR_ALREADY_INITIALIZED);
     const auto gate = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -7533,20 +7553,20 @@ extern "C" __declspec(dllexport) HRESULT WINAPI BeginSyntheticAsyncRecursiveSize
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) void WINAPI ReleaseSyntheticAsyncRecursiveSizeQueueGateForProbe()
+extern "C" ED_PROBE_EXPORT void WINAPI ReleaseSyntheticAsyncRecursiveSizeQueueGateForProbe()
 {
     const auto gate = g_syntheticAsyncRecursiveSizeScanGateForProbe;
     if (gate) SetEvent(gate);
 }
 
-extern "C" __declspec(dllexport) void WINAPI ClearSyntheticAsyncRecursiveSizeQueueGateForProbe()
+extern "C" ED_PROBE_EXPORT void WINAPI ClearSyntheticAsyncRecursiveSizeQueueGateForProbe()
 {
     const auto gate = g_syntheticAsyncRecursiveSizeScanGateForProbe;
     g_syntheticAsyncRecursiveSizeScanGateForProbe = nullptr;
     if (gate) CloseHandle(gate);
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticAsyncRecursiveSizeCommitGatePathForProbe(PCWSTR path)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI SetSyntheticAsyncRecursiveSizeCommitGatePathForProbe(PCWSTR path)
 {
     if (!path || !*path) return E_INVALIDARG;
     try
@@ -7559,7 +7579,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticAsyncRecursiveSizeCo
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI BeginSyntheticAsyncRecursiveSizeCommitGateForProbe()
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI BeginSyntheticAsyncRecursiveSizeCommitGateForProbe()
 {
     std::lock_guard<std::mutex> lock(g_syntheticAsyncRecursiveSizeCommitGateMutexForProbe);
     if (g_syntheticAsyncRecursiveSizeCommitGateForProbe || g_syntheticAsyncRecursiveSizeCommitGateReachedForProbe ||
@@ -7579,7 +7599,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI BeginSyntheticAsyncRecursiveSize
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) BOOL WINAPI HasSyntheticAsyncRecursiveSizeCommitGateReachedForProbe()
+extern "C" ED_PROBE_EXPORT BOOL WINAPI HasSyntheticAsyncRecursiveSizeCommitGateReachedForProbe()
 {
     HANDLE reached = nullptr;
     {
@@ -7589,7 +7609,7 @@ extern "C" __declspec(dllexport) BOOL WINAPI HasSyntheticAsyncRecursiveSizeCommi
     return reached && WaitForSingleObject(reached, 0) == WAIT_OBJECT_0;
 }
 
-extern "C" __declspec(dllexport) void WINAPI ReleaseSyntheticAsyncRecursiveSizeCommitGateForProbe()
+extern "C" ED_PROBE_EXPORT void WINAPI ReleaseSyntheticAsyncRecursiveSizeCommitGateForProbe()
 {
     HANDLE gate = nullptr;
     {
@@ -7599,7 +7619,7 @@ extern "C" __declspec(dllexport) void WINAPI ReleaseSyntheticAsyncRecursiveSizeC
     if (gate) SetEvent(gate);
 }
 
-extern "C" __declspec(dllexport) void WINAPI ClearSyntheticAsyncRecursiveSizeCommitGateForProbe()
+extern "C" ED_PROBE_EXPORT void WINAPI ClearSyntheticAsyncRecursiveSizeCommitGateForProbe()
 {
     HANDLE gate = nullptr, reached = nullptr;
     {
@@ -7614,67 +7634,67 @@ extern "C" __declspec(dllexport) void WINAPI ClearSyntheticAsyncRecursiveSizeCom
     if (reached) CloseHandle(reached);
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticRecursiveSizeCacheMissesDuringCompareCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticRecursiveSizeCacheMissesDuringCompareCount()
 { return InterlockedCompareExchange(&g_syntheticRecursiveSizeCacheMissesDuringCompareCount, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSizeDetailsExCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticSizeDetailsExCount()
 { return InterlockedCompareExchange(&g_syntheticSizeDetailsExCount, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSizeDetailsExFolderCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticSizeDetailsExFolderCount()
 { return InterlockedCompareExchange(&g_syntheticSizeDetailsExFolderCount, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSizeDetailsExFileCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticSizeDetailsExFileCount()
 { return InterlockedCompareExchange(&g_syntheticSizeDetailsExFileCount, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSizeDetailsOfItemCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticSizeDetailsOfItemCount()
 { return InterlockedCompareExchange(&g_syntheticSizeDetailsOfItemCount, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticItemDetailsOfCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticItemDetailsOfCount()
 { return InterlockedCompareExchange(&g_syntheticItemDetailsOfCount, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticPropertyStoreFactoryRequestCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticPropertyStoreFactoryRequestCount()
 { return InterlockedCompareExchange(&g_syntheticPropertyStoreFactoryRequests, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticPropertyStoreRequestCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticPropertyStoreRequestCount()
 { return InterlockedCompareExchange(&g_syntheticPropertyStoreRequests, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticGetAttributesOfCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticGetAttributesOfCount()
 { return InterlockedCompareExchange(&g_syntheticGetAttributesOfCount, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticFilesystemAttributeCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticFilesystemAttributeCount()
 { return InterlockedCompareExchange(&g_syntheticFilesystemAttributeCount, 0, 0); }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticMaskFilesystemAttributesForProbe(BOOL enabled)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI SetSyntheticMaskFilesystemAttributesForProbe(BOOL enabled)
 {
     InterlockedExchange(&g_syntheticMaskFilesystemAttributes, enabled ? 1 : 0);
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticOwnAttributesForProbe(BOOL enabled)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI SetSyntheticOwnAttributesForProbe(BOOL enabled)
 {
     InterlockedExchange(&g_syntheticOwnAttributesForProbe, enabled ? 1 : 0);
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticCustomSizeColumnForProbe(BOOL enabled)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI SetSyntheticCustomSizeColumnForProbe(BOOL enabled)
 {
     InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, enabled ? 1 : 0);
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticIgnoreRecursiveFolderSizeSortForProbe(BOOL enabled)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI SetSyntheticIgnoreRecursiveFolderSizeSortForProbe(BOOL enabled)
 {
     InterlockedExchange(&g_syntheticIgnoreRecursiveFolderSizeSortForProbe, enabled ? 1 : 0);
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticHumanSizeTextForProbe(BOOL enabled)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI SetSyntheticHumanSizeTextForProbe(BOOL enabled)
 {
     InterlockedExchange(&g_syntheticHumanSizeTextForProbe, enabled ? 1 : 0);
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticSizeDisplayOptionsForProbe(LONG unit, LONG decimalPlaces, BOOL thousandsSeparator)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI SetSyntheticSizeDisplayOptionsForProbe(LONG unit, LONG decimalPlaces, BOOL thousandsSeparator)
 {
     if (unit < 0 || unit > 7 || decimalPlaces < 0 || decimalPlaces > 3) return E_INVALIDARG;
     InterlockedExchange(&g_syntheticSizeDisplayUnitForProbe, unit);
@@ -7683,13 +7703,13 @@ extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticSizeDisplayOptionsFo
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticSlowCustomSizeColumnForProbe(BOOL enabled)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI SetSyntheticSlowCustomSizeColumnForProbe(BOOL enabled)
 {
     InterlockedExchange(&g_syntheticSlowCustomSizeColumnForProbe, enabled ? 1 : 0);
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticRelativePercentColumnTypeForProbe(BOOL enabled, SHCOLSTATEF type)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI SetSyntheticRelativePercentColumnTypeForProbe(BOOL enabled, SHCOLSTATEF type)
 {
     if (type != SHCOLSTATE_DEFAULT && type != SHCOLSTATE_TYPE_INT && type != SHCOLSTATE_TYPE_STR)
         return E_INVALIDARG;
@@ -7698,33 +7718,33 @@ extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticRelativePercentColum
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticSizeMetricsObservationForProbe(BOOL enabled)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI SetSyntheticSizeMetricsObservationForProbe(BOOL enabled)
 {
     g_syntheticSizeMetricsObservation = enabled ? TRUE : FALSE;
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticChildSizeOverrideForProbe(LONGLONG size)
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI SetSyntheticChildSizeOverrideForProbe(LONGLONG size)
 {
     if (size < -1) return E_INVALIDARG;
     InterlockedExchange64(&g_syntheticChildSizeOverride, size);
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticCustomSizeDetailsExCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticCustomSizeDetailsExCount()
 { return InterlockedCompareExchange(&g_syntheticCustomSizeDetailsExCount, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticCustomSizeDetailsExFolderCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticCustomSizeDetailsExFolderCount()
 { return InterlockedCompareExchange(&g_syntheticCustomSizeDetailsExFolderCount, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticCustomSizeDetailsExFileCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticCustomSizeDetailsExFileCount()
 { return InterlockedCompareExchange(&g_syntheticCustomSizeDetailsExFileCount, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticEnumObjectsCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticEnumObjectsCount()
 { return InterlockedCompareExchange(&g_syntheticEnumObjectsCount, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticEnumeratedItemCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticEnumeratedItemCount()
 { return InterlockedCompareExchange(&g_syntheticEnumeratedItems, 0, 0); }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticClassFactoryCreateCount()
+extern "C" ED_PROBE_EXPORT LONG WINAPI GetSyntheticClassFactoryCreateCount()
 { return InterlockedCompareExchange(&g_syntheticClassFactoryCreateCount, 0, 0); }

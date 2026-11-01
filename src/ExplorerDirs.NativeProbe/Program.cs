@@ -38,6 +38,8 @@ internal static class Program
             return ShellNamespaceOwnerProbe.RunCrashChild(args[1], args[2], args[3]);
         if (args.Length == 1 && args[0] == "--shell-namespace-owner-crash-recovery-private-desktop")
             return PrivateDesktopShellProbe.RunShellNamespaceOwnerCrashRecovery();
+        if (args.Length == 1 && args[0] == "--product-shell-adapter-build-smoke")
+            return ProductShellAdapterBuildSmoke.Run();
         if (args.Length == 5 && args[0] == "--registered-path-pidl-child")
             return RegisteredMultiRootPidlProbe.RunChild(args[1], args[2], args[3], args[4]);
         if (args.Length == 1 && args[0] == "--search-virtual-scopes")

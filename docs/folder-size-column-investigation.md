@@ -2541,6 +2541,8 @@ SettingsSmoke 完整运行通过，包含 profile CLSID 重写后读取 sidecar 
 
 ### 2026-11-02：Native adapter 接产品前的构建与 API 门槛
 
-复核 `ExplorerDirs.App.csproj`、`scripts/publish.ps1` 与原生 adapter 源码后确认：App 的 `dotnet publish` 目前不会编译或复制 NativeProbe DLL；release checksum 只记录 `ExplorerDirs.App.exe` 与 `ExplorerDirs.App.dll`。现有 DLL 由 `src/ExplorerDirs.NativeProbe/build-static-shell-folder-adapter.ps1` 从 NativeProbe 源码单独构建。adapter 的激活路径 `DllGetClassObject` 会从 per-CLSID backing-path map 创建 provider，但当前配置入口名为 `ConfigureSyntheticNamespaceRootForProbe`，同时源码还包含大量 NativeProbe 专用扫描闸门、计数器与诊断导出，不能直接作为产品 DLL 接入。
+复核 `ExplorerDirs.App.csproj`、`scripts/publish.ps1` 与原生 adapter 源码后确认：App 的 `dotnet publish` 目前不会编译或复制 Native adapter；release checksum 只记录 `ExplorerDirs.App.exe` 与 `ExplorerDirs.App.dll`。原生源码现在能生成两种 x64 构建：NativeProbe 版本用 `EXPLORERDIRS_NATIVEPROBE` 保留探针导出；新增的独立产品变体只导出 `DllGetClassObject`、`DllCanUnloadNow` 与通用 `ConfigureShellNamespaceRoot`，并默认把 Recursive Size 映射为 Shell 大小列。
 
-App 生命周期接线位置已经明确：在 `FolderOpenRouter.TryStart` 成功后、恢复任一 `MainWindow` 前初始化稳定 profile CLSID、adapter 配置和 volatile CLSID/COM/NameSpace keys；正常退出时所有 `MainWindow` 关闭后清理 owner，再由 Router 停止路由并释放 profile 锁。下一批应先把通用 provider 配置接口与 probe-only 控制面分开，并建立 App Release 构建/发布载荷校验；再通过 HostProbe 验证真实 profile path wrapping、会话恢复与多窗口列行为。当前产品与 release 仍未更改，不能称递归列已经接入。
+验证包括两种原生 DLL 的 `/W4 /WX` 构建、NativeProbe Release 构建、`dumpbin /exports` 导出表检查、产品变体无 view 的 COM 加载 smoke（配置 profile root、创建 class factory 与 `IShellFolder2`、读回 `Recursive Size` 标题、`DllCanUnloadNow=S_OK`），以及 NativeProbe 原有递归列合同复验。smoke 没有写注册表或创建 Shell view。产品 DLL 仍编译了部分内部诊断计数逻辑；因此目前只验证了导出面与 provider class 激活，不应将其当成最终发布二进制。App 项目和 release 仍未接入该 DLL。
+
+App 生命周期接线位置仍是：在 `FolderOpenRouter.TryStart` 成功后、恢复任一 `MainWindow` 前初始化稳定 profile CLSID、adapter 配置和 volatile CLSID/COM/NameSpace keys；正常退出时所有 `MainWindow` 关闭后清理 owner，再让 Router 停止路由并释放 profile 锁。下一步收敛产品变体中的探针计数开销，接入 App Release 构建/发布载荷校验，再通过 HostProbe 验证真实 profile path wrapping、会话恢复与多窗口列行为。当前产品与 release 未更改，不能称递归列已接入。
