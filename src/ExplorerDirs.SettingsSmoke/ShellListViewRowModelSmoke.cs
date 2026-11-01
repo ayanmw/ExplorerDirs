@@ -67,6 +67,12 @@ internal static class ShellListViewRowModelSmoke
         Check(target.RecursiveBytes == 4 && target.RecursiveSummary is null,
             "publishing a scan snapshot does not mutate the previous row snapshot");
 
+        var incremental = ExplorerDirs.NativeProbe.ShellListViewRowModel.ApplyRecursiveScanResult(
+            rows, targetPath, new(target.FileSystemIdentity!.Value, new(20, 3, 1, 0)));
+        Check(incremental[0].RecursiveBytes == 20 && incremental[0].RecursiveSummary == new RecursiveDirectoryScanResult(20, 3, 1, 0) &&
+              incremental[1] == sibling && incremental[2] == virtualRow,
+            "an incremental result updates its matching Shell folder without clearing other pending or cached rows");
+
         var nativeSnapshots = ExplorerDirs.NativeProbe.ShellListViewRowModel.ProjectRecursiveSizeSnapshots(updated);
         Check(nativeSnapshots.Count == 1 &&
               nativeSnapshots[0].ParsingName == targetPath &&
@@ -271,6 +277,13 @@ internal static class ShellListViewRowModelSmoke
             Check(staleScan[0].RecursiveBytes is null && staleScan[0].RecursiveSummary is null &&
                   staleScan[0].FileSystemIdentity == replacementIdentity,
                 "a scan result for a retired row is rejected after its path now identifies another folder");
+
+            var staleIncrementalScan = ExplorerDirs.NativeProbe.ShellListViewRowModel.ApplyRecursiveScanResult(
+                [retiredFolder], identityPath, new(originalIdentity!.Value, new(999, 1, 0, 0)));
+            Check(staleIncrementalScan[0].RecursiveBytes is null &&
+                  staleIncrementalScan[0].RecursiveSummary is null &&
+                  staleIncrementalScan[0].FileSystemIdentity == replacementIdentity,
+                "an incremental result for the retired directory is rejected at a same-path replacement");
 
             var unverifiedFolder = retiredFolder with { FileSystemIdentity = null };
             var unverifiedReplacementScan = ExplorerDirs.NativeProbe.ShellListViewRowModel.ApplyRecursiveScanResults(

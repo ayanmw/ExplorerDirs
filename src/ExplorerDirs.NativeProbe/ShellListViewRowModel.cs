@@ -103,29 +103,7 @@ internal static class ShellListViewRowModel
             if (IsFilesystemFolder(row))
             {
                 if (results.TryGetValue(Path.GetFullPath(row.FileSystemPath!), out var scanResult))
-                {
-                    var currentIdentity = ShellListViewRowIdentity.GetFileSystemIdentity(row.FileSystemPath!);
-                    if (row.FileSystemIdentity is not { } previousIdentity ||
-                        previousIdentity != scanResult.Identity || currentIdentity != scanResult.Identity)
-                    {
-                        // The handle scan, row snapshot, and current path must all identify the same folder.
-                        row = row with
-                        {
-                            RecursiveBytes = null,
-                            RecursiveSummary = null,
-                            FileSystemIdentity = currentIdentity
-                        };
-                    }
-                    else
-                    {
-                        row = row with
-                        {
-                            RecursiveBytes = scanResult.Summary.Bytes,
-                            RecursiveSummary = scanResult.Summary,
-                            FileSystemIdentity = currentIdentity ?? row.FileSystemIdentity
-                        };
-                    }
-                }
+                    row = ApplyRecursiveScanResult(row, scanResult);
                 else
                     // A completed scan without this folder must not leave an older value looking current.
                     row = row with { RecursiveBytes = null, RecursiveSummary = null, FileSystemIdentity = null };
@@ -133,6 +111,51 @@ internal static class ShellListViewRowModel
             updated[index] = row;
         }
         return updated;
+    }
+
+    internal static IReadOnlyList<ShellListViewRow> ApplyRecursiveScanResult(
+        IReadOnlyList<ShellListViewRow> rows,
+        string path,
+        ShellListViewRowScanResult result)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentNullException.ThrowIfNull(result);
+        var fullPath = Path.GetFullPath(path);
+        var updated = new ShellListViewRow[rows.Count];
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var row = rows[index];
+            if (IsFilesystemFolder(row) &&
+                string.Equals(Path.GetFullPath(row.FileSystemPath!), fullPath, StringComparison.OrdinalIgnoreCase))
+                row = ApplyRecursiveScanResult(row, result);
+            updated[index] = row;
+        }
+        return updated;
+    }
+
+    private static ShellListViewRow ApplyRecursiveScanResult(
+        ShellListViewRow row,
+        ShellListViewRowScanResult scanResult)
+    {
+        var currentIdentity = ShellListViewRowIdentity.GetFileSystemIdentity(row.FileSystemPath!);
+        if (row.FileSystemIdentity is not { } previousIdentity ||
+            previousIdentity != scanResult.Identity || currentIdentity != scanResult.Identity)
+        {
+            // The handle scan, row snapshot, and current path must all identify the same folder.
+            return row with
+            {
+                RecursiveBytes = null,
+                RecursiveSummary = null,
+                FileSystemIdentity = currentIdentity
+            };
+        }
+        return row with
+        {
+            RecursiveBytes = scanResult.Summary.Bytes,
+            RecursiveSummary = scanResult.Summary,
+            FileSystemIdentity = currentIdentity ?? row.FileSystemIdentity
+        };
     }
 
     internal static IReadOnlyList<ShellListViewRowRecursiveSizeSnapshot> ProjectRecursiveSizeSnapshots(

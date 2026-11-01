@@ -2026,3 +2026,9 @@ NativeProbe Release 构建 0 警告/错误；Private Desktop `--ishellview-recur
 在同一探针加入目录竞态：扫描器已从父目录枚举出 `vanishing-folder` 后，`beforeChildOpen` 将它移出原位置，再继续扫描。红测确认此前结果字典与完成回调都缺少这条请求行；修复后扫描器以枚举时的文件 ID 回报该行 `0 B / Unreadable=1`，并将同一不可读项计入根目录摘要。身份仍由消费者的当前行身份/扫描代次校验，扫描器不会把该占位值直接写入 Shell view。真实可打开目录及根目录的逐行回报/取消合同保持通过；根目录 reparse 分支也在回报前释放根句柄。
 
 SettingsSmoke、App 与 NativeProbe Release 构建均为 0 警告/错误；增量探针、递归扫描器 smoke、Shell ListView 行模型 smoke 通过。该测试使用本地临时目录移动竞态，不代表访问拒绝 ACL 或远程 SMB 延迟表现。仍是 NativeProbe 扫描 API 改进，产品列、Shell 行更新与 UI Dispatcher 未接入。
+
+### 2026-11-01：行模型按单个递归结果增量更新
+
+整批 `ApplyRecursiveScanResults` 会把结果字典缺少的文件夹行清空，因此不能安全消费一个目录一个目录到达的回调。为原型行模型新增单项应用入口：只匹配指定绝对路径，核对行快照身份、扫描句柄身份与当前路径身份后写入该行；其它行的待计算状态或已有值保持不变。同路径目录已被替换时，旧结果被拒绝且只清空目标行的旧递归值。
+
+SettingsSmoke 的红测在实现前因增量入口缺失而编译失败；实现后 Release 构建 0 警告/错误，行模型 smoke 与递归扫描器 smoke 通过。此项打通了 callback 结果到隔离行模型的更新语义，但尚未把它接到 NativeProbe 的 peer ListView 更新循环或产品 Dispatcher；尚无可见行渐进更新证据。
