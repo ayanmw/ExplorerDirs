@@ -94,10 +94,46 @@ internal static class RecursiveDirectoryScannerSmoke
             if (!cancelled || cancelledCallbacks.Count != 1 || cancelledCallbacks.Contains(rootPath))
                 throw new InvalidOperationException("Cancellation after a partial folder publish did not prevent the root total and remaining callbacks.");
 
+            var missingChildRoot = Path.Combine(Path.GetTempPath(), "ExplorerDirs-MissingTreeChild-" + Guid.NewGuid().ToString("N"));
+            var missingChildPath = Path.Combine(missingChildRoot, "vanishing-folder");
+            var displacedChildPath = missingChildRoot + ".displaced";
+            Directory.CreateDirectory(missingChildPath);
+            File.WriteAllBytes(Path.Combine(missingChildPath, "payload.bin"), [1, 2, 3]);
+            var childMovedBeforeOpen = false;
+            ShellListViewRowScanResult? missingChildCallback = null;
+            try
+            {
+                var missingChildResults = HandleBoundRecursiveDirectoryScanner.ScanDirectoryTree(
+                    missingChildRoot, [missingChildRoot, missingChildPath], CancellationToken.None,
+                    beforeChildOpen: (_, childPath) =>
+                    {
+                        if (string.Equals(childPath, missingChildPath, StringComparison.OrdinalIgnoreCase))
+                        {
+                            Directory.Move(childPath, displacedChildPath);
+                            childMovedBeforeOpen = true;
+                        }
+                    },
+                    completedDirectory: (path, result) =>
+                    {
+                        if (string.Equals(path, missingChildPath, StringComparison.OrdinalIgnoreCase))
+                            missingChildCallback = result;
+                    });
+                if (!childMovedBeforeOpen || !missingChildResults.TryGetValue(missingChildPath, out var missingChild) ||
+                    missingChild.Summary.Bytes != 0 || missingChild.Summary.Unreadable != 1 ||
+                    missingChildCallback != missingChild || missingChildResults[missingChildRoot].Summary.Unreadable != 1)
+                    throw new InvalidOperationException("A requested directory that disappears before opening did not publish an unreadable row result.");
+            }
+            finally
+            {
+                if (Directory.Exists(displacedChildPath)) Directory.Move(displacedChildPath, missingChildPath);
+                Directory.Delete(missingChildRoot, recursive: true);
+            }
+
             Console.WriteLine($"incremental-directory-tree-publish: requested-folders={folderCount}; " +
                 $"first-folder-published-before-root-completion=True; owner-thread={ownerThread}; " +
                 $"worker-thread={firstPublished.WorkerThread}; completed-callbacks={completions.Length}; " +
                 $"root-published-last={completions[^1].Path == rootPath}; cancellation-after-one-folder=True; " +
+                "missing-child-publishes-unreadable-row=True; " +
                 $"root-published-after-cancel=False; handles-released-after-cancel=True");
         }
         finally { Directory.Delete(root, recursive: true); }

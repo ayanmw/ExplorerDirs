@@ -2020,3 +2020,9 @@ NativeProbe Release 构建 0 警告/错误；Private Desktop `--ishellview-recur
 新增 `--recursive-directory-tree-incremental-publish-probe`：在 8 个同级目录夹具上暂停第一次目录完成回调，确认 owner 线程可在根目录扫描结束前取到完整目录摘要，再确认全部回调与最终字典一致、根目录为最后一项。第二轮在第一个同级目录完成时取消，确认只收到该目录的结果、不回报根总量，扫描句柄释放后夹具可以删除。SettingsSmoke Release 构建 0 警告/错误；定向 probe、既有递归扫描器 smoke、Shell ListView 行模型 smoke 均通过。
 
 边界：这是隔离扫描器 API 和队列消费模型验证；owner 线程取队列模拟 UI 投递，不是实际 Dispatcher，也未接产品扫描协调器、Shell 行刷新或可见列表，因此不能证明产品逐行绘制效果、滚动/排序稳定性、UI 响应时间或冷盘/网络取消延迟。百分比仍应等同级结果齐全后统一计算；本次只验证大小摘要可以先行发布。产品未修改。
+
+### 2026-11-01：增量扫描中请求目录消失时回报不可读行
+
+在同一探针加入目录竞态：扫描器已从父目录枚举出 `vanishing-folder` 后，`beforeChildOpen` 将它移出原位置，再继续扫描。红测确认此前结果字典与完成回调都缺少这条请求行；修复后扫描器以枚举时的文件 ID 回报该行 `0 B / Unreadable=1`，并将同一不可读项计入根目录摘要。身份仍由消费者的当前行身份/扫描代次校验，扫描器不会把该占位值直接写入 Shell view。真实可打开目录及根目录的逐行回报/取消合同保持通过；根目录 reparse 分支也在回报前释放根句柄。
+
+SettingsSmoke、App 与 NativeProbe Release 构建均为 0 警告/错误；增量探针、递归扫描器 smoke、Shell ListView 行模型 smoke 通过。该测试使用本地临时目录移动竞态，不代表访问拒绝 ACL 或远程 SMB 延迟表现。仍是 NativeProbe 扫描 API 改进，产品列、Shell 行更新与 UI Dispatcher 未接入。

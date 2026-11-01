@@ -108,6 +108,7 @@ internal static class HandleBoundRecursiveDirectoryScanner
                 {
                     var skipped = new ShellListViewRowScanResult(root.Identity, new(0, 0, 0, 1));
                     results[rootPath] = skipped;
+                    root.Handle.Dispose();
                     completedDirectory?.Invoke(rootPath, skipped);
                 }
                 return results;
@@ -195,6 +196,7 @@ internal static class HandleBoundRecursiveDirectoryScanner
                     if (child is null)
                     {
                         frame.Unreadable = checked(frame.Unreadable + 1);
+                        PublishUnreadableRequestedDirectory(normalizedChildPath, expectedChildIdentity);
                         continue;
                     }
                     if (child.Identity != expectedChildIdentity ||
@@ -202,6 +204,7 @@ internal static class HandleBoundRecursiveDirectoryScanner
                     {
                         child.Handle.Dispose();
                         frame.Unreadable = checked(frame.Unreadable + 1);
+                        PublishUnreadableRequestedDirectory(normalizedChildPath, expectedChildIdentity);
                         continue;
                     }
 
@@ -254,6 +257,14 @@ internal static class HandleBoundRecursiveDirectoryScanner
             }
             else completedRoot = summary;
             if (published is not null) completedDirectory?.Invoke(normalizedPath, published);
+        }
+
+        void PublishUnreadableRequestedDirectory(string path, ShellFileSystemIdentity identity)
+        {
+            if (requestedPaths?.Contains(path) != true) return;
+            var unreadable = new ShellListViewRowScanResult(identity, new(0, 0, 0, 1));
+            requestedResults![path] = unreadable;
+            completedDirectory?.Invoke(path, unreadable);
         }
     }
 

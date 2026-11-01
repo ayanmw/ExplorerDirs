@@ -5840,4 +5840,6 @@ peer SysListView32 现读取 Shell 文件夹的名称、大小、项目类型、
 
 2026-11-01 递归目录树逐行回报与取消：隔离句柄扫描器在每个请求目录完成后释放句柄并从后台回报大小摘要，根目录最后发布；队列探针证明 owner 可在根扫描结束前消费首个结果。8 个同级夹具的最终摘要完全对齐；在首目录完成时取消只保留该目录回报、不发布根总量，取消后夹具可删除。Release 构建、定向 probe、既有扫描器与行模型 smoke 通过。owner 队列仅模拟 UI 投递，产品扫描协调器和可见视图未接入。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01目录树扫描逐行回报与取消原型)。
 
+2026-11-01 递归增量扫描目录消失失败路径：红测复现目录在父项枚举后、打开前被移动时，旧逻辑只增加父级不可读计数、遗漏请求行结果；现回报以枚举身份绑定的 `Unreadable=1` 行摘要并计入根总量，避免递归列永久空白，同时由消费端身份门控过滤过期行。App/NativeProbe/SettingsSmoke Release 构建及相关 smoke 通过。仅本地夹具竞态，ACL/SMB 未测，产品列未接线。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01增量扫描中请求目录消失时回报不可读行)。
+
 2026-11-01 ExplorerBrowser 注册 namespace 递归列排序：`IFolderView2.SetSortColumns` 拒绝 provider 自定义递归 Size key，标准 `PKEY_Size` 不调用递归比较器；隔离视图 `IShellView` 表头真实鼠标点击及背景排序菜单均已验证升降序正确，递归比较各 1 次、比较期间无递归扫描。WPF `HwndSource` 根宿主的 Private Desktop 全流程 exit 0、前台/last-input/临时注册及夹具清理守卫通过；NativeProbe 模块由隔离进程退出时回收。原生 `STATIC` 根宿主仍会在父窗口销毁阶段挂起，根因未明。该路径仅证明注册 namespace 原型排序可行；产品仍使用 ExplorerBrowser，递归列、菜单、操作及 UI 均未接入。详见 `docs/folder-size-column-investigation.md`。
