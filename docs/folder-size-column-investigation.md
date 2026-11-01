@@ -2444,6 +2444,6 @@ NativeProbe Release 构建 0 警告/错误；Private Desktop watchdog exit 0，�
 
 ### 2026-11-02：profile Shell namespace 注册 owner 并行与重启原型
 
-新增隐藏 Private Desktop HostProbe，使用生产 `ShellNamespaceProfileStore` 为两个临时便携 profile 创建不同且稳定的 CLSID；A、B 各自在独立进程注册 volatile `HKCU\Software\Classes\CLSID` 和 Desktop `NameSpace` key，并用绝对 path-marker parsing name 绑定各自物理根。A、B 根含不同专属文件和同名 `shared-folder`，递归值分别为 13 B/29 B。B 注册完成后，A 删除自己的两棵注册；B 随即重新解析并读到自己的专属文件/29 B。随后重新加载 A 的 INI、确认 CLSID 未变、重建注册并解析 A；B 退出并只删除 B 的 key 后，A 仍能读取 13 B。两个 owner 的最终 key 均清理。
+此前的 owner-only 探针验证了 B 在 A 注销后重新解析仍读到专属文件/29 B；本次把 profile B 的首个真实 ExplorerBrowser 留在 B owner 子进程中。A 注销后，B 通过已打开 view 的 `IFolderView2` 重新读取行数和 provider 内容；A 使用原 INI 中的 CLSID 重建注册并打开自己的 view 后，B 再复验一次；最后 B owner 退出，A 的 view 仍读到 13 B。A、B 各自的两棵 volatile key 在协调进程中清理并验证。
 
-NativeProbe Release 构建 0 警告/错误；Private Desktop watchdog exit 0，前台与 last-input 未变。最终日志：`src/.state/native-probe-watchdog/20261102-033946-e2847ad4.stdout.log` 与 `.stderr.log`。这证明每 profile 稳定 CLSID 可隔离两个并行注册 owner 的正常关闭/重开边界；仍没有真实 ExplorerBrowser view、同 profile 多进程、app 崩溃后复用/清理、发布目录迁移或可见 Desktop DefView 证据。volatile namespace 注册尚未接入产品。本原型不授权将 Shell namespace 路径列作为正式用户功能启用。
+NativeProbe Release 构建 0 警告/错误；Private Desktop watchdog exit 0，前台与 last-input 未变。日志：`src/.state/native-probe-watchdog/20261102-035411-c1fdabb9.stdout.log` 与 `.stderr.log`。这证实两个不同 profile 的注册身份隔离、已打开 ExplorerBrowser view 在另一个 profile 正常注销/同 CLSID 重开期间保持 provider 读值，以及 owner 退出后协调者可清理 volatile keys。第二个同进程 ExplorerBrowser 的打开实验卡在 `BrowseToIDList`，不计通过；为把本次验证限定在 owner 存活期与注册隔离，测试子进程以进程退出释放 Shell 对象，正常 COM/view teardown 未纳入本次证据。仍未验证产品多窗口注册 owner、崩溃/强杀后的孤儿 key 清理、并发启动竞态、可见 Desktop DefView 或应用接线。volatile namespace 注册尚未接入产品；这不授权把 Shell namespace 路径列作为正式用户功能启用。
