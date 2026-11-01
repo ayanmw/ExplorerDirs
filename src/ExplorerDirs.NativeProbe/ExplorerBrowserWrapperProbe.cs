@@ -24,6 +24,7 @@ internal static class ExplorerBrowserWrapperProbe
     private static readonly Guid UnknownId = new("00000000-0000-0000-C000-000000000046");
     private static readonly Guid PersistFolder2Id = new("1AC3D9F0-175C-11D1-95BE-00609797EA4F");
     private const uint SigdnFileSystemPath = 0x80058000;
+    private const uint SigdnDesktopAbsoluteParsing = 0x80028000;
     private const uint SbspParent = 0x2000;
     private const uint SbspNavigateBack = 0x4000;
     private const uint SbspNavigateForward = 0x8000;
@@ -403,18 +404,44 @@ internal static class ExplorerBrowserWrapperProbe
 
                 Marshal.ThrowExceptionForHR(ParseDisplayName(viewFolder, "nested", out var nestedItem));
                 var expectedNestedRoot = ILCombine(expectedChildRoot, nestedItem);
-                Marshal.FreeCoTaskMem(nestedItem);
                 if (expectedNestedRoot == 0) throw new InvalidOperationException("Could not compose a nested namespace PIDL.");
+                var absoluteNestedNameHr = SHParseDisplayName($"::{{{classId:D}}}\\child\\nested", 0,
+                    out var absoluteNestedNamePidl, 0, out _);
+                var nestedFolderIid = ShellFolder2Id;
+                var nestedBindHr = At<BindToObjectNative>(viewFolder, 5)(viewFolder, nestedItem, 0,
+                    ref nestedFolderIid, out var directlyBoundNestedFolder);
+                Marshal.FreeCoTaskMem(nestedItem);
+                var directlyBoundNestedPidlMatches = false;
+                if (nestedBindHr >= 0 && directlyBoundNestedFolder != 0)
+                {
+                    var nestedPersistId = PersistFolder2Id;
+                    if (Marshal.QueryInterface(directlyBoundNestedFolder, in nestedPersistId, out var directlyBoundPersist) >= 0)
+                    {
+                        try
+                        {
+                            Marshal.ThrowExceptionForHR(At<GetCurFolder>(directlyBoundPersist, 5)(directlyBoundPersist, out var directlyBoundPidl));
+                            try { directlyBoundNestedPidlMatches = PidlBytesEqual(expectedNestedRoot, directlyBoundPidl); }
+                            finally { Marshal.FreeCoTaskMem(directlyBoundPidl); }
+                        }
+                        finally { Marshal.Release(directlyBoundPersist); }
+                    }
+                    Marshal.Release(directlyBoundNestedFolder);
+                    directlyBoundNestedFolder = 0;
+                }
+                var absoluteNestedNameMatches = absoluteNestedNameHr >= 0 &&
+                    PidlBytesEqual(expectedNestedRoot, absoluteNestedNamePidl);
+                Console.WriteLine($"explorerbrowser-registered-namespace: direct-nested-bind-hr=0x{nestedBindHr:X8}; direct-nested-pidl-matches={directlyBoundNestedPidlMatches}; absolute-nested-parse-hr=0x{absoluteNestedNameHr:X8}; absolute-nested-pidl-matches={absoluteNestedNameMatches}");
+                var nestedNavigationPidl = absoluteNestedNameHr >= 0 ? absoluteNestedNamePidl : expectedNestedRoot;
                 try
                 {
-                    NavigateAndWaitForFolder(browser, expectedNestedRoot, 0, classId,
-                        expectedNestedRoot, ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+                    NavigateAndWaitForFolder(browser, nestedNavigationPidl, 0, classId,
+                        nestedNavigationPidl, ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
                     var nestedRowCount = WaitForViewItemCount(folderView, 1);
                     NavigateAndWaitForFolder(browser, 0, SbspParent, classId,
                         expectedChildRoot, ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
                     _ = WaitForViewItemCount(folderView, 2);
                     NavigateAndWaitForFolder(browser, 0, SbspNavigateBack, classId,
-                        expectedNestedRoot, ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+                        nestedNavigationPidl, ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
                     _ = WaitForViewItemCount(folderView, 1);
                     NavigateAndWaitForFolder(browser, 0, SbspNavigateForward, classId,
                         expectedChildRoot, ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
@@ -432,7 +459,11 @@ internal static class ExplorerBrowserWrapperProbe
                         recursiveColumnVisibleAfterForward && nestedRecursiveSizeAfterForward == "10";
                     Console.WriteLine($"explorerbrowser-registered-namespace: nested-pidl-matches=True; nested-row-count={nestedRowCount}; parent-pidl-matches=True; travel-log-back=True; travel-log-forward=True; recursive-column-visible-in-child={recursiveColumnVisibleInChild}; recursive-column-visible-after-forward={recursiveColumnVisibleAfterForward}; nested-size-after-forward={nestedRecursiveSizeAfterForward}; recursive-column-and-value-restored={recursiveColumnAndValueRestored}");
                 }
-                finally { Marshal.FreeCoTaskMem(expectedNestedRoot); }
+                finally
+                {
+                    if (absoluteNestedNamePidl != 0) Marshal.FreeCoTaskMem(absoluteNestedNamePidl);
+                    Marshal.FreeCoTaskMem(expectedNestedRoot);
+                }
 
                 NavigateAndWaitForFolder(browser, rootPidl, 0, classId,
                     rootPidl, ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
@@ -1109,21 +1140,34 @@ internal static class ExplorerBrowserWrapperProbe
         ref nint currentPidl)
     {
         ReleaseActiveFolder(ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
-        Marshal.ThrowExceptionForHR(At<BrowseToIdList>(browser, 13)(browser, targetPidl, flags));
+        var browseHr = At<BrowseToIdList>(browser, 13)(browser, targetPidl, flags);
+        Marshal.ThrowExceptionForHR(browseHr);
+        Console.WriteLine($"explorerbrowser-registered-namespace: navigation-request flags=0x{flags:X8}; browse-hr=0x{browseHr:X8}; expected={ReadAbsoluteParsingName(expectedPidl)}");
         var stopwatch = Stopwatch.StartNew();
+        var actualClassId = Guid.Empty;
+        var actualLocation = "<unavailable>";
         while (true)
         {
             Application.DoEvents();
             ReadActiveFolder(browser, ref shellView, ref folderView, ref viewFolder, ref persist);
-            Marshal.ThrowExceptionForHR(At<GetClassId>(persist, 3)(persist, out var actualClassId));
+            Marshal.ThrowExceptionForHR(At<GetClassId>(persist, 3)(persist, out actualClassId));
             Marshal.ThrowExceptionForHR(At<GetCurFolder>(persist, 5)(persist, out currentPidl));
+            actualLocation = ReadAbsoluteParsingName(currentPidl);
             if (actualClassId == expectedClassId && PidlBytesEqual(expectedPidl, currentPidl)) return;
 
             ReleaseActiveFolder(ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
             if (stopwatch.Elapsed >= TimeSpan.FromSeconds(5))
-                throw new TimeoutException($"ExplorerBrowser did not navigate to the expected wrapped folder for flags 0x{flags:X8}.");
+                throw new TimeoutException($"ExplorerBrowser navigation mismatch: flags=0x{flags:X8}; expected-class={expectedClassId}; actual-class={actualClassId}; expected={ReadAbsoluteParsingName(expectedPidl)}; actual={actualLocation}.");
             Thread.Sleep(20);
         }
+    }
+
+    private static string ReadAbsoluteParsingName(nint pidl)
+    {
+        if (pidl == 0 || SHGetNameFromIDList(pidl, SigdnDesktopAbsoluteParsing, out var pointer) < 0)
+            return "<unavailable>";
+        try { return Marshal.PtrToStringUni(pointer) ?? "<empty>"; }
+        finally { Marshal.FreeCoTaskMem(pointer); }
     }
 
     private static int WaitForViewItemCount(nint folderView, int expectedCount)
