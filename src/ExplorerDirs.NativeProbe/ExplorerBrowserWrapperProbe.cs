@@ -635,6 +635,8 @@ internal static class ExplorerBrowserWrapperProbe
 
             VerifyExplorerBrowserPathIdentityTravel(browser, classId, rootPidl, peerFixture, ref shellView, ref folderView,
                 ref viewFolder, ref persist, ref currentPidl);
+            VerifyConcurrentExplorerBrowserRoots(browser, classId, rootPidl, peerFixture, nativeLibrary,
+                shellView, folderView, viewFolder, currentPidl);
             VerifyExplorerBrowserDestroyDuringRecursiveScan(browser, shellView, viewFolder, nativeLibrary,
                 rootPidl, fixture, ref initialized);
             return 0;
@@ -730,6 +732,94 @@ internal static class ExplorerBrowserWrapperProbe
         foreach (var character in path)
             token.Append(((int)character).ToString("X4", System.Globalization.CultureInfo.InvariantCulture));
         return $"::{{{classId:D}}}\\{token}";
+    }
+
+    private static void VerifyConcurrentExplorerBrowserRoots(nint firstBrowser, Guid classId, nint firstRootPidl,
+        string peerFixture, nint nativeLibrary, nint firstShellView, nint firstFolderView,
+        nint firstViewFolder, nint firstCurrentPidl)
+    {
+        nint browser = 0, parent = 0, peerPidl = 0, shellView = 0, folderView = 0;
+        nint viewFolder = 0, persist = 0, currentPidl = 0;
+        object? browserObject = null;
+        uint initialized = 0;
+        var browserSite = new ShellBrowserSite();
+        Marshal.ThrowExceptionForHR(At<GetItemCount>(firstFolderView, 7)(firstFolderView, 2, out var firstRowsBefore));
+        var firstSizeBefore = ReadViewItemDetailsByName(firstFolderView, firstViewFolder, "child", 1);
+        if (!PidlBytesEqual(firstRootPidl, firstCurrentPidl))
+            throw new InvalidOperationException("The first ExplorerBrowser must be at root A before opening peer root B.");
+        try
+        {
+            var browserClass = BrowserClassId;
+            var browserId = BrowserInterfaceId;
+            Marshal.ThrowExceptionForHR(CoCreateInstance(ref browserClass, 0, 1, ref browserId, out browser));
+            browserObject = Marshal.GetObjectForIUnknown(browser);
+            ShellBrowserSite.SetSite(browserObject, browserSite);
+            parent = CreateWindowExW(0, "STATIC", "ExplorerDirs isolated peer-root ExplorerBrowser",
+                0x90000000, 40, 40, 820, 620, 0, 0, 0, 0);
+            if (parent == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            var bounds = new ProbeRect { Right = 820, Bottom = 620 };
+            var settings = new ProbeFolderSettings { Mode = 4 };
+            Marshal.ThrowExceptionForHR(At<Initialize>(browser, 3)(browser, parent, ref bounds, ref settings));
+            initialized = 1;
+            Marshal.ThrowExceptionForHR(SHParseDisplayName(CreatePathIdentityParsingName(classId, peerFixture),
+                0, out peerPidl, 0, out _));
+            NavigateAndWaitForFolder(browser, peerPidl, 0, classId, peerPidl,
+                ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+            var peerRows = WaitForViewItemCount(folderView, 2);
+            var sizeKey = new PropertyKeyState(new Guid("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 12);
+            var captureHr = ShellColumnManager.Capture(folderView, out var columns);
+            if (captureHr != 0 || columns is null)
+                throw new InvalidOperationException($"Could not capture concurrent peer-root columns: {captureHr}.");
+            var desiredColumns = columns.Any(column => column.Key == sizeKey)
+                ? columns
+                : columns.Append(new DisplayColumnState(sizeKey, 160)).ToArray();
+            if (!columns.Any(column => column.Key == sizeKey))
+                Marshal.ThrowExceptionForHR(ShellColumnManager.Apply(folderView, desiredColumns));
+            var peerSize = ReadViewItemDetailsByName(folderView, viewFolder, "shared-folder", 1);
+
+            var firstPersist = GetPersistFolder2(firstViewFolder);
+            nint firstStillCurrent;
+            try { Marshal.ThrowExceptionForHR(At<GetCurFolder>(firstPersist, 5)(firstPersist, out firstStillCurrent)); }
+            finally { Marshal.Release(firstPersist); }
+            try
+            {
+                Marshal.ThrowExceptionForHR(At<GetItemCount>(firstFolderView, 7)(firstFolderView, 2, out var firstRows));
+                var firstSize = ReadViewItemDetailsByName(firstFolderView, firstViewFolder, "child", 1);
+                if (!PidlBytesEqual(firstRootPidl, firstStillCurrent) || firstRows != firstRowsBefore || firstSize != firstSizeBefore ||
+                    peerRows != 2 || peerSize != "29")
+                    throw new InvalidOperationException($"Concurrent ExplorerBrowser roots crossed state: A rows/size={firstRows}/{firstSize} (before={firstRowsBefore}/{firstSizeBefore}); B rows/size={peerRows}/{peerSize}; A-pidl-matches={PidlBytesEqual(firstRootPidl, firstStillCurrent)}.");
+                Console.WriteLine($"explorerbrowser-concurrent-path-roots: simultaneous=True; A-root-pidl-matches=True; A-rows={firstRows}; A-recursive-size={firstSize}; B-root-pidl-matches=True; B-rows={peerRows}; B-recursive-size={peerSize}; CLSID={classId:B}");
+            }
+            finally { Marshal.FreeCoTaskMem(firstStillCurrent); }
+
+            Marshal.ThrowExceptionForHR(At<Destroy>(browser, 4)(browser));
+            initialized = 0;
+            Marshal.ThrowExceptionForHR(At<GetItemCount>(firstFolderView, 7)(firstFolderView, 2, out var firstRowsAfterPeerDestroy));
+            if (firstCurrentPidl == 0 || !PidlBytesEqual(firstRootPidl, firstCurrentPidl) ||
+                firstRowsAfterPeerDestroy != firstRowsBefore ||
+                ReadViewItemDetailsByName(firstFolderView, firstViewFolder, "child", 1) != firstSizeBefore)
+                throw new InvalidOperationException("Destroying the peer-root ExplorerBrowser disturbed the first root view.");
+            Console.WriteLine("explorerbrowser-concurrent-path-roots: peer-destroy-preserved-first-root=True");
+        }
+        finally
+        {
+            ReleaseActiveFolder(ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+            if (initialized != 0 && browser != 0) _ = At<Destroy>(browser, 4)(browser);
+            if (browserObject is not null && browser != 0) ShellBrowserSite.SetSite(browserObject, null);
+            GC.KeepAlive(browserSite);
+            GC.KeepAlive(browserObject);
+            if (browser != 0) Marshal.Release(browser);
+            if (parent != 0 && IsWindow(parent))
+                Console.WriteLine("explorerbrowser-concurrent-path-roots: peer-parent-destroy-deferred-to-private-desktop-process-exit=True");
+            if (peerPidl != 0) Marshal.FreeCoTaskMem(peerPidl);
+        }
+    }
+
+    private static nint GetPersistFolder2(nint folder)
+    {
+        var iid = PersistFolder2Id;
+        Marshal.ThrowExceptionForHR(Marshal.QueryInterface(folder, in iid, out var persist));
+        return persist;
     }
 
     private static void VerifyExplorerBrowserDestroyDuringRecursiveScan(nint browser, nint shellView,

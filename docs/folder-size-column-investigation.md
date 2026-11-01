@@ -2229,3 +2229,11 @@ NativeProbe 现在直接链接生产 `QdrViewWriter` 与 `QdrImporter` 源码，
 Shell TravelLog 前进后没有自动恢复 B 的自定义列（`shell-restored-column=False`）。隔离宿主重放先前捕获的列集合后，B 的递归值再次读为 29；探针最后回到 A，随后原有递归扫描销毁、菜单/文件操作、通知和卸载断言均通过。Release build 0 警告/错误；Private Desktop 前台及输入守卫通过。
 
 这验证单个 ExplorerBrowser 实例在多个路径根间导航、Shell 历史及宿主重放列状态；不证明两个 ExplorerBrowser 同时承载不同根、应用 SessionStore/TabState 的真实跨标签保存、重启后恢复、持久 ViewStateStore 接线或用户可见验收。产品仍使用当前 ExplorerBrowser 物理文件夹视图，未接入自定义递归列 provider。
+
+### 2026-11-02：两个 ExplorerBrowser 并存承载独立路径根
+
+在上一探针中再创建第二个真实 `IExplorerBrowser`，仍使用同一临时 CLSID，但分别让第一个浏览器停留在根 A，第二个浏览器导航到 peer 根 B。两个窗口同时存在时，A 的 `GetCurFolder` 仍与 A 根 PIDL 完全一致，A 行数及递归大小相较创建第二浏览器前保持不变（本轮为 8 行/88 B）；B 只显示自己的 2 行，`shared-folder` 为 29 B。销毁 B 后，A 的 PIDL、行数和递归值仍维持基线。
+
+Release NativeProbe build 0 警告/错误，完整 `--explorerbrowser-registered-namespace-private-desktop` 探针退出码 0，Private Desktop 守卫通过。此前暴露的固定行数/固定大小断言已改为保存运行时基线，避免把探针前已完成的文件操作误判成串根。
+
+这证明隔离双 ExplorerBrowser 实例可同时承载同 CLSID 下独立物理根，并且销毁一个不会改变另一个。仍未验证产品 Pane/Tab 多实例接线、每 pane 独立 session INI、跨重启列/历史恢复、ExplorerBrowser 状态流的产品持久化或可见体验；产品未改。
