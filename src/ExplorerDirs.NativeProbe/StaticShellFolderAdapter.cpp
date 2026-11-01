@@ -96,7 +96,7 @@ namespace
     volatile LONG g_syntheticChildNotificationTranslationSent = 0;
     volatile LONG g_syntheticTranslateChildNotificationsForProbe = 0;
     volatile LONG g_syntheticAttributeNotificationTranslationCount = 0;
-    volatile LONG g_syntheticRecursiveSizeCacheCapacityForProbe = 2048;
+    volatile LONG g_syntheticRecursiveSizeCacheCapacityForProbe = 4096;
     bool ShouldTranslateSyntheticChildNotification(LONG event)
     {
         // UPDATEITEM carries property changes for an existing child; the custom

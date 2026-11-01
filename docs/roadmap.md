@@ -5820,3 +5820,5 @@ peer SysListView32 现读取 Shell 文件夹的名称、大小、项目类型、
 2026-11-01 递归大小缓存容量诊断：四视图 × 100 目录负载下缓存 2,048 扫描 404 次、0 驱逐；缓存 128 复跑扫描 1,404–3,498 次，instrumented run 记录 1,276 次驱逐。hit/miss 以缓存 API 调用计数。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01共享缓存容量与重复扫描对照)。
 
 2026-11-02 四视图 × 512 目录最小夹具容量配对：容量 2,048 两次扫描 2,219–2,246 次（唯一基线 2,052）、发生 171–198 次驱逐及 8–9 次通知；容量 4,096 无驱逐、扫描精确 2,052 次、通知 4 次，行值及选区/焦点保持，Private Desktop exit 0。多保留 4 个快照的 payload 估算多 1,310 B（不含 map/分配器开销，也不是进程 Private Bytes）。此隔离负载下 4,096 避免重复扫描，仍须测真实产品整体内存影响；递归列未接 ExplorerBrowser。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-02最小夹具验证缓存容量阈值)。
+
+2026-11-02 NativeProbe 默认缓存容量改为 4,096 后，四视图 × 600 目录最小夹具完成 2,404 次唯一扫描，重复/驱逐/队列拒绝均为 0，列值、选择、焦点及 Private Desktop 守卫通过，exit 0。该默认仅用于 NativeProbe，产品配置未变；98,312,192 B Private Bytes 是完整探针进程值，不代表缓存本身。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-02最小夹具验证缓存容量阈值)。

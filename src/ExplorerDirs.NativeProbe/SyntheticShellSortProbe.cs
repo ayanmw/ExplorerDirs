@@ -258,7 +258,7 @@ public static class SyntheticShellSortProbe
     private static int GetRecursiveSizeCacheCapacity()
     {
         var capacityText = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_RECURSIVE_SIZE_CACHE_CAPACITY");
-        var capacity = string.IsNullOrWhiteSpace(capacityText) ? 2048 :
+        var capacity = string.IsNullOrWhiteSpace(capacityText) ? 4096 :
             int.TryParse(capacityText, out var parsedCapacity) ? parsedCapacity : -1;
         if (capacity is < 1 or > 4096)
             throw new ArgumentOutOfRangeException(nameof(capacityText), "The recursive-size cache probe accepts capacities from 1 to 4096.");
