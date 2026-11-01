@@ -2580,3 +2580,11 @@ App 生命周期接线位置仍是：在 `FolderOpenRouter.TryStart` 成功后�
 实现改为合并窗口内用 Shell parsing name 去重累计更新行，窗口到期后逐行发送 `SHCNE_UPDATEITEM`；若期间出现目录级失效则以一个 `SHCNE_UPDATEDIR` 覆盖逐项通知。产品 native adapter `/W4 /WX` 与 NativeProbe Release build 均成功；异步 burst 回归修改后 4/4 轮收到全部 16 个不同项，两目录产品 HostProbe 对照的通知路径 2/2 轮各收到两项，另外一轮在通知齐全后卡在后续排序快照阶段；单次排序命令探针仍观察到 Shell 项数 `0→2→4`，说明不能把通知修复解释为排序稳定。16 项 burst 结束后 Shell ItemCount 与导出快照均稳定为 16。现有 NativeProbe 按需扫描 smoke 与子项通知映射合同通过。延迟排序的稳定性仍按前文记录，未因逐项通知修复而宣告解决。
 
 证据范围：这是加载产品 DLL 的隐藏 ExplorerBrowser HostProbe，父窗口不可见、前台不变、注册和临时夹具自动清理；未覆盖可见列表闪烁、真实多窗格/焦点/选区或大规模磁盘扫描，也没有接入产品 UI 功能开关或发布版本。NativeProbe Private Desktop 复跑在 `cleanup-destroy-parent-window-1` 超时，watch chain 为 COM → svchost → ChsIME，超时前前台/输入未变；不把该清理超时视作功能通过，也未观察到本次通知改动导致的前台副作用。该修复只确保并发完成的行更新都通知 Shell，不承诺 DefView 一定重排，也不改变此前“重排不得造成空列表”的门槛。
+
+### 2026-11-02：逐项通知改用虚拟 namespace PIDL
+
+上节 burst 证据证明通知没有丢项，但两目录 HostProbe 有时在通知到达后观察到 Shell ItemCount 持续增长（4、6、8…），表明用物理 backing-folder PIDL 标识通知项与当前 ExplorerBrowser 正在浏览的合成 namespace PIDL 不一致。现在扫描任务排队时克隆当前虚拟子项 PIDL，并与 provider 根 PIDL 合成绝对 PIDL；合并队列仍按物理 parsing name 去重，但 `SHCNE_UPDATEITEM` 使用对应虚拟绝对 PIDL。遇到目录级失效时继续退回一次物理根 `SHCNE_UPDATEDIR`。
+
+修正后 16 项 burst 连续 5/5 轮均收到全部更新，Shell ItemCount 与导出快照持续为 16，最终顺序稳定为 5、29、101…114 B 升序。重建当前 Native adapter 后另复跑两目录默认排序场景：3 轮中 2 轮通知路径完整但排序采样持续报 ItemCount=4 且导出读值为瞬态错误；1 轮调度排序后恢复 2 行，但观测到 0→2 行。故普通排序路径依旧不稳定，不能并入逐项通知成功结论；这与前文已知的异步重排会短暂清空/扰动 Shell 行数一致。Native adapter `/W4 /WX` 与 NativeProbe Release 均构建通过；异步按需扫描及子项变更映射合同 smoke 通过。PIDL 分配失败路径也会移除待扫描身份，避免同一行永久被认为已有扫描在途。
+
+这仍是隐藏 HostProbe/NativeProbe 证据：未接 App、未进行可见窗口像素/焦点/选区验收，也未改 release。异步值完成后的可靠自动排序仍未解决；本结果只证明正确的行身份通知没有导致重复扩行，并且 burst 后视图稳定。

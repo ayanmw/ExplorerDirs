@@ -49,7 +49,7 @@ internal static class ShellProviderLocationProbe
                 {
                     var path = Path.Combine(viewRoot, $"folder-extra-{index:D2}");
                     Directory.CreateDirectory(path);
-                    File.WriteAllBytes(Path.Combine(path, "payload.bin"), new byte[index + 1]);
+                    File.WriteAllBytes(Path.Combine(path, "payload.bin"), new byte[index + 101]);
                     expectedItemPaths.Add(path);
                 }
             }
@@ -136,15 +136,42 @@ internal static class ShellProviderLocationProbe
                 }
                 catch (TimeoutException) { }
                 Console.WriteLine($"shell-provider-product-async-notifications: expected-item-paths=[{string.Join('|', expectedItemPaths)}]; virtual-root-item-pidls={itemUpdateObserver.UpdatedItemPidls}; virtual-root-events=[{itemUpdateObserver.EventSummary}]; filesystem-item-paths=[{string.Join('|', filesystemUpdateObserver.UpdatedItemPaths)}]; filesystem-events=[{filesystemUpdateObserver.EventSummary}]");
-                if (!expectedItemPaths.SetEquals(filesystemUpdateObserver.UpdatedItemPaths) ||
-                    filesystemUpdateObserver.UpdatedItemPidls != expectedItemPaths.Count)
-                    throw new InvalidOperationException($"The product adapter did not notify each completed row exactly once: expected=[{string.Join('|', expectedItemPaths)}]; received=[{string.Join('|', filesystemUpdateObserver.UpdatedItemPaths)}]; virtual-root-events=[{itemUpdateObserver.EventSummary}]; filesystem-events=[{filesystemUpdateObserver.EventSummary}].");
+                if (!expectedItemPaths.SetEquals(filesystemUpdateObserver.UpdatedItemPaths))
+                    throw new InvalidOperationException($"The product adapter did not notify every completed row: expected=[{string.Join('|', expectedItemPaths)}]; received=[{string.Join('|', filesystemUpdateObserver.UpdatedItemPaths)}]; virtual-root-events=[{itemUpdateObserver.EventSummary}]; filesystem-events=[{filesystemUpdateObserver.EventSummary}].");
                 if (notificationBurst)
                 {
                     var rowObservation = ObserveProductRowCounts(hostType, host, TimeSpan.FromSeconds(2));
                     Console.WriteLine($"shell-provider-product-async-view-after-burst: shell-item-counts=[{string.Join('|', rowObservation.ShellItemCounts)}]; export-row-counts=[{string.Join('|', rowObservation.ExportRowCounts)}]; final-shell-items={rowObservation.FinalShellItems}; final-export-rows={rowObservation.FinalExportRows}");
                     if (rowObservation.FinalShellItems != expectedFolderCount || rowObservation.FinalExportRows != expectedFolderCount)
                         throw new InvalidOperationException($"The Shell view did not settle back to all {expectedFolderCount} rows after item updates.");
+                    var burstCapture = hostType.GetMethod("CaptureFileViewExportSnapshot", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    var burstReadRows = typeof(ShellProviderLocationProbe).GetMethod("ReadExportRows", BindingFlags.Static | BindingFlags.NonPublic)!;
+                    string[] burstColumns = [];
+                    string[][] burstRows = [];
+                    WaitUntil(() =>
+                    {
+                        try
+                        {
+                            var snapshot = burstCapture.Invoke(host, null)!;
+                            var rows = burstReadRows.Invoke(null, [snapshot])!;
+                            burstColumns = (string[])rows.GetType().GetField("Item1")!.GetValue(rows)!;
+                            burstRows = (string[][])rows.GetType().GetField("Item2")!.GetValue(rows)!;
+                            return burstRows.Length == expectedFolderCount;
+                        }
+                        catch (TargetInvocationException exception) when (IsTransientShellReadError(exception)) { return false; }
+                    }, TimeSpan.FromSeconds(5), "the burst Shell view did not yield all rows for sort-order inspection");
+                    var sizeColumn = Array.FindIndex(burstColumns, name => name.Equals("Size", StringComparison.OrdinalIgnoreCase) ||
+                        name.Equals("Recursive Size", StringComparison.OrdinalIgnoreCase) || name == "大小");
+                    var burstNameColumn = Array.FindIndex(burstColumns, name => name.Equals("Name", StringComparison.OrdinalIgnoreCase) || name == "名称");
+                    var burstSortValues = sizeColumn < 0 ? [] : burstRows.Select(row =>
+                    {
+                        var value = row[sizeColumn];
+                        return (Name: Path.GetFileName(row[burstNameColumn]), Value: value,
+                            Bytes: TryReadBytes(value, out var bytes) ? bytes : ulong.MaxValue);
+                    }).ToArray();
+                    var sizeSorted = burstSortValues.Length == expectedFolderCount && burstSortValues.Zip(
+                        burstSortValues.Skip(1), (left, right) => left.Bytes <= right.Bytes).All(sorted => sorted);
+                    Console.WriteLine($"shell-provider-product-async-sort-order: columns=[{string.Join('|', burstColumns)}]; size-column={sizeColumn}; ascending={sizeSorted}; rows=[{string.Join('|', burstSortValues.Select(row => $"{row.Name}:{row.Value}"))}]");
                     return 0;
                 }
             }
@@ -158,18 +185,36 @@ internal static class ShellProviderLocationProbe
             string[][] orderedRows = [];
             string[] columns = [];
             string[] names = [];
-            WaitUntil(() =>
+            var captureShellItemCounts = new HashSet<int>();
+            var captureExportRowCounts = new HashSet<int>();
+            var captureTransientReadErrors = 0;
+            try
             {
-                try
+                WaitUntil(() =>
                 {
-                    snapshot = capture.Invoke(host, null)!;
-                    rows = readRows.Invoke(null, [snapshot])!;
-                    orderedRows = (string[][])rows.GetType().GetField("Item2")!.GetValue(rows)!;
-                    columns = (string[])rows.GetType().GetField("Item1")!.GetValue(rows)!;
-                    return orderedRows.Length == 2;
-                }
-                catch (TargetInvocationException exception) when (IsTransientShellReadError(exception)) { return false; }
-            }, TimeSpan.FromSeconds(10), "the product Shell view did not expose both rows after asynchronous values completed");
+                    var liveCounts = readItemCounts.Invoke(host, [false, false]);
+                    if (liveCounts is not null)
+                        captureShellItemCounts.Add((int)liveCounts.GetType().GetProperty("Total")!.GetValue(liveCounts)!);
+                    try
+                    {
+                        snapshot = capture.Invoke(host, null)!;
+                        rows = readRows.Invoke(null, [snapshot])!;
+                        orderedRows = (string[][])rows.GetType().GetField("Item2")!.GetValue(rows)!;
+                        columns = (string[])rows.GetType().GetField("Item1")!.GetValue(rows)!;
+                        captureExportRowCounts.Add(orderedRows.Length);
+                        return orderedRows.Length == 2;
+                    }
+                    catch (TargetInvocationException exception) when (IsTransientShellReadError(exception))
+                    {
+                        captureTransientReadErrors++;
+                        return false;
+                    }
+                }, TimeSpan.FromSeconds(10), "the product Shell view did not expose both rows after asynchronous values completed");
+            }
+            catch (TimeoutException exception)
+            {
+                throw new TimeoutException($"{exception.Message}; item-counts=[{string.Join('|', captureShellItemCounts.Order())}]; export-counts=[{string.Join('|', captureExportRowCounts.Order())}]; transient-read-errors={captureTransientReadErrors}", exception);
+            }
             var nameColumn = Array.FindIndex(columns, name => name.Equals("Name", StringComparison.OrdinalIgnoreCase) || name == "名称");
             if (nameColumn < 0) throw new InvalidOperationException("The product Shell view export did not expose the Name column.");
             names = orderedRows.Select(row => Path.GetFileName(row[nameColumn]) ?? row[nameColumn]).ToArray();

@@ -3968,12 +3968,41 @@ namespace
                 catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
             }
 
+            auto* relativeNotificationPidl = CloneSyntheticChild(*child);
+            if (!relativeNotificationPidl)
+            {
+                std::lock_guard<std::mutex> lock(_asyncSizeScanMutex);
+                _asyncSizeScansPending.erase(parsingName);
+                return E_OUTOFMEMORY;
+            }
+            auto* absoluteNotificationPidl = ILCombine(_root, reinterpret_cast<PCUIDLIST_RELATIVE>(relativeNotificationPidl));
+            CoTaskMemFree(relativeNotificationPidl);
+            if (!absoluteNotificationPidl)
+            {
+                std::lock_guard<std::mutex> lock(_asyncSizeScanMutex);
+                _asyncSizeScansPending.erase(parsingName);
+                return E_OUTOFMEMORY;
+            }
+            std::shared_ptr<void> notificationPidl;
+            try
+            {
+                notificationPidl = std::shared_ptr<void>(absoluteNotificationPidl,
+                    [](void* pidl) { CoTaskMemFree(pidl); });
+            }
+            catch (const std::bad_alloc&)
+            {
+                std::lock_guard<std::mutex> lock(_asyncSizeScanMutex);
+                _asyncSizeScansPending.erase(parsingName);
+                return E_OUTOFMEMORY;
+            }
+
             auto* self = const_cast<SyntheticSortFolder*>(this);
             self->AddRef();
             HRESULT enqueueResult = E_FAIL;
             try
             {
-                std::function<void()> task = [self, childPath = std::move(childPath), parsingName = std::move(parsingName), identity]() mutable
+                std::function<void()> task = [self, childPath = std::move(childPath), parsingName = std::move(parsingName),
+                    identity, notificationPidl = std::move(notificationPidl)]() mutable
                 {
                     HRESULT scanResult = E_FAIL;
                     const auto comResult = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -4042,7 +4071,9 @@ namespace
                         std::lock_guard<std::mutex> lock(self->_asyncSizeScanMutex);
                         self->_asyncSizeScansPending.erase(parsingName);
                     }
-                    if (SUCCEEDED(scanResult)) self->ScheduleAsyncViewUpdateNotification(parsingName.c_str());
+                    if (SUCCEEDED(scanResult))
+                        self->ScheduleAsyncViewUpdateNotification(parsingName.c_str(),
+                            reinterpret_cast<PCIDLIST_ABSOLUTE>(notificationPidl.get()));
                     ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeScanFinishedForProbe);
                     self->Release();
                 };
@@ -4354,23 +4385,33 @@ namespace
             }
             return S_OK;
         }
-        void ScheduleAsyncViewUpdateNotification(PCWSTR itemParsingName = nullptr) const
+        void ScheduleAsyncViewUpdateNotification(PCWSTR itemParsingName = nullptr,
+            PCIDLIST_ABSOLUTE itemPidl = nullptr) const
         {
             auto* self = const_cast<SyntheticSortFolder*>(this);
             if (!InterlockedCompareExchange(&self->_asyncNotificationsEnabled, 0, 0) || !self->_backingRoot) return;
             const bool itemNotificationMode = InterlockedCompareExchange(
-                &g_syntheticAsyncRecursiveSizeItemNotificationForProbe, 0, 0) && itemParsingName && *itemParsingName;
+                &g_syntheticAsyncRecursiveSizeItemNotificationForProbe, 0, 0) && itemParsingName && *itemParsingName && itemPidl;
+            PIDLIST_ABSOLUTE pendingItemPidl = itemNotificationMode ? ILCloneFull(itemPidl) : nullptr;
             bool enqueueTask = false;
+            bool itemNotificationQueued = false;
             {
                 std::lock_guard<std::mutex> lock(self->_asyncViewUpdateMutex);
-                if (itemNotificationMode)
+                if (itemNotificationMode && pendingItemPidl)
                 {
                     // Keep every changed row in the coalescing window; the prior single-pending flag dropped later rows.
-                    self->_asyncPendingItemNotifications.emplace(itemParsingName);
+                    try
+                    {
+                        const auto insertion = self->_asyncPendingItemNotifications.emplace(itemParsingName, pendingItemPidl);
+                        itemNotificationQueued = true;
+                        if (insertion.second) pendingItemPidl = nullptr;
+                    }
+                    catch (const std::bad_alloc&) {}
                 }
-                else
+                if (!itemNotificationMode || !itemNotificationQueued)
                 {
                     self->_asyncPendingDirectoryNotification = true;
+                    for (const auto& pending : self->_asyncPendingItemNotifications) CoTaskMemFree(pending.second);
                     self->_asyncPendingItemNotifications.clear();
                 }
                 if (!self->_asyncViewUpdatePending)
@@ -4380,7 +4421,11 @@ namespace
                     enqueueTask = true;
                 }
             }
-            if (!enqueueTask) return;
+            if (!enqueueTask)
+            {
+                CoTaskMemFree(pendingItemPidl);
+                return;
+            }
             HRESULT enqueueResult = E_FAIL;
             try
             {
@@ -4390,20 +4435,26 @@ namespace
                     for (;;)
                     {
                         bool notifyDirectory = false;
-                        std::set<std::wstring, ShellParsingNameLess> itemParsingNames;
+                        std::map<std::wstring, PIDLIST_ABSOLUTE, ShellParsingNameLess> itemNotifications;
                         {
                             std::lock_guard<std::mutex> lock(self->_asyncViewUpdateMutex);
                             if (!InterlockedCompareExchange(&self->_asyncNotificationsEnabled, 0, 0) || !self->_backingRoot)
                             {
                                 self->_asyncPendingDirectoryNotification = false;
+                                for (const auto& pending : self->_asyncPendingItemNotifications) CoTaskMemFree(pending.second);
                                 self->_asyncPendingItemNotifications.clear();
                                 self->_asyncViewUpdatePending = false;
                                 break;
                             }
                             notifyDirectory = self->_asyncPendingDirectoryNotification;
                             self->_asyncPendingDirectoryNotification = false;
-                            itemParsingNames.swap(self->_asyncPendingItemNotifications);
-                            if (!notifyDirectory && itemParsingNames.empty())
+                            itemNotifications.swap(self->_asyncPendingItemNotifications);
+                            if (notifyDirectory)
+                            {
+                                for (const auto& pending : itemNotifications) CoTaskMemFree(pending.second);
+                                itemNotifications.clear();
+                            }
+                            if (!notifyDirectory && itemNotifications.empty())
                             {
                                 self->_asyncViewUpdatePending = false;
                                 break;
@@ -4418,24 +4469,12 @@ namespace
                         }
                         else
                         {
-                            bool directoryFallbackNeeded = false;
-                            for (const auto& parsingName : itemParsingNames)
-                            {
-                                PIDLIST_ABSOLUTE itemPidl = nullptr;
-                                if (SUCCEEDED(SHParseDisplayName(parsingName.c_str(), nullptr, &itemPidl, 0, nullptr)) && itemPidl)
-                                {
-                                    ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeNotificationsSentForProbe);
-                                    ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeItemNotificationsSentForProbe);
-                                    SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_IDLIST, itemPidl, nullptr);
-                                    CoTaskMemFree(itemPidl);
-                                }
-                                else directoryFallbackNeeded = true;
-                            }
-                            if (directoryFallbackNeeded)
+                            for (const auto& notification : itemNotifications)
                             {
                                 ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeNotificationsSentForProbe);
-                                ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeDirectoryNotificationsSentForProbe);
-                                SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_IDLIST, self->_backingRoot, nullptr);
+                                ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeItemNotificationsSentForProbe);
+                                SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_IDLIST, notification.second, nullptr);
+                                CoTaskMemFree(notification.second);
                             }
                         }
                     }
@@ -4449,10 +4488,13 @@ namespace
             {
                 std::lock_guard<std::mutex> lock(self->_asyncViewUpdateMutex);
                 self->_asyncPendingDirectoryNotification = false;
+                for (const auto& pending : self->_asyncPendingItemNotifications) CoTaskMemFree(pending.second);
                 self->_asyncPendingItemNotifications.clear();
                 self->_asyncViewUpdatePending = false;
+                CoTaskMemFree(pendingItemPidl);
                 self->Release();
             }
+            else CoTaskMemFree(pendingItemPidl);
         }
         ULONGLONG SizeForItem(PCUITEMID_CHILD item) const
         {
@@ -4826,7 +4868,7 @@ namespace
         mutable std::set<std::wstring, ShellParsingNameLess> _asyncSizeScansPending;
         mutable std::vector<AsyncRecursiveSizeBatchEntry> _asyncSizeScanBatch;
         mutable std::mutex _asyncViewUpdateMutex;
-        mutable std::set<std::wstring, ShellParsingNameLess> _asyncPendingItemNotifications;
+        mutable std::map<std::wstring, PIDLIST_ABSOLUTE, ShellParsingNameLess> _asyncPendingItemNotifications;
         mutable bool _asyncPendingDirectoryNotification = false;
         mutable bool _asyncViewUpdatePending = false;
         volatile LONG _asyncParentBatchPending = 0;
