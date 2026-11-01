@@ -36,6 +36,18 @@ namespace
         WriteFile(output, "\r\n", 2, &written, nullptr);
     }
 
+    void TraceSyntheticFolderStage(const char* stage, const std::wstring& backingPath, HRESULT result)
+    {
+        char pathUtf8[1024]{};
+        if (!backingPath.empty())
+            WideCharToMultiByte(CP_UTF8, 0, backingPath.c_str(), -1, pathUtf8,
+                static_cast<int>(ARRAYSIZE(pathUtf8)), nullptr, nullptr);
+        char message[1400]{};
+        sprintf_s(message, "synthetic-sort: %s; hr=0x%08X; backing-path=%s",
+            stage, static_cast<unsigned>(result), pathUtf8);
+        TraceSyntheticSortStage(message);
+    }
+
     void TraceSyntheticNotificationPidl(LONG event, unsigned index, PCIDLIST_ABSOLUTE pidl)
     {
         if (!pidl)
@@ -2899,6 +2911,8 @@ namespace
             if (!_inner) return E_UNEXPECTED;
             const auto* child = SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(item));
             if (!child) return E_INVALIDARG;
+            const bool traceNested = _wcsicmp(child->name, L"nested") == 0;
+            if (traceNested) TraceSyntheticFolderStage("BindToObject-nested-enter", _backingPath, S_OK);
             PITEMID_CHILD original = nullptr;
             auto result = _inner->ParseDisplayName(nullptr, bind, const_cast<LPWSTR>(child->name), nullptr, &original, nullptr);
             if (FAILED(result)) return result;
@@ -2958,6 +2972,7 @@ namespace
             result = hasRemaining
                 ? nested->BindToObject(remaining, bind, iid, value)
                 : nested->QueryInterface(iid, value);
+            if (traceNested) TraceSyntheticFolderStage("BindToObject-nested-return", nested->_backingPath, result);
             nested->Release();
             return result;
         }
@@ -3040,7 +3055,10 @@ namespace
             create.cbSize = sizeof(create);
             create.pshf = this;
             create.psfvcb = static_cast<IShellFolderViewCB*>(this);
+            TraceSyntheticFolderStage("CreateViewObject-IShellView-enter", _backingPath, S_OK);
             const auto result = SHCreateShellFolderView(&create, reinterpret_cast<IShellView**>(value));
+            TraceSyntheticFolderStage(*value ? "CreateViewObject-IShellView-return-view" : "CreateViewObject-IShellView-return-null",
+                _backingPath, result);
             if (SUCCEEDED(result) && *value && !_shellView)
             {
                 for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
