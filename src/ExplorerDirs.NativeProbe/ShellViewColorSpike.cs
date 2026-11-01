@@ -2936,13 +2936,40 @@ internal static class ShellViewColorSpike
                 if (refusalPreservedSource) return 0;
             }
 
-            var folderChildIndex = selectedNames.FindIndex(name =>
-                name.Equals("virtual-folder", StringComparison.OrdinalIgnoreCase));
+            nint currentFolderChild = 0;
+            var currentFolderCount = GetShellViewItemCount(folderView);
+            for (var index = 0; index < currentFolderCount; index++)
+            {
+                Check(At<GetFolderItem>(folderView, 6)(folderView, index, out var child));
+                nint absolute = 0;
+                var isFolder = false;
+                var retainChild = false;
+                try
+                {
+                    absolute = ILCombine(folderPidl, child);
+                    if (absolute == 0) throw new InvalidOperationException("Could not combine the current ZIP folder child PIDL.");
+                    isFolder = ShellListViewRowIdentity.Capture(folder, child, absolute, ref systemImageList).DisplayName
+                        .Equals("virtual-folder", StringComparison.OrdinalIgnoreCase);
+                    retainChild = isFolder;
+                }
+                finally
+                {
+                    if (absolute != 0) Marshal.FreeCoTaskMem(absolute);
+                    if (!retainChild) Marshal.FreeCoTaskMem(child);
+                }
+                if (isFolder)
+                {
+                    currentFolderChild = child;
+                    break;
+                }
+            }
+            if (currentFolderChild == 0)
+                throw new IOException("The current ZIP view no longer exposes virtual-folder after the preceding file move.");
             nint folderChildArray = 0, folderDataObject = 0, folderDestination = 0, folderOperation = 0;
             try
             {
                 folderChildArray = Marshal.AllocHGlobal(IntPtr.Size);
-                Marshal.WriteIntPtr(folderChildArray, selectedChildren[folderChildIndex]);
+                Marshal.WriteIntPtr(folderChildArray, currentFolderChild);
                 Check(At<GetUIObjectOf>(folder, 10)(folder, parent, 1, folderChildArray,
                     in dataObjectId, 0, out folderDataObject));
                 if (folderDataObject == 0) throw new InvalidOperationException("The ZIP folder entry did not provide an IDataObject for MoveItems.");
