@@ -106,18 +106,26 @@ public static class SyntheticShellSortProbe
         var fixture = Path.Combine(Path.GetTempPath(), $"ExplorerDirs-AsyncOnDemandRecursiveSize-{Guid.NewGuid():N}");
         try
         {
-            Directory.CreateDirectory(Path.Combine(fixture, "child", "nested-folder"));
-            File.WriteAllBytes(Path.Combine(fixture, "child", "direct.bin"), [1, 2, 3, 4, 5, 6]);
-            File.WriteAllBytes(Path.Combine(fixture, "child", "nested-folder", "nested.bin"), [1, 2, 3, 4]);
+            for (var index = 0; index < 16; index++)
+            {
+                var child = Path.Combine(fixture, $"child-{index:D2}");
+                Directory.CreateDirectory(Path.Combine(child, "nested-folder"));
+                File.WriteAllBytes(Path.Combine(child, "direct.bin"), [1, 2, 3, 4, 5, 6]);
+                File.WriteAllBytes(Path.Combine(child, "nested-folder", "nested.bin"), [1, 2, 3, 4]);
+            }
             var module = NativeLibrary.Load(FindAdapterLibrary());
             try
             {
                 var check = Marshal.GetDelegateForFunctionPointer<FolderTreeContractSmoke>(
                     NativeLibrary.GetExport(module, "RunSyntheticAsyncOnDemandRecursiveSizeColumnSmoke"));
                 Check(check(fixture));
+                var peakWorkers = Marshal.GetDelegateForFunctionPointer<GetCounter>(
+                    NativeLibrary.GetExport(module, "GetSyntheticAsyncRecursiveSizePeakWorkerCountForProbe"))();
+                if (peakWorkers != 2)
+                    throw new InvalidOperationException($"Expected the bounded async scanner to use its two worker slots, got {peakWorkers}.");
             }
             finally { NativeLibrary.Free(module); }
-            Console.WriteLine("synthetic-async-on-demand-recursive-size-column-smoke: first-value-read-returns-before-scan=True; worker-publishes-10-bytes=True; repeated-value-read-uses-cache=True; shell-view-created=False");
+            Console.WriteLine("synthetic-async-on-demand-recursive-size-column-smoke: first-value-read-returns-before-scan=True; worker-publishes-10-bytes=True; repeated-value-read-uses-cache=True; peak-workers=2-of-2; shell-view-created=False");
             return 0;
         }
         finally { Directory.Delete(fixture, recursive: true); }
@@ -1366,6 +1374,9 @@ public static class SyntheticShellSortProbe
         }
         finally
         {
+            if (module != 0 && asyncOnDemandRecursiveSize)
+                Marshal.GetDelegateForFunctionPointer<ReleaseViewHold>(NativeLibrary.GetExport(module,
+                    "ReleaseSyntheticSortViewHold"))();
             // Destroy Shell's child windows while the view, browser site, and folder objects they call back into are still alive.
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-destroy-view-window-1");
             if (viewWindowCreated && view != 0) _ = At<DestroyViewWindow>(view, 10)(view);

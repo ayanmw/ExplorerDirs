@@ -8,9 +8,12 @@
 #include <propkey.h>
 #include <strsafe.h>
 #include <algorithm>
+#include <condition_variable>
+#include <functional>
 #include <map>
 #include <new>
 #include <mutex>
+#include <queue>
 #include <set>
 #include <string>
 #include <thread>
@@ -1589,10 +1592,99 @@ namespace
     volatile LONG g_syntheticAsyncRecursiveSizeScanForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeScanCompletedForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeScanFinishedForProbe = 0;
+    volatile LONG g_syntheticAsyncRecursiveSizeActiveWorkersForProbe = 0;
+    volatile LONG g_syntheticAsyncRecursiveSizePeakWorkersForProbe = 0;
     HANDLE g_syntheticAsyncRecursiveSizeScanGateForProbe = nullptr;
     volatile LONG g_syntheticExtendedMetadataColumnsForProbe = 0;
     volatile LONG g_syntheticRelativePercentColumnTypeForProbe = SHCOLSTATE_TYPE_INT;
     volatile LONG64 g_syntheticChildSizeOverride = -1;
+
+    class SyntheticAsyncRecursiveSizeQueue
+    {
+    public:
+        static constexpr size_t kWorkerCount = 2;
+        static constexpr size_t kMaximumQueuedTasks = 256;
+
+        SyntheticAsyncRecursiveSizeQueue()
+        {
+            try
+            {
+                _workers.reserve(kWorkerCount);
+                for (size_t index = 0; index < kWorkerCount; ++index)
+                    _workers.emplace_back([this] { WorkerLoop(); });
+            }
+            catch (...)
+            {
+                {
+                    std::lock_guard<std::mutex> lock(_mutex);
+                    _stopping = true;
+                }
+                _ready.notify_all();
+                for (auto& worker : _workers) if (worker.joinable()) worker.join();
+                throw;
+            }
+        }
+
+        ~SyntheticAsyncRecursiveSizeQueue()
+        {
+            {
+                std::lock_guard<std::mutex> lock(_mutex);
+                _stopping = true;
+            }
+            _ready.notify_all();
+            for (auto& worker : _workers) if (worker.joinable()) worker.join();
+        }
+
+        HRESULT Enqueue(std::function<void()>&& task)
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            if (_stopping) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
+            if (_tasks.size() >= kMaximumQueuedTasks) return HRESULT_FROM_WIN32(ERROR_NOT_ENOUGH_QUOTA);
+            try { _tasks.push(std::move(task)); }
+            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+            _ready.notify_one();
+            return S_OK;
+        }
+
+    private:
+        void WorkerLoop()
+        {
+            for (;;)
+            {
+                std::function<void()> task;
+                {
+                    std::unique_lock<std::mutex> lock(_mutex);
+                    _ready.wait(lock, [this] { return _stopping || !_tasks.empty(); });
+                    if (_stopping && _tasks.empty()) return;
+                    task = std::move(_tasks.front());
+                    _tasks.pop();
+                }
+                const auto active = InterlockedIncrement(&g_syntheticAsyncRecursiveSizeActiveWorkersForProbe);
+                auto peak = InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizePeakWorkersForProbe, 0, 0);
+                while (active > peak)
+                {
+                    const auto observed = InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizePeakWorkersForProbe, active, peak);
+                    if (observed == peak) break;
+                    peak = observed;
+                }
+                try { task(); }
+                catch (...) { TraceSyntheticSortStage("synthetic-on-demand-size: queued-worker-task-threw"); }
+                InterlockedDecrement(&g_syntheticAsyncRecursiveSizeActiveWorkersForProbe);
+            }
+        }
+
+        std::mutex _mutex;
+        std::condition_variable _ready;
+        std::queue<std::function<void()>> _tasks;
+        std::vector<std::thread> _workers;
+        bool _stopping = false;
+    };
+
+    SyntheticAsyncRecursiveSizeQueue& GetSyntheticAsyncRecursiveSizeQueue()
+    {
+        static SyntheticAsyncRecursiveSizeQueue queue;
+        return queue;
+    }
 
     std::wstring FormatSyntheticSizeText(ULONGLONG bytes)
     {
@@ -2687,6 +2779,8 @@ namespace
                         AddRef();
                         _shellView = static_cast<IShellView*>(*value);
                         _shellView->AddRef();
+                        InterlockedExchange(&_asyncScansCancelled, 0);
+                        InterlockedExchange(&_asyncNotificationsEnabled, 1);
                         break;
                     }
                 }
@@ -3006,6 +3100,8 @@ namespace
         }
         void ReleaseViewHold()
         {
+            InterlockedExchange(&_asyncNotificationsEnabled, 0);
+            InterlockedExchange(&_asyncScansCancelled, 1);
             auto* view = _shellView;
             _shellView = nullptr;
             if (view) view->Release();
@@ -3150,69 +3246,92 @@ namespace
 
             auto* self = const_cast<SyntheticSortFolder*>(this);
             self->AddRef();
+            HRESULT enqueueResult = E_FAIL;
             try
             {
-                std::thread([self, childPath = std::move(childPath), parsingName = std::move(parsingName), identity]()
+                std::function<void()> task = [self, childPath = std::move(childPath), parsingName = std::move(parsingName), identity]() mutable
                 {
+                    HRESULT scanResult = E_FAIL;
                     const auto comResult = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-                    HRESULT scanResult = SUCCEEDED(comResult) ? S_OK : comResult;
-                    auto gate = g_syntheticAsyncRecursiveSizeScanGateForProbe;
-                    if (SUCCEEDED(scanResult) && gate && WaitForSingleObject(static_cast<HANDLE>(gate), 10000) != WAIT_OBJECT_0)
-                        scanResult = HRESULT_FROM_WIN32(ERROR_TIMEOUT);
-
-                    const SyntheticFileIdentityLess less{};
-                    SyntheticFileIdentity beforeScan{};
-                    SyntheticDirectoryMetrics metrics{};
-                    if (SUCCEEDED(scanResult) && !TryGetSyntheticFileIdentity(childPath.c_str(), &beforeScan))
-                        scanResult = HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
-                    if (SUCCEEDED(scanResult) && (!beforeScan.available || less(beforeScan, identity) || less(identity, beforeScan)))
-                        scanResult = HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
-                    if (SUCCEEDED(scanResult))
+                    if (SUCCEEDED(comResult))
                     {
-                        LARGE_INTEGER frequency{}, scanStart{}, scanEnd{};
-                        QueryPerformanceFrequency(&frequency);
-                        QueryPerformanceCounter(&scanStart);
-                        scanResult = GetSyntheticDirectoryMetrics(childPath, &metrics);
-                        QueryPerformanceCounter(&scanEnd);
-                        InterlockedIncrement(&g_syntheticOnDemandSizeScanCount);
-                        if (frequency.QuadPart > 0 && scanEnd.QuadPart >= scanStart.QuadPart)
+                        try
                         {
-                            const auto elapsedTicks = scanEnd.QuadPart - scanStart.QuadPart;
-                            const auto elapsedMicroseconds = static_cast<LONG64>(
-                                static_cast<long double>(elapsedTicks) * 1000000.0L / static_cast<long double>(frequency.QuadPart));
-                            InterlockedAdd64(&g_syntheticOnDemandSizeScanMicroseconds, elapsedMicroseconds);
+                            scanResult = InterlockedCompareExchange(&self->_asyncScansCancelled, 0, 0)
+                                ? HRESULT_FROM_WIN32(ERROR_CANCELLED) : S_OK;
+                            auto gate = g_syntheticAsyncRecursiveSizeScanGateForProbe;
+                            if (SUCCEEDED(scanResult) && gate && WaitForSingleObject(static_cast<HANDLE>(gate), 10000) != WAIT_OBJECT_0)
+                                scanResult = HRESULT_FROM_WIN32(ERROR_TIMEOUT);
+                            if (SUCCEEDED(scanResult) && InterlockedCompareExchange(&self->_asyncScansCancelled, 0, 0))
+                                scanResult = HRESULT_FROM_WIN32(ERROR_CANCELLED);
+
+                            const SyntheticFileIdentityLess less{};
+                            SyntheticFileIdentity beforeScan{};
+                            SyntheticDirectoryMetrics metrics{};
+                            if (SUCCEEDED(scanResult) && !TryGetSyntheticFileIdentity(childPath.c_str(), &beforeScan))
+                                scanResult = HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
+                            if (SUCCEEDED(scanResult) && (!beforeScan.available || less(beforeScan, identity) || less(identity, beforeScan)))
+                                scanResult = HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
+                            if (SUCCEEDED(scanResult))
+                            {
+                                LARGE_INTEGER frequency{}, scanStart{}, scanEnd{};
+                                QueryPerformanceFrequency(&frequency);
+                                QueryPerformanceCounter(&scanStart);
+                                scanResult = GetSyntheticDirectoryMetrics(childPath, &metrics);
+                                QueryPerformanceCounter(&scanEnd);
+                                InterlockedIncrement(&g_syntheticOnDemandSizeScanCount);
+                                if (frequency.QuadPart > 0 && scanEnd.QuadPart >= scanStart.QuadPart)
+                                {
+                                    const auto elapsedTicks = scanEnd.QuadPart - scanStart.QuadPart;
+                                    const auto elapsedMicroseconds = static_cast<LONG64>(
+                                        static_cast<long double>(elapsedTicks) * 1000000.0L / static_cast<long double>(frequency.QuadPart));
+                                    InterlockedAdd64(&g_syntheticOnDemandSizeScanMicroseconds, elapsedMicroseconds);
+                                }
+                            }
+                            SyntheticFileIdentity afterScan{};
+                            if (SUCCEEDED(scanResult) && !TryGetSyntheticFileIdentity(childPath.c_str(), &afterScan))
+                                scanResult = HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
+                            if (SUCCEEDED(scanResult) && (!afterScan.available || less(beforeScan, afterScan) || less(afterScan, beforeScan)))
+                                scanResult = HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
+                            if (SUCCEEDED(scanResult) && InterlockedCompareExchange(&self->_asyncScansCancelled, 0, 0))
+                                scanResult = HRESULT_FROM_WIN32(ERROR_CANCELLED);
+                            if (SUCCEEDED(scanResult))
+                                scanResult = self->_recursiveSizeStore->Set(parsingName.c_str(), afterScan, metrics.bytes);
+                            if (SUCCEEDED(scanResult))
+                            {
+                                InterlockedIncrement(&g_syntheticAsyncRecursiveSizeScanCompletedForProbe);
+                                if (InterlockedCompareExchange(&self->_asyncNotificationsEnabled, 0, 0) && self->_backingRoot)
+                                    SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_IDLIST, self->_backingRoot, nullptr);
+                            }
+                            else if (scanResult != HRESULT_FROM_WIN32(ERROR_CANCELLED))
+                                TraceSyntheticSortStage("synthetic-on-demand-size: asynchronous-scan-failed");
                         }
+                        catch (...)
+                        {
+                            scanResult = E_FAIL;
+                            TraceSyntheticSortStage("synthetic-on-demand-size: asynchronous-scan-threw");
+                        }
+                        CoUninitialize();
                     }
-                    SyntheticFileIdentity afterScan{};
-                    if (SUCCEEDED(scanResult) && !TryGetSyntheticFileIdentity(childPath.c_str(), &afterScan))
-                        scanResult = HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
-                    if (SUCCEEDED(scanResult) && (!afterScan.available || less(beforeScan, afterScan) || less(afterScan, beforeScan)))
-                        scanResult = HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
-                    if (SUCCEEDED(scanResult))
-                        scanResult = self->_recursiveSizeStore->Set(parsingName.c_str(), afterScan, metrics.bytes);
+                    else TraceSyntheticSortStage("synthetic-on-demand-size: worker-com-initialize-failed");
 
                     {
                         std::lock_guard<std::mutex> lock(self->_asyncSizeScanMutex);
                         self->_asyncSizeScansPending.erase(parsingName);
                     }
                     InterlockedIncrement(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe);
-                    if (SUCCEEDED(scanResult))
-                    {
-                        InterlockedIncrement(&g_syntheticAsyncRecursiveSizeScanCompletedForProbe);
-                        if (self->_shellView && self->_backingRoot)
-                            SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_IDLIST, self->_backingRoot, nullptr);
-                    }
-                    else TraceSyntheticSortStage("synthetic-on-demand-size: asynchronous-scan-failed");
-                    if (SUCCEEDED(comResult)) CoUninitialize();
                     self->Release();
-                }).detach();
+                };
+                enqueueResult = GetSyntheticAsyncRecursiveSizeQueue().Enqueue(std::move(task));
             }
-            catch (const std::system_error&)
+            catch (const std::bad_alloc&) { enqueueResult = E_OUTOFMEMORY; }
+            catch (const std::system_error&) { enqueueResult = E_FAIL; }
+            if (FAILED(enqueueResult))
             {
                 std::lock_guard<std::mutex> lock(_asyncSizeScanMutex);
                 _asyncSizeScansPending.erase(parsingName);
                 self->Release();
-                return E_FAIL;
+                return enqueueResult;
             }
             return S_OK;
         }
@@ -3571,6 +3690,8 @@ namespace
         std::vector<SyntheticChild> _pendingSelected;
         mutable std::mutex _asyncSizeScanMutex;
         mutable std::set<std::wstring, ShellParsingNameLess> _asyncSizeScansPending;
+        volatile LONG _asyncScansCancelled = 0;
+        volatile LONG _asyncNotificationsEnabled = 0;
         SyntheticChild _pendingFocused{};
         bool _pendingHasFocused = false;
         volatile LONG _refreshPending = 0;
@@ -4727,6 +4848,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticAsyncOnDemandRecursi
     g_syntheticAsyncRecursiveSizeScanGateForProbe = gate;
     InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanCompletedForProbe, 0);
     InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0);
+    InterlockedExchange(&g_syntheticAsyncRecursiveSizePeakWorkersForProbe, 0);
     InterlockedExchange(&g_syntheticOnDemandSizeScanCount, 0);
     InterlockedExchange(&g_syntheticDirectoryMetricsCallCount, 0);
     InterlockedExchange(&g_syntheticDirectoryMetricsEntryCount, 0);
@@ -4735,7 +4857,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticAsyncOnDemandRecursi
     PIDLIST_ABSOLUTE rootPidl = nullptr;
     SyntheticSortFolder* root = nullptr;
     IEnumIDList* enumerator = nullptr;
-    PITEMID_CHILD item = nullptr;
+    std::vector<PITEMID_CHILD> items;
     if (SUCCEEDED(result)) result = SHParseDisplayName(backingPath, nullptr, &rootPidl, 0, nullptr);
     if (SUCCEEDED(result))
     {
@@ -4744,39 +4866,109 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticAsyncOnDemandRecursi
     }
     if (SUCCEEDED(result)) result = root->Initialize(rootPidl);
     if (SUCCEEDED(result)) result = root->EnumObjects(nullptr, SHCONTF_FOLDERS, &enumerator);
-    ULONG fetched = 0;
-    if (SUCCEEDED(result)) result = enumerator->Next(1, &item, &fetched);
-    const auto* child = SyntheticData(item);
-    if (SUCCEEDED(result) && (result != S_OK || fetched != 1 || !child || !(child->attributes & FILE_ATTRIBUTE_DIRECTORY)))
-        result = E_FAIL;
+    while (SUCCEEDED(result))
+    {
+        PITEMID_CHILD item = nullptr;
+        ULONG fetched = 0;
+        const auto nextResult = enumerator->Next(1, &item, &fetched);
+        if (nextResult == S_FALSE) break;
+        if (FAILED(nextResult) || fetched != 1 || !item)
+        {
+            if (item) CoTaskMemFree(item);
+            result = FAILED(nextResult) ? nextResult : E_FAIL;
+            break;
+        }
+        try { items.push_back(item); }
+        catch (const std::bad_alloc&) { CoTaskMemFree(item); result = E_OUTOFMEMORY; break; }
+    }
+    if (SUCCEEDED(result) && items.size() != 16) { TraceSyntheticSortStage("async-queue-smoke: unexpected-folder-count"); result = E_FAIL; }
 
-    SHELLDETAILS pendingDetails{};
-    if (SUCCEEDED(result)) result = root->GetDetailsOf(item, 1, &pendingDetails);
-    const bool returnedPending = SUCCEEDED(result) && pendingDetails.str.uType == STRRET_WSTR &&
-        pendingDetails.str.pOleStr && !*pendingDetails.str.pOleStr &&
-        InterlockedCompareExchange(&g_syntheticOnDemandSizeScanCount, 0, 0) == 0 &&
-        InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0, 0) == 0;
-    if (pendingDetails.str.uType == STRRET_WSTR && pendingDetails.str.pOleStr) CoTaskMemFree(pendingDetails.str.pOleStr);
-    if (SUCCEEDED(result) && !returnedPending) result = E_FAIL;
+    for (size_t index = 0; SUCCEEDED(result) && index < 8; ++index)
+    {
+        auto item = items[index];
+        SHELLDETAILS pendingDetails{};
+        const auto detailsResult = root->GetDetailsOf(item, 1, &pendingDetails);
+        const bool returnedPending = SUCCEEDED(detailsResult) && pendingDetails.str.uType == STRRET_WSTR &&
+            pendingDetails.str.pOleStr && !*pendingDetails.str.pOleStr &&
+            InterlockedCompareExchange(&g_syntheticOnDemandSizeScanCount, 0, 0) == 0 &&
+            InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0, 0) == 0;
+        if (pendingDetails.str.uType == STRRET_WSTR && pendingDetails.str.pOleStr) CoTaskMemFree(pendingDetails.str.pOleStr);
+        if (FAILED(detailsResult) || !returnedPending) { TraceSyntheticSortStage("async-queue-smoke: first-read-did-not-return-pending"); result = FAILED(detailsResult) ? detailsResult : E_FAIL; break; }
+    }
+
+    const auto workerStartDeadline = GetTickCount64() + 5000;
+    while (SUCCEEDED(result) &&
+        InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizePeakWorkersForProbe, 0, 0) <
+            static_cast<LONG>(SyntheticAsyncRecursiveSizeQueue::kWorkerCount) &&
+        GetTickCount64() < workerStartDeadline) Sleep(1);
+    const auto peakWorkers = InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizePeakWorkersForProbe, 0, 0);
+    if (SUCCEEDED(result) && peakWorkers != static_cast<LONG>(SyntheticAsyncRecursiveSizeQueue::kWorkerCount)) { TraceSyntheticSortStage("async-queue-smoke: worker-limit-not-reached"); result = E_FAIL; }
 
     SetEvent(g_syntheticAsyncRecursiveSizeScanGateForProbe);
     const auto deadline = GetTickCount64() + 10000;
     while (SUCCEEDED(result) &&
-        InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0, 0) == 0 &&
+        InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0, 0) < 8 &&
         GetTickCount64() < deadline) Sleep(1);
-    const bool workerCompleted = InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0, 0) == 1 &&
-        InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanCompletedForProbe, 0, 0) == 1 &&
-        InterlockedCompareExchange(&g_syntheticOnDemandSizeScanCount, 0, 0) == 1;
-    if (SUCCEEDED(result) && !workerCompleted) result = HRESULT_FROM_WIN32(ERROR_TIMEOUT);
+    const bool workerCompleted = InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0, 0) == 8 &&
+        InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanCompletedForProbe, 0, 0) == 8 &&
+        InterlockedCompareExchange(&g_syntheticOnDemandSizeScanCount, 0, 0) == 8 &&
+        InterlockedCompareExchange(&g_syntheticDirectoryMetricsCallCount, 0, 0) == 16 &&
+        InterlockedCompareExchange(&g_syntheticDirectoryMetricsEntryCount, 0, 0) == 24;
+    if (SUCCEEDED(result) && !workerCompleted) { TraceSyntheticSortStage("async-queue-smoke: first-batch-incomplete"); result = HRESULT_FROM_WIN32(ERROR_TIMEOUT); }
 
-    SHELLDETAILS completedDetails{};
-    if (SUCCEEDED(result)) result = root->GetDetailsOf(item, 1, &completedDetails);
-    const bool completedValueMatches = SUCCEEDED(result) && completedDetails.str.uType == STRRET_WSTR &&
-        completedDetails.str.pOleStr && _wcsicmp(completedDetails.str.pOleStr, L"10") == 0;
-    if (completedDetails.str.uType == STRRET_WSTR && completedDetails.str.pOleStr) CoTaskMemFree(completedDetails.str.pOleStr);
-    if (SUCCEEDED(result) && !completedValueMatches) result = E_FAIL;
+    for (size_t index = 0; SUCCEEDED(result) && index < 8; ++index)
+    {
+        auto item = items[index];
+        SHELLDETAILS completedDetails{};
+        const auto detailsResult = root->GetDetailsOf(item, 1, &completedDetails);
+        const bool completedValueMatches = SUCCEEDED(detailsResult) && completedDetails.str.uType == STRRET_WSTR &&
+            completedDetails.str.pOleStr && _wcsicmp(completedDetails.str.pOleStr, L"10") == 0;
+        if (completedDetails.str.uType == STRRET_WSTR && completedDetails.str.pOleStr) CoTaskMemFree(completedDetails.str.pOleStr);
+        if (FAILED(detailsResult) || !completedValueMatches) { TraceSyntheticSortStage("async-queue-smoke: completed-value-mismatch"); result = FAILED(detailsResult) ? detailsResult : E_FAIL; break; }
+    }
 
-    if (item) CoTaskMemFree(item);
+    HANDLE cancellationGate = nullptr;
+    if (SUCCEEDED(result))
+    {
+        cancellationGate = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (!cancellationGate) result = HRESULT_FROM_WIN32(GetLastError());
+    }
+    if (SUCCEEDED(result))
+    {
+        g_syntheticAsyncRecursiveSizeScanGateForProbe = cancellationGate;
+        InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanCompletedForProbe, 0);
+        InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0);
+        InterlockedExchange(&g_syntheticAsyncRecursiveSizePeakWorkersForProbe, 0);
+        InterlockedExchange(&g_syntheticOnDemandSizeScanCount, 0);
+        InterlockedExchange(&g_syntheticDirectoryMetricsCallCount, 0);
+        InterlockedExchange(&g_syntheticDirectoryMetricsEntryCount, 0);
+        for (size_t index = 8; index < items.size(); ++index)
+        {
+            SHELLDETAILS pendingDetails{};
+            const auto detailsResult = root->GetDetailsOf(items[index], 1, &pendingDetails);
+            const bool returnedPending = SUCCEEDED(detailsResult) && pendingDetails.str.uType == STRRET_WSTR &&
+                pendingDetails.str.pOleStr && !*pendingDetails.str.pOleStr;
+            if (pendingDetails.str.uType == STRRET_WSTR && pendingDetails.str.pOleStr) CoTaskMemFree(pendingDetails.str.pOleStr);
+            if (FAILED(detailsResult) || !returnedPending) { result = FAILED(detailsResult) ? detailsResult : E_FAIL; break; }
+        }
+        root->ReleaseViewHold();
+        SetEvent(cancellationGate);
+        const auto cancellationDeadline = GetTickCount64() + 10000;
+        while (SUCCEEDED(result) &&
+            InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0, 0) < 8 &&
+            GetTickCount64() < cancellationDeadline) Sleep(1);
+        const bool queuedWorkCancelled =
+            InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0, 0) == 8 &&
+            InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanCompletedForProbe, 0, 0) == 0 &&
+            InterlockedCompareExchange(&g_syntheticOnDemandSizeScanCount, 0, 0) == 0 &&
+            InterlockedCompareExchange(&g_syntheticDirectoryMetricsCallCount, 0, 0) == 0;
+        if (SUCCEEDED(result) && !queuedWorkCancelled) { TraceSyntheticSortStage("async-queue-smoke: released-view-did-not-cancel-queued-work"); result = E_FAIL; }
+        CloseHandle(cancellationGate);
+        cancellationGate = nullptr;
+    }
+    if (cancellationGate) CloseHandle(cancellationGate);
+
+    for (auto item : items) CoTaskMemFree(item);
     if (enumerator) enumerator->Release();
     if (root) root->Release();
     if (rootPidl) CoTaskMemFree(rootPidl);
@@ -4785,7 +4977,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticAsyncOnDemandRecursi
     InterlockedExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, previousDemandSetting);
     InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanForProbe, previousAsyncSetting);
     InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, previousCustomColumnSetting);
-    if (SUCCEEDED(result)) TraceSyntheticSortStage("synthetic-async-on-demand-size: callback-returned-empty; worker-published-10-bytes; repeated-read-cached");
+    if (SUCCEEDED(result)) TraceSyntheticSortStage("synthetic-async-on-demand-size: callbacks-returned-empty; 8-reads-queued; peak-active-workers=2; 8-snapshots-published; released-view-cancelled-8-queued-reads; repeated-reads-cached");
     return result;
 }
 
@@ -5480,6 +5672,9 @@ extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticOnDemandSizeScanCount()
 
 extern "C" __declspec(dllexport) LONG64 WINAPI GetSyntheticOnDemandSizeScanMicroseconds()
 { return InterlockedCompareExchange64(&g_syntheticOnDemandSizeScanMicroseconds, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizePeakWorkerCountForProbe()
+{ return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizePeakWorkersForProbe, 0, 0); }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticRecursiveSizeCacheMissesDuringCompareCount()
 { return InterlockedCompareExchange(&g_syntheticRecursiveSizeCacheMissesDuringCompareCount, 0, 0); }

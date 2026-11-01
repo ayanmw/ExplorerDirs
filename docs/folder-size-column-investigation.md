@@ -1378,3 +1378,11 @@ Microsoft API 页面说明 `RefreshObject` 是重绘指定项目，`UpdateObject
 在隔离 provider 中增加异步按需模式：首次 `GetDetailsOf` 对未缓存的目录列值立即返回空字符串，并把扫描放到 worker；扫描前后校验目录文件身份，成功后写入有界快照，再发送 `SHCNE_UPDATEDIR`。静态 smoke 用门闩证明回调在 worker 开始前已返回空值、worker 发布 10 B、重复读取命中缓存。WPF Private Desktop `IShellView` 探针进一步证实实际 Shell 通知闭环：初始请求后 worker 完成两项目录扫描，活动 view 收到 `SFVM_FSNOTIFY`，随后再次请求列值并读到 `child=10`；列请求计数从 3 增至 6。原同步按需对照仍通过，100 个目录、102 行显示值为目录 10 / 文件 4，排序比较阶段递归扫描为 0。Native adapter `/W4 /WX`、NativeProbe Release（0 警告/错误）、异步无窗口 smoke、异步 Private Desktop watchdog 和同步按需 Private Desktop watchdog 均通过；隔离前台、输入和临时 Shell 注册清理守卫通过。
 
 这是 NativeProbe 的异步行为原型，不是产品功能。当前样例仅验证一个 10 B 目录在隐藏合成 DefView 中从空值回填；worker 采用每目录一个 detached thread，尚未做有界线程池、取消/关闭生命周期、并发多窗格压力或失败后重试策略评审，不能直接移植为产品实现。`SHCNE_UPDATEDIR` 会让 Shell 重新请求并可能重枚举目录；本探针没有量化可见闪烁、排序状态下的异步回填重排或真实目录 I/O。下一步先评审受控后台队列与关闭/失效生命周期，并在隔离 view 中测量通知造成的重枚举范围；产品 ExplorerBrowser 仍未接线。
+
+### 2026-11-01：异步扫描改为有界队列并验证 view 释放取消
+
+将上述 detached worker 改为隔离 adapter 内的固定 2 worker 队列，待处理任务上限为 256；超过上限时队列返回配额错误，列值回调仍以空值继续，后续 Shell 读取可以重试。扫描任务在排队前对 provider AddRef，结束后释放；DLL 静态队列在卸载时停止接收任务、排空并 join worker。创建 Shell view 时开启该 provider 的扫描通知；显式释放 view hold 时标记取消并禁止后续 `SHCNE_UPDATEDIR`。Private Desktop 探针在异步模式 teardown 中先释放 view hold 再销毁 Shell 子窗口；无窗口 smoke 另外在队列任务被门闩阻塞时显式释放 hold。worker 在等待门闩唤醒后和发布快照前都检查取消状态，避免关闭中的工作继续扫描或通知。
+
+RED 阶段的 8 项并发合同先失败于缺失峰值计数导出；加入队列后，view 释放合同又复现了一个竞态：已经等待的 worker 被唤醒后仍会扫描。增加唤醒后的取消检查后，16 项静态夹具中前 8 项全部完成，峰值并发稳定为 2；后 8 项在模拟释放 view 后被取消，指标扫描调用为 0。无窗口 async smoke 连续 3 次通过。隐藏 WPF Private Desktop Shell 回读通过（`child=10`、列请求 3→6、扫描 2 次），同步按需 100 目录回归通过；adapter `/W4 /WX`、NativeProbe Release 0 警告/错误，前台/输入与隔离清理检查通过。
+
+这仍是 NativeProbe 原型，不能说明产品宿主会在相同阶段释放 view hold：队列满载 256 的行为尚未做压力验证；固定线程在 adapter 加载期间保持空闲，尚未评估其常驻内存；失败任务目前会清除 pending 状态但没有自动重试策略。通知仍可能导致目录重枚举，尚未验证排序中的回填重排、通知风暴合并、真实路径耗时、可见刷新效果或 ExplorerBrowser 产品接线。下一步量测队列饱和和多窗格共享负载，并确认有限队列下可见目录最终能重试填值，再评估线程的空闲回收与通知合并。
