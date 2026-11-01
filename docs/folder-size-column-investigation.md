@@ -1972,3 +1972,11 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 在已经覆盖文件 create/delete/rename 的双 `IShellView` 原型中，再把可见行 `size-10` 实际改名为 `size-10-renamed`，并显式发送双路径 `SHCNE_RENAMEFOLDER`。两份真实 Shell view 均收敛到新名称；基于真实 filesystem identity 对账后，目录行的稳定 ID=3、选中和焦点保持。失效逻辑只退役旧路径缓存；两视图随后对新路径共用一次生产递归扫描，读回 20 B。Peer 列表在已按大小排序的情况下依稳定 row ID 更新名称，数值顺序及逐行列文本检查通过。包含此前文件 update/create/delete/rename 的完整探针连续三轮 exit 0；NativeProbe Release 构建 0 警告/错误，Private Desktop 前台、输入和夹具清理守卫通过。
 
 该测试通过 `Directory.Move` 改变真实夹具，再由探针显式发出 `SHCNE_RENAMEFOLDER`；它不证明所有文件系统 watcher 与 Shell 通知自然时序，也未覆盖重叠子树缓存、重命名竞争、通知丢失/溢出或产品生命周期。仍然只是 NativeProbe；产品继续使用 ExplorerBrowser，未生成 release。
+
+### 2026-11-01：ExplorerBrowser 注册 namespace 的递归列排序入口
+
+扩展已注册临时 Shell namespace 的 ExplorerBrowser 探针：夹具包含递归大小为 2 B 与 10 B 的两个文件夹，以及 4 B、25 B 文件。`IShellFolder2.MapColumnToSCID` 能返回递归列的自定义 property key，但 `IFolderView2.SetSortColumns` 对该 key 返回 `TYPE_E_ELEMENTNOTFOUND (0x8002802B)`；改用标准 `PKEY_Size` 虽然接受，Shell 行序为 `child|child-small|root.txt|rename-source.txt`，递归大小 `CompareIDs` 调用为 0，无法按文件夹递归大小排序。
+
+同一活动 `IShellView` 上查询 `IShellFolderView` 并调用 `Rearrange(1)` 后，provider 的比较器收到 5 次比较，真实 Shell 行序变为 `child-small|root.txt|child|rename-source.txt`，与 2、4、10、25 B 数值顺序一致。Release NativeProbe 构建 0 警告/错误，注册 namespace Private Desktop 全流程 exit 0；临时注册清理、前台及 last-input 守卫通过。
+
+该切片证明 ExplorerBrowser 承载的注册 namespace 可以用旧式列索引触发自定义递归数值排序；没有验证用户鼠标点击表头如何到达该排序入口、排序指示器/升降序状态、真实物理目录的 child PIDL 身份，也没有可见 UI 验收。普通 ExplorerBrowser 文件系统路径与产品仍未接入该 provider；NativeProbe 夹具是临时 backing 目录。下一步应在隔离 `IShellView` 宿主里验证表头排序事件和排序状态恢复，再决定如何映射到产品窗格导航与标签会话。

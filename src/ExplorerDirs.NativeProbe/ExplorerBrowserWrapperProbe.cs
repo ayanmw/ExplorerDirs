@@ -138,9 +138,11 @@ internal static class ExplorerBrowserWrapperProbe
             PrivateDesktopShellProbe.ReportStage("namespace-probe: prepare-fixture-and-registration");
             Directory.CreateDirectory(Path.Combine(fixture, "child"));
             Directory.CreateDirectory(Path.Combine(fixture, "child", "nested"));
+            Directory.CreateDirectory(Path.Combine(fixture, "child-small"));
             File.WriteAllBytes(Path.Combine(fixture, "root.txt"), [1, 2, 3, 4]);
             File.WriteAllText(Path.Combine(fixture, "rename-source.txt"), "namespace rename contract");
             File.WriteAllBytes(Path.Combine(fixture, "child", "nested", "deep.bin"), Enumerable.Repeat((byte)7, 10).ToArray());
+            File.WriteAllBytes(Path.Combine(fixture, "child-small", "payload.bin"), [1, 2]);
 
             nativeLibrary = NativeLibrary.Load(FindAdapterLibrary());
             Marshal.ThrowExceptionForHR(Marshal.GetDelegateForFunctionPointer<SetFolderClassId>(
@@ -209,7 +211,7 @@ internal static class ExplorerBrowserWrapperProbe
             var header = listView == 0 ? 0 : SendMessageW(listView, 0x101F, 0, 0); // LVM_GETHEADER
             var headerTitles = header == 0 ? [] : ReadNativeHeaderTitles(header);
             var viewChildClasses = ReadChildClasses(shellViewWindow);
-            if (!classIdMatches || !rootPidlMatches || !recursiveColumnPresent || !recursiveSizeVisible || itemCount != 3)
+            if (!classIdMatches || !rootPidlMatches || !recursiveColumnPresent || !recursiveSizeVisible || itemCount != 4)
                 throw new InvalidOperationException("ExplorerBrowser did not preserve the registered custom namespace view contract.");
             Console.WriteLine($"explorerbrowser-registered-namespace: browse-to-idlist=0x{browseHr:X8}; class-id-matches={classIdMatches}; root-pidl-matches={rootPidlMatches}; recursive-column-metadata={recursiveColumn}; recursive-size-visible-in-shell={recursiveSizeVisible}; visible-shell-column-count={visibleColumnsAfterApply.Count}; native-header=[{string.Join('|', headerTitles)}]; view-child-classes=[{string.Join('|', viewChildClasses)}]; row-count={itemCount}; fixture={fixture}; visible-to-user=False");
 
@@ -235,6 +237,55 @@ internal static class ExplorerBrowserWrapperProbe
             Console.WriteLine($"explorerbrowser-registered-namespace: background-context-menu-hr=0x{backgroundMenuHr:X8}; query-hr=0x{backgroundMenuQueryHr:X8}; menu-items={backgroundMenuItemCount}");
             if (backgroundMenuHr < 0 || backgroundMenu == 0 || backgroundMenuQueryHr < 0 || backgroundMenuItemCount <= 0)
                 throw new InvalidOperationException("The registered namespace did not expose native background-folder commands.");
+
+            // Verify sorting through the actual ExplorerBrowser view. New property keys may be
+            // rejected by IFolderView2 even when the folder maps the column, so also probe the
+            // legacy Shell-folder-view column-index path used by DefView.
+            Marshal.ThrowExceptionForHR(At<MapColumnToScid>(viewFolder, 19)(viewFolder, 1, out var recursiveSizeKey));
+            var sortColumn = Marshal.AllocCoTaskMem(Marshal.SizeOf<NativeSortColumn>());
+            int recursiveKeySortHr;
+            try
+            {
+                Marshal.StructureToPtr(new NativeSortColumn { Key = recursiveSizeKey, Direction = 1 }, sortColumn, false);
+                recursiveKeySortHr = At<SetSortColumns>(folderView, 27)(folderView, sortColumn, 1);
+                Marshal.StructureToPtr(new NativeSortColumn
+                {
+                    Key = new ShellColumnManager.NativeKey { FormatId = sizeKey.FormatId, PropertyId = sizeKey.PropertyId },
+                    Direction = 1
+                }, sortColumn, false);
+                Marshal.ThrowExceptionForHR(At<SetSortColumns>(folderView, 27)(folderView, sortColumn, 1));
+            }
+            finally { Marshal.FreeCoTaskMem(sortColumn); }
+            Marshal.ThrowExceptionForHR(At<RefreshView>(shellView, 8)(shellView));
+            Application.DoEvents();
+            Thread.Sleep(250);
+            Application.DoEvents();
+            var pkeySizeOrder = ReadViewItemNamesInOrder(folderView, viewFolder);
+            var compareCount = Marshal.GetDelegateForFunctionPointer<GetProbeCount>(
+                NativeLibrary.GetExport(nativeLibrary, "GetSyntheticSizeCompareCount"))();
+            Console.WriteLine($"explorerbrowser-registered-namespace: recursive-property-sort-hr=0x{recursiveKeySortHr:X8}; PKEY_Size-order=[{string.Join('|', pkeySizeOrder)}]; recursive-size-compare-calls={compareCount}");
+            if (recursiveKeySortHr >= 0 || compareCount != 0 ||
+                !pkeySizeOrder.SequenceEqual(new[] { "child", "child-small", "root.txt", "rename-source.txt" }, StringComparer.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The property-key sort control did not distinguish ExplorerBrowser's unsupported custom-key path.");
+
+            var shellFolderViewId = new Guid("37A378C0-F82D-11CE-AE65-08002B2E1262");
+            Marshal.ThrowExceptionForHR(Marshal.QueryInterface(shellView, in shellFolderViewId, out var shellFolderView));
+            try
+            {
+                Marshal.ThrowExceptionForHR(At<Rearrange>(shellFolderView, 3)(shellFolderView, 1));
+                Marshal.ThrowExceptionForHR(At<RefreshView>(shellView, 8)(shellView));
+                Application.DoEvents();
+                Thread.Sleep(250);
+                Application.DoEvents();
+            }
+            finally { Marshal.Release(shellFolderView); }
+            var legacyColumnOrder = ReadViewItemNamesInOrder(folderView, viewFolder);
+            compareCount = Marshal.GetDelegateForFunctionPointer<GetProbeCount>(
+                NativeLibrary.GetExport(nativeLibrary, "GetSyntheticSizeCompareCount"))();
+            Console.WriteLine($"explorerbrowser-registered-namespace: legacy-size-column-order=[{string.Join('|', legacyColumnOrder)}]; compare-calls={compareCount}");
+            if (recursiveKeySortHr >= 0 || compareCount == 0 ||
+                !legacyColumnOrder.SequenceEqual(new[] { "child-small", "root.txt", "child", "rename-source.txt" }, StringComparer.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The Shell view did not sort mixed file/folder rows by the recursive Size column through its legacy column-index path.");
 
             File.WriteAllText(Path.Combine(fixture, "context-delete.txt"), "temporary native-menu delete target");
             PrivateDesktopShellProbe.ReportStage("namespace-probe: invoke-native-delete-command");
@@ -289,10 +340,10 @@ internal static class ExplorerBrowserWrapperProbe
             {
                 Application.DoEvents();
                 Marshal.ThrowExceptionForHR(At<GetItemCount>(folderView, 7)(folderView, 2, out countAfterNotification));
-                if (countAfterNotification == 4) break;
+                if (countAfterNotification == 5) break;
                 Thread.Sleep(100);
             }
-            if (countAfterNotification != 4)
+            if (countAfterNotification != 5)
                 throw new InvalidOperationException($"The registered namespace view did not enumerate the externally created file after SHCNE_UPDATEDIR; count={countAfterNotification}.");
             Console.WriteLine($"explorerbrowser-registered-namespace: external-process-root-create-exit={rootNotifyExitCode}; updatedir-row-count={countAfterNotification}; external-create-visible=True");
 
@@ -360,7 +411,7 @@ internal static class ExplorerBrowserWrapperProbe
                 Marshal.ThrowExceptionForHR(At<GetCurFolder>(persist, 5)(persist, out currentPidl));
                 var rootReturnMatches = returnedClassId == classId && PidlBytesEqual(rootPidl, currentPidl);
                 Marshal.ThrowExceptionForHR(At<GetItemCount>(folderView, 7)(folderView, 2, out var rootRowCountAfterRename));
-                if (!rootReturnMatches || rootRowCountAfterRename != 4)
+                if (!rootReturnMatches || rootRowCountAfterRename != 5)
                     throw new InvalidOperationException("Parent navigation did not return to the registered namespace root.");
                 Console.WriteLine($"explorerbrowser-registered-namespace: child-pidl-matches={childIdentityMatches}; child-row-count={childRowCount}; return-to-root={rootReturnMatches}; root-row-count-after-notification={rootRowCountAfterRename}");
             }
@@ -689,6 +740,19 @@ internal static class ExplorerBrowserWrapperProbe
             finally { Marshal.FreeCoTaskMem(item); }
         }
         return ulong.MaxValue;
+    }
+
+    private static string[] ReadViewItemNamesInOrder(nint folderView, nint folder)
+    {
+        Marshal.ThrowExceptionForHR(At<GetItemCount>(folderView, 7)(folderView, 2, out var count));
+        var names = new string[count];
+        for (var index = 0; index < count; index++)
+        {
+            Marshal.ThrowExceptionForHR(At<GetItemPidl>(folderView, 6)(folderView, index, out var item));
+            try { names[index] = ReadShellDetailsText(folder, item, 0); }
+            finally { Marshal.FreeCoTaskMem(item); }
+        }
+        return names;
     }
 
     private static string ReadShellDetailsText(nint folder, nint item, uint column)
@@ -1109,6 +1173,11 @@ internal static class ExplorerBrowserWrapperProbe
 
     [StructLayout(LayoutKind.Sequential)] private struct ProbeRect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] private struct ProbeFolderSettings { public uint Mode, Flags; }
+    [StructLayout(LayoutKind.Sequential)] private struct NativeSortColumn
+    {
+        public ShellColumnManager.NativeKey Key;
+        public int Direction;
+    }
     [StructLayout(LayoutKind.Sequential)] private struct NativeStrRet { public uint Type; public nint Pointer; }
     [StructLayout(LayoutKind.Sequential)] private struct NativeShellDetails { public int Format, Width; public NativeStrRet Text; }
     [StructLayout(LayoutKind.Sequential)] private struct NativeHeaderItem
@@ -1145,6 +1214,10 @@ internal static class ExplorerBrowserWrapperProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCurFolder(nint self, out nint pidl);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetClassId(nint self, out Guid classId);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemCount(nint self, uint scope, out int count);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSortColumns(nint self, nint columns, int count);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int RefreshView(nint self);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int MapColumnToScid(nint self, uint column, out ShellColumnManager.NativeKey key);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int Rearrange(nint self, nint sortColumn);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int BrowseToIdList(nint self, nint pidl, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetDetailsOf(nint self, nint item, uint column, nint details);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetWindow(nint self, out nint window);
