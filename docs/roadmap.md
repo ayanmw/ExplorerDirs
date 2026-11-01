@@ -5789,3 +5789,4 @@ peer SysListView32 现读取 Shell 文件夹的名称、大小、项目类型、
 
 这只把异步递归值接到了 IShellView 的 peer 行列表，不改变 Shell 自身 DefView 或 ExplorerBrowser 产品；未验证通知后递归值重扫、可见重绘/闪烁、慢盘/网络及真实多窗格负载。后续继续把 Shell 行增删改通知与递归缓存失效、peer 列回填接成闭环，并保留菜单/分组/刷新回归。产品仍使用 ExplorerBrowser，递归列不进入发布版。
 2026-11-01 隔离逐行递归大小列通知原型通过：更新 `size-10` 子文件后，至少一种真实 Shell 更新通知被收到，局部缓存失效并在 worker 重扫为 20 B；发现 DefView 视图 PIDL 可落后于同路径重枚举 PIDL，按路径配对、文件 ID保留行身份后，数值排序与选中焦点保持。NativeProbe Release build 和 Private Desktop watchdog 通过。仅隐藏 `IShellView` + peer ListView，不含产品接线、可见 UI、慢盘/网络及通知合并/丢失场景。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01递归大小对-shell-更新通知的按需失效原型)。
+2026-11-01 递归大小更新通知突发切片：两次隐藏 filesystem `IShellView` 运行均收到 6 个显式 Shell 更新事件，150 ms 安静窗口后在探针内去重为 1 个受影响目录，worker 只重扫一次至 20 B；扫描期间 peer 行、选择与焦点不变，重枚举后身份及数值排序保持。NativeProbe Release build 和 Private Desktop watchdog 通过。此去重逻辑尚未接入产品通知队列；未测取消竞争、watcher 溢出、慢盘/网络及可见 UI。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01递归大小通知突发的异步去重切片)。

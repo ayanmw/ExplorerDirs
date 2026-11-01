@@ -1795,4 +1795,10 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 
 隔离 `--ishellview-recursive-size-projection-private-desktop` 在初始后台扫描后修改 `size-10\payload.bin`，向 Shell 发布 `SHCNE_UPDATEITEM` 与 `SHCNE_UPDATEDIR`，确认监听器收到了通知；随后仅移除 `size-10` 的缓存并在 worker 线程重扫，得到 20 B。第一次重枚举发现 DefView 保留了更新前的目录 PIDL，而 `IShellFolder` 已返回相同文件系统路径、不同元数据 PIDL；按 PIDL 字节匹配会误报行缺失。原型现允许文件系统路径配对，并以卷序列号和文件 ID保留同一目录行身份，避免仅凭复用路径继承状态。更新后的数值排序、选中/焦点行和前台窗口均保持；Private Desktop 前台、输入、夹具清理守卫通过，NativeProbe Release build 0 警告/错误。
 
-这只证明隐藏 `IShellView` 旁的独立 peer `SysListView32` 可以接收通知、局部失效和 worker 重扫。没有接入 ExplorerBrowser、产品窗格或可见 UI，也没有覆盖真实慢盘/网络项目、Shell 通知合并、通知丢失与批量目录变更；不能据此宣称产品逐行列已实现。后续需先把异步刷新与通知合并纳入隔离原型，再评估迁移门槛。
+这只证明隐藏 `IShellView` 旁的独立 peer `SysListView32` 可以接收通知、局部失效和 worker 重扫。没有接入 ExplorerBrowser、产品窗格或可见 UI，也没有覆盖真实慢盘/网络项目、Shell 通知合并、通知丢失与批量目录变更；不能据此宣称产品逐行列已实现。接下来需验证扫描期间新通知到达时的重扫/过期结果保护，再评估迁移门槛。
+
+### 2026-11-01：递归大小通知突发的异步去重切片
+
+在上一节真实文件系统 Shell 更新通知场景上，快速改写 `size-10\payload.bin` 三次并发布多条 `SHCNE_UPDATEITEM`/`SHCNE_UPDATEDIR`。两次独立 Private Desktop 运行均收到 6 个更新事件；探针在 150 ms 安静窗口后按受影响目录去重为 1 项，仅启动一次 worker 扫描，最终读回 20 B。扫描被刻意延迟期间，peer ListView 行 ID 与选中/焦点保持；重枚举后原目录行身份、数值排序和焦点仍保持。NativeProbe Release build 0 警告/错误，两个 watchdog 运行均 exit 0，前台、last-input 和 fixture 清理守卫通过。
+
+这只验证隔离探针内的 burst 收集、路径去重、worker 扫描及 peer 行保留；去重集合和安静计时尚未接入产品通知管线，通知由探针显式 `SHChangeNotify` 触发。未覆盖 watcher 溢出、取消/关闭竞争、慢盘/网络、多个窗格共享容量或可见刷新体验。下一步核对扫描期间新通知到达时的重扫/过期结果保护，再决定是否推进产品架构迁移评审。

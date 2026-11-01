@@ -1555,11 +1555,45 @@ internal static class ShellViewHostFilterProbe
             using var changeWatch = new ShellChangeReconciliationProbe.ChangeWindow();
             changeWatch.Register(folderPidl);
             var eventIndex = changeWatch.Events.Count;
+            File.WriteAllBytes(changedPayload, new byte[12]);
+            SHChangeNotify(ShellChangeUpdatedItem, ShellChangePathUnicode, changedPayload, null);
+            File.WriteAllBytes(changedPayload, new byte[16]);
+            SHChangeNotify(ShellChangeUpdatedItem, ShellChangePathUnicode, changedPayload, null);
             File.WriteAllBytes(changedPayload, new byte[20]);
             SHChangeNotify(ShellChangeUpdatedItem, ShellChangePathUnicode, changedPayload, null);
             SHChangeNotify(ShellChangeUpdatedDirectory, ShellChangePathUnicode, changedDirectory, null);
             if (!changeWatch.WaitForAnySince(eventIndex, [ShellChangeUpdatedItem, ShellChangeUpdatedDirectory], TimeSpan.FromSeconds(5)))
                 throw new TimeoutException("The Shell change window did not receive the recursive-size fixture update notification.");
+            var lastNotificationCount = -1;
+            var lastNotificationAt = Environment.TickCount64;
+            var notificationDeadline = lastNotificationAt + 5000;
+            while (Environment.TickCount64 < notificationDeadline &&
+                   Environment.TickCount64 - lastNotificationAt < 150)
+            {
+                Application.DoEvents();
+                var observedCount = changeWatch.ChangeEvents.Count;
+                if (observedCount != lastNotificationCount)
+                {
+                    lastNotificationCount = observedCount;
+                    lastNotificationAt = Environment.TickCount64;
+                }
+                Thread.Sleep(10);
+            }
+            var updateEvents = changeWatch.ChangeEvents.Skip(eventIndex)
+                .Where(change => change.EventId is ShellChangeUpdatedItem or ShellChangeUpdatedDirectory).ToArray();
+            if (updateEvents.Length < 2)
+                throw new InvalidOperationException($"Expected duplicate Shell update notifications for the burst; observed={updateEvents.Length}.");
+            var dirtyDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var change in updateEvents)
+            {
+                if (change.FirstPath is not { } changedPath) continue;
+                var fullChangedPath = Path.GetFullPath(changedPath);
+                if (string.Equals(fullChangedPath, changedDirectory, StringComparison.OrdinalIgnoreCase) ||
+                    fullChangedPath.StartsWith(changedDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                    dirtyDirectories.Add(changedDirectory);
+            }
+            if (dirtyDirectories.Count != 1)
+                throw new InvalidOperationException($"The update burst did not coalesce to the changed directory: paths=[{string.Join('|', updateEvents.Select(change => change.FirstPath))}].");
             WaitForPeerShellItem(folderView, changedDirectory, shouldExist: true, expectedCount);
 
             var refreshedProjection = CapturePeerShellRows(folderView, folderPidl, shellFolder, projection.Rows, ref nextId);
@@ -1575,11 +1609,15 @@ internal static class ShellViewHostFilterProbe
             var refreshScan = Task.Run(() =>
             {
                 var workerThread = Environment.CurrentManagedThreadId;
-                return (Rows: HandleBoundRecursiveDirectoryScanner.Scan([changedDirectory], refreshCancellation.Token), WorkerThread: workerThread);
+                Thread.Sleep(150); // Keep the coalesced invalidation pending while the peer list remains unchanged.
+                return (Rows: HandleBoundRecursiveDirectoryScanner.Scan(dirtyDirectories, refreshCancellation.Token), WorkerThread: workerThread);
             }, refreshCancellation.Token);
             while (!refreshScan.IsCompleted)
             {
                 Application.DoEvents();
+                if (!ReadPeerListRowIds(listView).SequenceEqual(sortedIds) ||
+                    GetPeerListItemState(listView, selectedAfterSort, 0x0003) != 0x0003)
+                    throw new InvalidOperationException("The peer rows or selection changed while the coalesced recursive-size refresh was pending.");
                 Thread.Sleep(10);
             }
             var refreshedScan = refreshScan.GetAwaiter().GetResult();
@@ -1614,7 +1652,7 @@ internal static class ShellViewHostFilterProbe
                 refreshedSelectedIndex < 0 || GetPeerListItemState(listView, refreshedSelectedIndex, 0x0003) != 0x0003 ||
                 !refreshedNames.SequenceEqual(expectedRefreshedOrder.Select(row => row.Name), StringComparer.OrdinalIgnoreCase))
                 throw new InvalidOperationException($"The updated recursive-size value did not flow through peer sort/reselection: names=[{string.Join(',', refreshedNames)}], value={updatedBytesById.GetValueOrDefault(selectedRow.Id)}.");
-            Console.WriteLine($"ishellview-peer-recursive-size-notification: shell-notification=True; peer-rows-reenumerated=True; row-ids-preserved=True; stale-cache-invalidated={cacheEntryInvalidated}; rescanned-bytes={updatedBytesById[selectedRow.Id]}; rescan-worker={refreshedScan.WorkerThread}; numeric-order=[{string.Join(',', refreshedNames)}]; selected-focused-id={selectedRow.Id}; selection-focus-preserved=True; foreground-unchanged={GetForegroundWindow() == foreground}");
+            Console.WriteLine($"ishellview-peer-recursive-size-notification: shell-update-events={updateEvents.Length}; changed-directories-coalesced={dirtyDirectories.Count}; peer-rows-retained-during-worker-rescan=True; peer-rows-reenumerated=True; row-ids-preserved=True; stale-cache-invalidated={cacheEntryInvalidated}; rescanned-bytes={updatedBytesById[selectedRow.Id]}; rescan-worker={refreshedScan.WorkerThread}; numeric-order=[{string.Join(',', refreshedNames)}]; selected-focused-id={selectedRow.Id}; selection-focus-preserved=True; foreground-unchanged={GetForegroundWindow() == foreground}");
         }
         finally
         {
