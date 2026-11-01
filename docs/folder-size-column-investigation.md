@@ -2303,3 +2303,9 @@ HostProbe Release build 0 警告/错误；`--shell-provider-location` exit 0，�
 HostProbe 为保存升序及降序分别构造初始会话，均验证首次完整刷新前行序与目标方向一致；完整探针仍通过导出、Shell 列值、菜单排序、Header 交互及普通文件系统 `PKEY_Size` 控制。Release build 0 警告/错误，两种方向的隐藏 `--shell-provider-location` 运行均 exit 0，父 HWND 不可见。没有可见 UI 证据；两条 Shell 命令分两个 100 ms Dispatcher tick 执行，是否出现短暂中间行序尚待 UI 检查。此为产品 Host 的注册 synthetic provider 原型，不表示递归列已部署到普通物理目录或 release。
 
 将第二次命令间隔试降至 16 ms 时，HostProbe 在 Shell 重新排列期间从 `IShellFolder2.GetDetailsEx` 读取项目返回 `E_FAIL`；这说明仅缩短延迟会与 Shell 行枚举竞争。恢复为已通过的 100 ms。当前没有可靠的“Shell 已完成此次重排”通知，因此不再缩短间隔；该失败发生于隔离隐藏 HostProbe，不是可见 UI 或产品文件操作的验收结果。
+
+### 2026-11-02：产品 Host 原型混合文件与文件夹的递归大小排序
+
+扩展注册 synthetic provider HostProbe，在同一目录加入 5 B 与 29 B 两个目录、12 B 普通文件。生产 `ExplorerBrowserHost` 的可见未解析递归列升序在完整 view 刷新前得到 `folder-small → file-middle.bin → folder-large`，降序反转；导出列值按相同 Shell 行序读回 `5 → 12 → 29`，普通文件系统 `PKEY_Size` 控制仍按 5 B 与 29 B 文件排序通过。Release HostProbe 构建 0 警告/错误，升序与降序隐藏运行均通过，父窗口不可见。
+
+此结果仅证明 registered synthetic provider 的产品 Host 能在一列中比较目录递归值与普通文件原生字节值，不代表普通物理目录已获得派生列 provider、扫描更新或发布功能。Q-Dir 官方 FAQ/功能页说明文件夹大小默认忽略排序以避免性能问题，并提供显式选项；本次 HostProbe 使用递归大小排序，尚未在产品 Host 上验证该默认/可选策略，故不能称为 Q-Dir 排序语义已对齐。[FAQ 63](https://softwareok.com/?faq=63&seite=faq-Q-DIR) · [文件与文件夹大小列](https://www.softwareok.com/?seite=freeware%2Fq-dir%2FFile_and_folder_size_Column_with_percentage)

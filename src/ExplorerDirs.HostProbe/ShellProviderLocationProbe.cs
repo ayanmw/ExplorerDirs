@@ -20,6 +20,7 @@ internal static class ShellProviderLocationProbe
         var pathB = Path.Combine(root, "session-root");
         var smallFolder = Path.Combine(pathB, "folder-small");
         var largeFolder = Path.Combine(pathB, "folder-large");
+        const int expectedRows = 3;
         var classId = Guid.NewGuid();
         var classKeyPath = $@"Software\Classes\CLSID\{{{classId:D}}}";
         var namespaceKeyPath = $@"Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{{{classId:D}}}";
@@ -34,6 +35,7 @@ internal static class ShellProviderLocationProbe
             Directory.CreateDirectory(smallFolder);
             Directory.CreateDirectory(largeFolder);
             File.WriteAllText(Path.Combine(pathA, "default-only.txt"), "wrong root");
+            File.WriteAllBytes(Path.Combine(pathB, "file-middle.bin"), new byte[12]);
             File.WriteAllBytes(Path.Combine(smallFolder, "payload.bin"), new byte[5]);
             File.WriteAllBytes(Path.Combine(largeFolder, "payload.bin"), new byte[29]);
 
@@ -99,8 +101,8 @@ internal static class ShellProviderLocationProbe
             WaitUntil(() =>
             {
                 counts = readCounts.Invoke(host, [false, false]);
-                return counts is not null && (int)counts.GetType().GetProperty("Total")!.GetValue(counts)! == 2;
-            }, TimeSpan.FromSeconds(15), "the production host did not enumerate the registered Shell folder's two rows");
+                return counts is not null && (int)counts.GetType().GetProperty("Total")!.GetValue(counts)! == expectedRows;
+            }, TimeSpan.FromSeconds(15), "the production host did not enumerate the registered Shell folder's mixed rows");
             if (counts is null) throw new InvalidOperationException("The production host could not read the Shell folder's row count.");
             var total = (int)counts.GetType().GetProperty("Total")!.GetValue(counts)!;
             var currentViewState = hostType.GetMethod("CaptureViewState", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!
@@ -114,20 +116,20 @@ internal static class ShellProviderLocationProbe
             string[] directRecursiveValues = [];
             WaitUntil(() =>
             {
-                directRecursiveValues = ReadRecursiveValues(hostType, host, 2);
-                return directRecursiveValues.Length == 2 && directRecursiveValues.All(value => !string.IsNullOrWhiteSpace(value));
+                directRecursiveValues = ReadRecursiveValues(hostType, host, expectedRows);
+                return directRecursiveValues.Length == expectedRows && directRecursiveValues.All(value => !string.IsNullOrWhiteSpace(value));
             }, TimeSpan.FromSeconds(15), "the product host's IShellFolder2.GetDetailsEx did not return recursive values");
             PumpDispatcher(TimeSpan.FromMilliseconds(300));
             WaitUntil(() =>
             {
                 var settledCounts = readCounts.Invoke(host, [false, false]);
                 return settledCounts is not null &&
-                    (int)settledCounts.GetType().GetProperty("Total")!.GetValue(settledCounts)! == 2;
+                    (int)settledCounts.GetType().GetProperty("Total")!.GetValue(settledCounts)! == expectedRows;
             }, TimeSpan.FromSeconds(10), "the product Shell view did not settle its row count after initial custom sorting");
-            var recursiveDisplay = ReadRecursiveDisplayText(adapter, hostType, host, 2);
+            var recursiveDisplay = ReadRecursiveDisplayText(adapter, hostType, host, expectedRows);
             if (!string.Equals(recursiveDisplay.Header, "Recursive Size", StringComparison.Ordinal) ||
                 recursiveDisplay.Values.Select(value => TryReadBytes(value, out var bytes) ? bytes : ulong.MaxValue)
-                    .Order().SequenceEqual([5UL, 29UL]) is false)
+                    .Order().SequenceEqual([5UL, 12UL, 29UL]) is false)
                 throw new InvalidOperationException($"The provider's recursive GetDetailsOf contract is unexpected: header='{recursiveDisplay.Header}', values=[{string.Join('|', recursiveDisplay.Values)}].");
             var providerColumnContract = ReadProviderColumnContract(hostType, host);
             if (providerColumnContract.CompareResult is not (-1 or 1) ||
@@ -142,7 +144,7 @@ internal static class ShellProviderLocationProbe
                 name.Contains("Recursive Size", StringComparison.OrdinalIgnoreCase) ||
                 name.Contains("9e5e05ac-1936-4a75-94f7-4704b8b01923", StringComparison.OrdinalIgnoreCase));
             if (sizeColumnIndex < 0) throw new InvalidOperationException($"The product view omitted the restored recursive-size column: [{string.Join('|', columnNames)}].");
-            if (rows.Length != 2) throw new InvalidOperationException($"The product export snapshot returned {rows.Length} rows; expected 2.");
+            if (rows.Length != expectedRows) throw new InvalidOperationException($"The product export snapshot returned {rows.Length} rows; expected {expectedRows}.");
 
             var nameColumnIndex = Array.FindIndex(columnNames, name =>
                 name.Equals("Name", StringComparison.OrdinalIgnoreCase) || name.Equals("名称", StringComparison.Ordinal));
@@ -161,7 +163,9 @@ internal static class ShellProviderLocationProbe
             var getCompareCountForColumn = GetExport<GetCounterForColumn>(adapter, "GetSyntheticSortCompareCountForColumn");
             var compareCountBeforeSort = getCompareCount();
             var columnCompareCountsBefore = Enumerable.Range(0, 8).Select(index => getCompareCountForColumn((uint)index)).ToArray();
-            var expectedInitialOrder = descending ? new[] { "folder-large", "folder-small" } : ["folder-small", "folder-large"];
+            var ascendingOrder = new[] { "folder-small", "file-middle.bin", "folder-large" };
+            var descendingOrder = ascendingOrder.Reverse().ToArray();
+            var expectedInitialOrder = descending ? descendingOrder : ascendingOrder;
             var orderBeforeRefresh = Array.Empty<string>();
             WaitUntil(() =>
             {
@@ -239,25 +243,26 @@ internal static class ShellProviderLocationProbe
             var headerFirstCompareCount = getCompareCount();
             ClickHeaderColumn(sortHeaderWindow, recursiveHeaderIndex);
             PumpDispatcher(TimeSpan.FromMilliseconds(500));
-            directRecursiveValues = ReadRecursiveValues(hostType, host, 2);
+            directRecursiveValues = ReadRecursiveValues(hostType, host, expectedRows);
             (columnNames, rows) = ReadExportRows(capture.Invoke(host, null)!);
             namesInShellOrder = rows.Select(row => Path.GetFileName(row[nameColumnIndex]) ?? row[nameColumnIndex]).ToArray();
             var exportedRecursiveValues = rows.Select(row => row[sizeColumnIndex]).ToArray();
             if (exportedRecursiveValues.Select(value => TryReadBytes(value, out var bytes) ? bytes : ulong.MaxValue)
-                    .SequenceEqual([5UL, 29UL]) is false)
+                    .SequenceEqual([5UL, 12UL, 29UL]) is false)
                 throw new InvalidOperationException($"The product export snapshot did not consume recursive display values in Shell row order: columns=[{string.Join('|', columnNames)}], values=[{string.Join('|', exportedRecursiveValues)}].");
             var mappedShellExport = ReadVisibleShellDetailsSnapshot(adapter, hostType, host, nativeHeaderOrder, total);
             if (!mappedShellExport.Columns.SequenceEqual(["Recursive Size", "Name"], StringComparer.Ordinal) ||
-                !mappedShellExport.Rows.Select(row => string.Join('|', row)).SequenceEqual(["5|folder-small", "29|folder-large"], StringComparer.Ordinal))
+                !mappedShellExport.Rows.Select(row => string.Join('|', row)).SequenceEqual(
+                    ["5|folder-small", "12|file-middle.bin", "29|folder-large"], StringComparer.Ordinal))
                 throw new InvalidOperationException($"The visible Shell details-to-column mapping produced unexpected export data: columns=[{string.Join('|', mappedShellExport.Columns)}], rows=[{string.Join('|', mappedShellExport.Rows.Select(row => string.Join('|', row)))}], ordinals=[{string.Join('|', mappedShellExport.Ordinals)}].");
             var valuesByName = rows.Select((row, index) =>
                     (Name: namesInShellOrder[index], Bytes: TryReadBytes(directRecursiveValues[index], out var bytes) ? bytes : ulong.MaxValue))
                 .ToDictionary(item => item.Name, item => item.Bytes, StringComparer.OrdinalIgnoreCase);
-            var recursiveValuesMatchFixture = valuesByName["folder-small"] == 5 && valuesByName["folder-large"] == 29;
+            var recursiveValuesMatchFixture = valuesByName["folder-small"] == 5 &&
+                valuesByName["file-middle.bin"] == 12 && valuesByName["folder-large"] == 29;
             if (!recursiveValuesMatchFixture)
                 throw new InvalidOperationException($"The product Shell view returned unexpected per-folder values: [{string.Join('|', valuesByName.Select(item => $"{item.Key}={item.Value}"))}].");
-            var sortApplied = valuesByName["folder-small"] < valuesByName["folder-large"] &&
-                namesInShellOrder.SequenceEqual(["folder-small", "folder-large"], StringComparer.OrdinalIgnoreCase);
+            var sortApplied = namesInShellOrder.SequenceEqual(ascendingOrder, StringComparer.OrdinalIgnoreCase);
             var compareCountAfterSort = getCompareCount();
             var columnCompareDeltas = Enumerable.Range(0, columnCompareCountsBefore.Length)
                 .Select(index => getCompareCountForColumn((uint)index) - columnCompareCountsBefore[index]).ToArray();
