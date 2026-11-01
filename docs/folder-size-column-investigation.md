@@ -1512,3 +1512,15 @@ Native adapter `/W4 /WX` 与 NativeProbe Release 均构建成功，0 警告/错�
 四个同根 view 在队列门闩后全部关闭，4 个批次均完成取消结算，扫描 0、关闭后通知 0。另一轮只退役其中一个 view，剩余三 view 仍回填全部值：81 次唯一扫描、拒绝 0、通知 1、聚合重枚举 3。所有 Private Desktop watchdog exit 0，前台与最后输入未变，隔离桌面和夹具清理通过。
 
 这补足同进程合成 provider 的四根并发、全关取消及单 view 退役接管证据；仍未覆盖队列被其它产品任务占满、慢网络/磁盘、多个 Explorer Dirs 进程的共享策略、真实 ExplorerBrowser 或可见刷新。递归大小列依旧只在 NativeProbe，不接入产品。
+
+### 2026-11-01：ExplorerBrowser 产品接线架构评审
+
+源码核对确认，产品每个窗格由 WPF `ExplorerBrowserHost : HwndHost` 创建 `IExplorerBrowser`，在导航完成后取得 Shell `IShellView`，并用 `IColumnManager` 保存/恢复 Windows 文件夹本身公开的列。这里没有受支持的接口可向当前 DefView 增加一列由应用按行提供、可参与 Shell 排序的值；隔离 `IShellView` 原型通过 `IShellFolder2` 暴露自定义 `PROPERTYKEY` 才能让 DefView 消费该列。
+
+原型 provider 已能用普通文件系统作 backing folder，并转发一部分枚举、项目身份与 `IFileOperation` 请求；但这仍不能作为在现有 ExplorerBrowser 中替换单个回调的插件。要让产品打开物理路径时得到派生列，导航必须先解析到包装 namespace 的 PIDL，再由包装父/子 folder 维持相同身份链。当前产品会话、地址栏、历史记录、文件夹树、Shell 通知、跨窗格拖放/剪贴板、菜单命令路由和虚拟位置都以现有 Shell 路径及 ExplorerBrowser 生命周期为基础；接入会触及整个窗格的导航和对象身份边界。
+
+已有隔离证据覆盖：Details 列值和数值排序、异步两 worker 批次、排序回填重排、同根去重、多根并发、队列背压重试、view 关闭取消，以及合成文件夹上的部分 Shell 文件操作与对象菜单接口。未覆盖：完整 OLE `DoDragDrop` 源端、可见原生菜单命令路由、完整剪切/撤销重做行为、真实多进程缓存/通知、普通真实文件夹上的完整 namespace 回环、ExplorerBrowser 产品宿主，以及用户可见刷新闪烁。隐藏 view 的焦点/选区测试也出现过一次不稳定，不能当作已关闭门槛。
+
+结论：递归大小列的异步 provider 原型已足以证明“Shell 自定义文件夹可以提供可排序的派生列”，不再需要重复扩展同类隐藏 DefView 压力。它尚不足以证明可安全接入产品；应保持 NativeProbe 隔离，下一阶段把验证集中到最关键的迁移切片：让 ExplorerBrowser 宿主导航到一个包装的真实本地文件夹，验证返回路径/面包屑/父级导航、标准文件与背景菜单执行、单项重命名及 Shell 通知后列刷新，再确认退出与重开无残留注册。只有该切片在可见 UI 中通过，才评估四窗格和会话接线；若这些基础 Shell 行为需要由应用重做，则将迁移成本与收益重新评估，不把列原型并入当前产品。
+
+本评审是基于当前源码与已有隔离探针的路线判断，不是 ExplorerBrowser 原型运行或用户可见验收。本轮没有改产品宿主、发布包或用户级 Shell 注册；该列仍未实现于 Explorer Dirs。
