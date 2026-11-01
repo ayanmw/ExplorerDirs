@@ -2507,3 +2507,10 @@ NativeProbe Release 构建 0 警告/错误；Private Desktop watchdog exit 0，�
 生命周期顺序约束：在 `FolderOpenRouter.TryStart` 成功之后、恢复任一 ExplorerBrowser 窗口之前检查并重建当前 profile 的 CLSID/NameSpace volatile 注册；正常退出时先销毁所有 view 并释放 namespace owner/注册，再释放 FolderOpenRouter 的 profile 锁，避免新进程抢锁后与旧注册清理交错。进程崩溃时锁会自动释放而 volatile 键仍存活，所以下次单实例启动可安全识别本 profile 的旧注册并重新建立。该结论是从已有生命周期代码与 probe 结果推导的接线顺序，尚未实现或运行。
 
 隔离预览发布脚本目前会复制 `ShellNamespace.ini`、会话注册表和各窗口会话；一旦这些状态含有 provider CLSID 的 parsing name，直接复制会让两个 profile 共用身份。产品接线前必须为副本分配新 CLSID，并在复制时重写所有窗口会话及其它已确认的 profile 内 provider parsing name；不能只改 INI 后保留旧路径。后续优先在纯配置/SessionStore smoke 中验证这种重映射，再实现 App 级 volatile owner 生命周期；仍不启用产品递归列或更新 release。
+### 2026-11-02：隔离预览 profile 身份重映射复核与快速链接 PIDL 缺口
+
+重新检查当前 `scripts/publish.ps1` 并运行 `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/publish-smoke.ps1`：exit 0，输出 `Publish isolation smoke: PASS (fixture payload only; no real release or GUI)`。现有脚本在隔离预览副本中生成不同于源 profile 的 CLSID，重写复制的 INI 和 `.qdr` 中 `ExplorerDirs.State` Base64 JSON；测试还确认两次预览获得不同 CLSID、源 profile fixture 哈希不变、QDR `DirN` 物理路径保留。未改动脚本或真实 releases。
+
+此 smoke 当前没有用生产 `SessionStore.Parse` 读回重映射后的合法窗口会话：其 `ExplorerDirs.ini` 和第二窗口 fixture 只有简化 `Path=...` 文本，所以它证明发布脚本替换文本，不单独证明 SessionStore 的实际完整格式能恢复新路径。另从生产 `QuickLinkStore.AddFolderLocation` 确认，普通/虚拟 Shell 文件夹使用 `IShellLink.SetIDList` 写 PIDL；隔离发布会原样复制 `QuickLinks/*.lnk`，不读取或重写二进制 PIDL。若链接指向本程序 provider，旧 CLSID 可能仍存在于副本中。当前产品尚未注册该 provider，因此实际用户链接路径尚未产生；这属于 provider 集成前仍需关闭的克隆兼容缺口。
+
+下一步为有效 `SessionStore` profile 做新旧 CLSID 的解析往返验证，并确定是否能安全识别/重建 `.lnk` 的 provider PIDL；不能识别的链接需明确保留原始目标或在隔离副本中跳过，不能静默导向另一 profile。此轮无窗口、无产品代码或 release 变更。
