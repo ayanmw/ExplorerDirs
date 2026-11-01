@@ -317,10 +317,12 @@ public static class SyntheticShellSortProbe
         var asyncQueueSaturationRequested = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_FORCE_QUEUE_SATURATION") == "1";
         var asyncParentBatchProbe = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_BATCH_BY_VIEW") == "1";
         var asyncCancelAfterQueueProbe = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_CANCEL_AFTER_QUEUE") == "1";
+        var asyncCancelSingleViewProbe = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_CANCEL_SINGLE_VIEW") == "1";
         var asyncPartialRequestProbe = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_PARTIAL_REQUEST") == "1";
         // Diagnostic only: hold both workers to expose queue rejection under distinct per-pane roots.
         var asyncQueueSaturationProbe = asyncSharedViewDistinctRoots && asyncQueueSaturationRequested;
-        var asyncQueueGateProbe = asyncQueueSaturationProbe || (asyncSharedViewDistinctRoots && asyncParentBatchProbe) || asyncCancelAfterQueueProbe || asyncPartialRequestProbe;
+        var asyncQueueGateProbe = asyncQueueSaturationProbe || (asyncSharedViewDistinctRoots && asyncParentBatchProbe) ||
+            asyncCancelAfterQueueProbe || asyncCancelSingleViewProbe || asyncPartialRequestProbe;
         if (asyncSharedViewProbe && asyncSharedViewCount is not (2 or 4))
             throw new ArgumentOutOfRangeException(nameof(asyncSharedViewCountText), "The shared recursive-size view probe accepts two or four active views.");
         if (asyncSharedViewRootMode is not ("same" or "distinct") ||
@@ -332,10 +334,12 @@ public static class SyntheticShellSortProbe
             throw new ArgumentException("View-batched recursive-size scanning requires four active views.", nameof(asyncParentBatchProbe));
         if (asyncCancelAfterQueueProbe && (!asyncParentBatchProbe || !asyncSharedViewProbe || asyncSharedViewCount != 4))
             throw new ArgumentException("Batch cancellation requires four active view batches.", nameof(asyncCancelAfterQueueProbe));
+        if (asyncCancelSingleViewProbe && (!asyncParentBatchProbe || !asyncSharedViewProbe || asyncSharedViewCount != 4 || asyncSharedViewDistinctRoots))
+            throw new ArgumentException("Single-view cancellation requires four batches sharing one root.", nameof(asyncCancelSingleViewProbe));
         if (asyncPartialRequestProbe && (!asyncParentBatchProbe || !asyncSharedViewProbe || asyncSharedViewCount != 4))
             throw new ArgumentException("Partial-row demand requires the four-view batch probe.", nameof(asyncPartialRequestProbe));
-        if (asyncCancelAfterQueueProbe && asyncPartialRequestProbe)
-            throw new ArgumentException("Queue cancellation and partial-row demand are separate probe scenarios.");
+        if ((asyncCancelAfterQueueProbe ? 1 : 0) + (asyncCancelSingleViewProbe ? 1 : 0) + (asyncPartialRequestProbe ? 1 : 0) > 1)
+            throw new ArgumentException("Cancellation and demand-observation probe scenarios are mutually exclusive.");
         if (asyncSharedViewProbe && (!recursiveDirectorySizeSortOnly || largeViewSortProbe || twoViewDistinctLocations || onDemandFolderCount < 2))
             throw new ArgumentException("The async shared-view probe requires the recursive-size view fixture, a single shared root, and no separate large-view sort strategy.");
         if (largeViewSortProbe && (!onDemandRecursiveSize || onDemandFolderCount == 0))
@@ -824,6 +828,46 @@ public static class SyntheticShellSortProbe
                             Console.WriteLine($"synthetic-async-recursive-size-cancel: queued-view-batches={getFinishedAfterCancellation()}; scans-after-close={scansAfterCancellation}; notifications-after-close={notificationsAfterCancellation}");
                             if (getFinishedAfterCancellation() < asyncSharedViewCount || scansAfterCancellation != 0 || notificationsAfterCancellation != 0)
                                 throw new IOException("Closing all held Shell views did not cancel queued recursive-size batches before scan or notification.");
+                            Marshal.GetDelegateForFunctionPointer<NativeVoidCall>(
+                                NativeLibrary.GetExport(module, "ClearSyntheticAsyncRecursiveSizeQueueGateForProbe"))();
+                            asyncQueueGateCreated = false;
+                            return 0;
+                        }
+                        if (asyncCancelSingleViewProbe)
+                        {
+                            Check(At<DestroyViewWindow>(view, 10)(view));
+                            viewWindowCreated = false;
+                            Check(Marshal.GetDelegateForFunctionPointer<RetireViewHoldForProbe>(NativeLibrary.GetExport(module,
+                                "RetireSyntheticSortViewHoldForProbe"))(view));
+                            Marshal.GetDelegateForFunctionPointer<NativeVoidCall>(
+                                NativeLibrary.GetExport(module, "ReleaseSyntheticAsyncRecursiveSizeQueueGateForProbe"))();
+                            var singleRetirementDeadline = Environment.TickCount64 + 20_000;
+                            var getFinishedAfterSingleRetirement = Marshal.GetDelegateForFunctionPointer<NativeLibraryUnloadContractSmoke>(
+                                NativeLibrary.GetExport(module, "GetSyntheticAsyncRecursiveSizeScanFinishedCountForProbe"));
+                            while (getFinishedAfterSingleRetirement() < asyncSharedViewCount &&
+                                Environment.TickCount64 < singleRetirementDeadline)
+                                Pump(25);
+                            var survivingViewsDeadline = Environment.TickCount64 + 10_000;
+                            var survivingViewsValuesReady = false;
+                            var enumDeltaAfterSingleRetirement = 0;
+                            while (Environment.TickCount64 < survivingViewsDeadline)
+                            {
+                                Pump(25);
+                                ReadSharedViewColumns();
+                                survivingViewsValuesReady = AllSharedAsyncColumnValuesReady();
+                                enumDeltaAfterSingleRetirement = ReadCounter(module, "GetSyntheticEnumObjectsCount") - initialEnumerationCount;
+                                if (survivingViewsValuesReady && enumDeltaAfterSingleRetirement >= asyncSharedViewCount - 1 &&
+                                    ReadCounter(module, "GetSyntheticAsyncRecursiveSizeNotificationCountForProbe") > 0)
+                                    break;
+                            }
+                            var scansAfterSingleRetirement = ReadCounter(module, "GetSyntheticOnDemandSizeScanCount");
+                            var notificationsAfterSingleRetirement = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeNotificationCountForProbe");
+                            Console.WriteLine($"synthetic-async-recursive-size-single-view-retirement: finished-batches={getFinishedAfterSingleRetirement()}; surviving-views-values-ready={survivingViewsValuesReady}; scans={scansAfterSingleRetirement}; expected-unique-scans={onDemandFolderCount + 1}; notifications={notificationsAfterSingleRetirement}; enum-delta={enumDeltaAfterSingleRetirement}");
+                            if (getFinishedAfterSingleRetirement() < asyncSharedViewCount ||
+                                scansAfterSingleRetirement != onDemandFolderCount + 1 ||
+                                notificationsAfterSingleRetirement == 0 || enumDeltaAfterSingleRetirement < asyncSharedViewCount - 1 ||
+                                !survivingViewsValuesReady || rejectedBeforeRelease != 0)
+                                throw new IOException("Surviving same-root views did not take over the retired view's recursive-size work exactly once.");
                             Marshal.GetDelegateForFunctionPointer<NativeVoidCall>(
                                 NativeLibrary.GetExport(module, "ClearSyntheticAsyncRecursiveSizeQueueGateForProbe"))();
                             asyncQueueGateCreated = false;
@@ -4314,6 +4358,7 @@ public static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ReleaseViewHold();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int RetireViewHoldForProbe(nint view);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SchedulePendingRefreshes();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CancelViewRefresh(nint view);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ScheduleSingleRefresh(nint view);

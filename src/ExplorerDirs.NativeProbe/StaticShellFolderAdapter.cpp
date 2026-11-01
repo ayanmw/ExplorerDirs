@@ -5738,6 +5738,25 @@ extern "C" __declspec(dllexport) void WINAPI ReleaseSyntheticSortViewHold()
     }
 }
 
+extern "C" __declspec(dllexport) HRESULT WINAPI RetireSyntheticSortViewHoldForProbe(IShellView* view)
+{
+    if (!view) return E_POINTER;
+    for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
+    {
+        auto* folder = static_cast<SyntheticSortFolder*>(InterlockedCompareExchangePointer(
+            &g_syntheticSortViewHolds[index], nullptr, nullptr));
+        if (!folder || !folder->OwnsShellView(view) ||
+            InterlockedCompareExchangePointer(&g_syntheticSortViewHolds[index], nullptr, folder) != folder)
+            continue;
+        folder->CancelPendingRefresh();
+        folder->CancelPendingBackingDirectoryUpdate();
+        folder->ReleaseViewHold();
+        folder->Release();
+        return S_OK;
+    }
+    return E_INVALIDARG;
+}
+
 extern "C" __declspec(dllexport) HRESULT WINAPI CancelSyntheticSortRefreshForProbe(IShellView* view)
 {
     if (!view) return E_POINTER;
