@@ -193,7 +193,7 @@ internal static class ShellViewHostFilterProbe
                 throw new Exception("Direct IShellView did not apply the ICommDlgBrowser3 filter to the isolated fixture.");
             if (recursiveSizeProjectionOnly)
             {
-                VerifyRecursiveSizePeerProjection(folderView, folderPidl, folder, parent, count, () =>
+                VerifyRecursiveSizePeerProjection(view, folderView, folderPidl, folder, parent, count, () =>
                 {
                     Check(At<DestroyViewWindow>(view, 10)(view));
                     created = false; // The projection probe destroys the real Shell view while a scan is pending.
@@ -1476,7 +1476,7 @@ internal static class ShellViewHostFilterProbe
         return listView;
     }
 
-    private static void VerifyRecursiveSizePeerProjection(nint folderView, nint folderPidl, nint shellFolder,
+    private static void VerifyRecursiveSizePeerProjection(nint shellView, nint folderView, nint folderPidl, nint shellFolder,
         nint parent, int expectedCount, Action destroyShellView)
     {
         var foreground = GetForegroundWindow();
@@ -1499,9 +1499,14 @@ internal static class ShellViewHostFilterProbe
                     throw new InvalidOperationException($"The Shell rows did not contain the recursive-size fixture '{expected}'.");
 
             var selectedRow = projection.Rows.Single(row => row.Name == "size-10");
-            VerifyPeerShellCommandMenu(shellFolder, parent, selectedRow.RelativePidl);
+            var secondarySelectedRow = projection.Rows.Single(row => row.Name == "size-2");
             var selectedIndex = projection.Rows.IndexOf(selectedRow);
             SetPeerListItemState(listView, selectedIndex, 0x0003, 0x0003);
+            VerifyPeerShellCommandMenu(shellView, shellFolder, parent, [selectedRow.RelativePidl], ["cut", "copy", "delete", "rename", "properties"]);
+            SetPeerListItemState(listView, projection.Rows.IndexOf(secondarySelectedRow), 0x0002, 0x0002);
+            VerifyPeerShellCommandMenu(shellView, shellFolder, parent,
+                [selectedRow.RelativePidl, secondarySelectedRow.RelativePidl], ["cut", "copy", "delete"]);
+            SetPeerListItemState(listView, projection.Rows.IndexOf(secondarySelectedRow), 0, 0x0002);
             var initialNames = ReadPeerListNames(listView);
             var initialIds = ReadPeerListRowIds(listView);
             var ownerThread = Environment.CurrentManagedThreadId;
@@ -1953,16 +1958,19 @@ internal static class ShellViewHostFilterProbe
         finally { Marshal.FreeHGlobal(itemPointer); Marshal.FreeHGlobal(buffer); }
     }
 
-    private static void VerifyPeerShellCommandMenu(nint shellFolder, nint owner, nint relativePidl)
+    private static void VerifyPeerShellCommandMenu(nint shellView, nint shellFolder, nint owner, IReadOnlyList<nint> relativePidls,
+        IReadOnlyList<string> requiredVerbs)
     {
-        var children = Marshal.AllocHGlobal(IntPtr.Size);
+        var children = Marshal.AllocHGlobal(IntPtr.Size * relativePidls.Count);
         nint contextMenu = 0;
         object? contextObject = null;
         try
         {
-            Marshal.WriteIntPtr(children, relativePidl);
+            for (var index = 0; index < relativePidls.Count; index++)
+                Marshal.WriteIntPtr(children, index * IntPtr.Size, relativePidls[index]);
             var menuId = ContextMenuId;
-            Check(At<GetUIObjectOf>(shellFolder, 10)(shellFolder, owner, 1, children, in menuId, 0, out contextMenu));
+            Check(At<GetUIObjectOf>(shellFolder, 10)(shellFolder, owner, (uint)relativePidls.Count, children,
+                in menuId, 0, out contextMenu));
             if (contextMenu == 0) throw new InvalidOperationException("The selected Shell row did not provide an IContextMenu.");
             contextObject = Marshal.GetObjectForIUnknown(contextMenu);
         }
@@ -1973,11 +1981,46 @@ internal static class ShellViewHostFilterProbe
         }
 
         using var commands = new NativeShellCommandMenu(contextObject!, owner);
-        var requiredVerbs = new[] { "cut", "copy", "delete", "rename", "properties" };
         var enabledVerbs = requiredVerbs.Where(commands.IsEnabled).ToArray();
-        if (enabledVerbs.Length != requiredVerbs.Length)
+        if (enabledVerbs.Length != requiredVerbs.Count)
             throw new InvalidOperationException($"The product Shell command adapter did not expose all selected-row verbs: enabled=[{string.Join(',', enabledVerbs)}].");
-        Console.WriteLine($"ishellview-peer-selected-context-menu: source=IShellFolder.GetUIObjectOf; adapter=NativeShellCommandMenu; enabled=[{string.Join(',', enabledVerbs)}]; popup-shown=False; command-invoked=False");
+        Console.WriteLine($"ishellview-peer-selected-context-menu: selected-count={relativePidls.Count}; source=IShellFolder.GetUIObjectOf; adapter=NativeShellCommandMenu; enabled=[{string.Join(',', enabledVerbs)}]; popup-shown=False; command-invoked=False");
+
+        var commandStates = ShellFileCommands.Query(background => OpenPeerShellCommandMenu(
+            background, shellView, shellFolder, owner, relativePidls));
+        if (!commandStates.GetValueOrDefault(ShellFileCommand.Copy) ||
+            !commandStates.GetValueOrDefault(ShellFileCommand.Delete) ||
+            !commandStates.GetValueOrDefault(ShellFileCommand.NewFolder))
+            throw new InvalidOperationException($"The product ShellFileCommands query did not combine selected and background verbs correctly: {string.Join(',', commandStates.Select(pair => $"{pair.Key}={pair.Value}"))}.");
+        Console.WriteLine($"ishellview-peer-command-matrix: selected-count={relativePidls.Count}; copy={commandStates[ShellFileCommand.Copy]}; delete={commandStates[ShellFileCommand.Delete]}; new-folder={commandStates[ShellFileCommand.NewFolder]}; query=ShellFileCommands.Query; popup-shown=False");
+    }
+
+    private static IShellCommandMenu? OpenPeerShellCommandMenu(bool background, nint shellView,
+        nint shellFolder, nint owner, IReadOnlyList<nint> relativePidls)
+    {
+        nint contextMenu = 0;
+        if (background)
+        {
+            var menuId = ContextMenuId;
+            Check(At<GetItemObject>(shellView, 15)(shellView, 0, ref menuId, out contextMenu)); // SVGIO_BACKGROUND
+        }
+        else
+        {
+            var children = Marshal.AllocHGlobal(IntPtr.Size * relativePidls.Count);
+            try
+            {
+                for (var index = 0; index < relativePidls.Count; index++)
+                    Marshal.WriteIntPtr(children, index * IntPtr.Size, relativePidls[index]);
+                var menuId = ContextMenuId;
+                Check(At<GetUIObjectOf>(shellFolder, 10)(shellFolder, owner, (uint)relativePidls.Count,
+                    children, in menuId, 0, out contextMenu));
+            }
+            finally { Marshal.FreeHGlobal(children); }
+        }
+
+        if (contextMenu == 0) return null;
+        try { return new NativeShellCommandMenu(Marshal.GetObjectForIUnknown(contextMenu), owner); }
+        finally { Marshal.Release(contextMenu); }
     }
 
     private static void VerifyPeerListDetails(nint listView, IReadOnlyList<PeerShellRow> rows)

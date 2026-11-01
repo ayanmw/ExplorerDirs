@@ -1842,3 +1842,5 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 在同一隐藏真实 `IShellView` 行投影中保留每行相对 PIDL；从选中 `size-10` 行的相对 PIDL 调用真实父 `IShellFolder.GetUIObjectOf(IContextMenu)`，再将 COM 菜单交给产品 `NativeShellCommandMenu`。产品适配器识别并确认 `cut/copy/delete/rename/properties` 均启用；未显示 popup、未调用动词，也未接触系统剪贴板。此前已通过的按需递归扫描、排序、通知失效和焦点合同继续通过。NativeProbe Release build 0 警告/错误，Private Desktop 探针 exit 0，前台/last-input 与隔离清理守卫通过。
 
 此切片证明自控列表可按真实所选 PIDL取得 Shell 原生命令状态，并复用产品命令适配器；不证明菜单可见外观、owner-draw/第三方扩展消息、实际命令执行、剪贴板、撤销重做、OLE 拖放或产品窗格接线。相对 PIDL 只在当前 peer 行快照生命周期内持有，随行快照替换释放；产品和 release 未改变。
+
+同一命令矩阵现扩展到真实 peer ListView 单选与双选：所选项菜单从一个或两个相对 PIDL 构建，`ShellFileCommands.Query` 同时读取所选项和 view-owned 背景菜单。单选时 Copy/Delete/Rename/Properties 与 Cut 可用；双选时 Copy/Delete/Cut 仍可用；两种情况下背景 New Folder 均可用。Release build 与 Private Desktop 探针重复通过，菜单未显示且未执行命令。该矩阵只核对命令可用状态，不验证剪贴板/删除等动词的多选执行效果。
