@@ -78,6 +78,8 @@ internal static class ShellProviderLocationProbe
                 Console.WriteLine($"shell-provider-product-async-large-readiness-adapter: path={adapterPath}");
             stage = "load-product-adapter";
             adapter = NativeLibrary.Load(adapterPath);
+            if (largeSortReadiness && NativeLibrary.TryGetExport(adapter, "SetProductCompareTraceEnabled", out var compareTraceSwitch))
+                Marshal.GetDelegateForFunctionPointer<SetFlag>(compareTraceSwitch)(0);
             var configure = GetExport<ConfigureShellNamespaceRoot>(adapter, "ConfigureShellNamespaceRoot");
             Check(configure(ref classId, fallbackRoot));
             if ((notificationBurst || notificationDirectory || notificationItems) && NativeLibrary.TryGetExport(adapter, "SetProductViewNotificationsUseSyntheticRoot", out var notificationRootAddress))
@@ -510,10 +512,11 @@ internal static class ShellProviderLocationProbe
                 stage = "production-initial-sort-after-async-fill";
                 ResetProductCompareDiagnostics(adapter);
                 var largeReadinessCountTrace = largeSortReadiness ? new List<string>() : null;
-                var observation = ObserveProductSort(hostType, host, capture, readRows, readItemCounts,
-                    nameColumn, TimeSpan.FromSeconds(20), expectedSizeSortedNames,
-                    sampleIntervalMilliseconds: largeSortReadiness ? 100 : 20,
-                    orderedCountTrace: largeReadinessCountTrace);
+                var observation = largeSortReadiness
+                    ? ObserveProductLargeSortWithCountSampling(hostType, host, capture, readRows, readItemCounts,
+                        nameColumn, expectedSizeSortedNames, adapter, largeReadinessCountTrace!)
+                    : ObserveProductSort(hostType, host, capture, readRows, readItemCounts,
+                        nameColumn, TimeSpan.FromSeconds(20), expectedSizeSortedNames);
                 var compareDiagnosticsAfterScheduledSort = largeSortReadiness ? [] : ReadProductCompareDiagnostics(adapter);
                 if (!observation.Names.SequenceEqual(expectedSizeSortedNames, StringComparer.OrdinalIgnoreCase))
                     throw new TimeoutException("The production navigation restore did not sort by recursive size after asynchronous values completed.");
@@ -1531,6 +1534,77 @@ internal static class ShellProviderLocationProbe
             nativeListViewRowSnapshots.Order(StringComparer.Ordinal).ToArray(), exportRowCounts.Order().ToArray(), transientReadErrors);
     }
 
+    private static (string[] Names, int[] ShellItemCounts, int[] NativeListViewCounts, string[] NativeListViewRowSnapshots, int[] ExportRowCounts, int TransientReadErrors) ObserveProductLargeSortWithCountSampling(
+        Type hostType, HwndHost host, MethodInfo capture, MethodInfo readRows, MethodInfo readItemCounts,
+        int nameColumn, string[] expectedNames, nint adapter, List<string> countTrace)
+    {
+        const int expectedCount = 1002;
+        var shellCounts = new HashSet<int>();
+        var listViewCounts = new HashSet<int>();
+        var exportCounts = new HashSet<int>();
+        var nativeViewField = hostType.GetField("_viewWindow", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var elapsed = Stopwatch.StartNew();
+        var lastCounts = string.Empty;
+        var stableFullCountSamples = 0;
+        string[] names = [];
+        do
+        {
+            try
+            {
+                var liveCounts = readItemCounts.Invoke(host, [false, false]);
+                var shellCount = liveCounts is null ? -1 :
+                    (int)liveCounts.GetType().GetProperty("Total")!.GetValue(liveCounts)!;
+                var listCount = ReadNativeListViewItemCount((nint)nativeViewField.GetValue(host)!);
+                shellCounts.Add(shellCount);
+                listViewCounts.Add(listCount);
+                var compareCount = ReadProductLongCounter(adapter, "GetProductRecursiveCompareCount");
+                var enumStarted = ReadProductDiagnosticCounter(adapter, "GetProductSyntheticEnumStarted");
+                var enumCompleted = ReadProductDiagnosticCounter(adapter, "GetProductSyntheticEnumCompleted");
+                var enumItems = ReadProductLongCounter(adapter, "GetProductSyntheticEnumItemCount");
+                var enumTotalMilliseconds = ReadProductLongCounter(adapter, "GetProductSyntheticEnumTotalMilliseconds");
+                var enumMaximumMilliseconds = ReadProductLongCounter(adapter, "GetProductSyntheticEnumMaximumMilliseconds");
+                var counts = $"{shellCount}/{listCount}";
+                var transition = $"{counts}/compare-{FormatProbeCounter(compareCount)}/enum={enumStarted}/{enumCompleted}/items-{FormatProbeCounter(enumItems)}/enum-ms={FormatProbeCounter(enumTotalMilliseconds)}/{FormatProbeCounter(enumMaximumMilliseconds)}";
+                if (!string.Equals(counts, lastCounts, StringComparison.Ordinal))
+                {
+                    countTrace.Add($"{elapsed.ElapsedMilliseconds}ms={transition}");
+                    lastCounts = counts;
+                }
+
+                if (shellCount == expectedCount && listCount == expectedCount)
+                {
+                    stableFullCountSamples++;
+                    if (stableFullCountSamples >= 5)
+                    {
+                        // Read full Shell row data only after the cheap count samples settle, so the observer
+                        // does not repeatedly enumerate all 1,002 rows while DefView is rebuilding them.
+                        var snapshot = capture.Invoke(host, null)!;
+                        var export = readRows.Invoke(null, [snapshot])!;
+                        var rows = (string[][])export.GetType().GetField("Item2")!.GetValue(export)!;
+                        names = rows.Select(row => Path.GetFileName(row[nameColumn]) ?? row[nameColumn]).ToArray();
+                        exportCounts.Add(names.Length);
+                        if (names.SequenceEqual(expectedNames, StringComparer.OrdinalIgnoreCase)) break;
+                        stableFullCountSamples = 0;
+                    }
+                }
+                else stableFullCountSamples = 0;
+            }
+            catch (TargetInvocationException exception) when (IsTransientShellReadError(exception)) { }
+            PumpDispatcher(TimeSpan.FromMilliseconds(20));
+        } while (elapsed.Elapsed < TimeSpan.FromSeconds(20));
+
+        return (names, shellCounts.Order().ToArray(), listViewCounts.Order().ToArray(), [],
+            exportCounts.Order().ToArray(), 0);
+    }
+
+    private static long? ReadProductLongCounter(nint adapter, string exportName) =>
+        NativeLibrary.TryGetExport(adapter, exportName, out var address)
+            ? Marshal.GetDelegateForFunctionPointer<GetCounter64>(address)()
+            : null;
+
+    private static string FormatProbeCounter(long? value) =>
+        value?.ToString(CultureInfo.InvariantCulture) ?? "unavailable";
+
     private static (int[] ShellItemCounts, int[] ExportRowCounts, int FinalShellItems, int FinalExportRows) ObserveProductRowCounts(
         Type hostType, HwndHost host, TimeSpan duration)
     {
@@ -2306,6 +2380,7 @@ internal static class ShellProviderLocationProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetClassId(ref Guid classId);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetFlag(int enabled);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCounter();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate long GetCounter64();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ResetProductCompareDiagnosticsDelegate();
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)]
     private delegate int GetProductCompareDiagnostic(int index, StringBuilder buffer, uint capacity);

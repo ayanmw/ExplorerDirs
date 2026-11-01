@@ -12,8 +12,15 @@ EXPORTS
     GetProductAsyncItemNotificationIdentity
     GetProductViewItemNotificationCallbackCount
     ResetProductCompareDiagnostics
+    SetProductCompareTraceEnabled
     GetProductCompareDiagnosticCount
     GetProductCompareDiagnostic
+    GetProductSyntheticEnumStarted
+    GetProductSyntheticEnumCompleted
+    GetProductSyntheticEnumItemCount
+    GetProductSyntheticEnumTotalMilliseconds
+    GetProductSyntheticEnumMaximumMilliseconds
+    GetProductRecursiveCompareCount
     GetProductViewGetNotifyCallCount
     GetProductViewGetNotifyEventMask
     GetProductViewGetNotifyRootIdentity

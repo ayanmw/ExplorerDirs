@@ -1,4 +1,4 @@
-2026-10-31 自有行模型属性事件合同补充：NativeProbe 的合成 adapter 事件分类现在包含 `SHCNE_ATTRIBUTES`，以便只读/隐藏等属性变化使行模型重新枚举；仅完成 classifier smoke 与编译，未创建 Shell view 或验证真实通知/绘制。它属于隔离 IShellView 迁移原型，不是当前 ExplorerBrowser 产品功能。详见[隔离调查](folder-size-column-investigation.md#2026-10-31-隔离属性变更通知分类)。
+﻿2026-10-31 自有行模型属性事件合同补充：NativeProbe 的合成 adapter 事件分类现在包含 `SHCNE_ATTRIBUTES`，以便只读/隐藏等属性变化使行模型重新枚举；仅完成 classifier smoke 与编译，未创建 Shell view 或验证真实通知/绘制。它属于隔离 IShellView 迁移原型，不是当前 ExplorerBrowser 产品功能。详见[隔离调查](folder-size-column-investigation.md#2026-10-31-隔离属性变更通知分类)。
 
 2026-11-01 隔离自有行模型颜色绘制：NativeProbe 的 Win32 `SysListView32` 基线把现有颜色规则 evaluator 接到 `NM_CUSTOMDRAW`，文件通配规则和 `#DIR` 文件夹规则在 Icon、Details、SmallIcon、List、Tile、Content 六种样式下均生成预期的未选中行背景色；选中行交由默认绘制以保持系统选择外观。Release 构建、规则 smoke 和 Private Desktop watchdog 通过。此为自绘列表原型证据，不是 ExplorerBrowser/DefView/Q-Dir `.qdr` 导入接线，也没有可见 UI 验收。
 
@@ -576,3 +576,5 @@ Q-Dir 官方 FAQ 38 将名称通配符过滤和列值过滤分别介绍，并说
 2026-11-02 产品 ExplorerBrowserHost 按需递归列复验：真实产品 adapter / host 读取 5/29 B 并保留升序键，但值完成后不自动重排；显式排序使行序正确却短暂 0→2。此为隐藏宿主结果，无可见绘制证据；递归列仍限实验标签。
 2026-11-02 递归大小列异步排序门控：定位固定延迟早于值回填的竞态；改为当前 Shell 自定义排序列全部有值后再触发排序。生产 ExplorerBrowserHost 隐藏 HostProbe 无手动补排 6/6 正确升序，Shell/ListView/export 行数稳定 2。可见 UI、大目录和慢存储仍待验。
 2026-11-02 递归列大列表门控改为 8 行分批并在 Dispatcher 批次间让步；1,002 行隐藏 HostProbe 单批约 5.8–8.6 ms，升序正确。曾有一轮采样到 1002→0→1002，随后复跑未重现，仍按间歇性空列表风险处理；真实可见帧与慢 provider 待验，见[递归大小调查](folder-size-column-investigation.md)。
+
+2026-11-02 1,002 行递归列排序对照：隐藏诊断 HostProbe 5 轮保留轨迹中 2 轮有短暂 0 行，另有一次运行输出未留存；空窗同步大量 CompareIDs（约 5k–10k 次），SyntheticSortFolder.EnumObjects 为 0，最后排序正确。线索指向 DefView 比较重排期间撤项，但不能排除其它 Shell 枚举，且没有可见帧证据。未将 redraw 抑制接入产品。详见[调查记录](folder-size-column-investigation.md#2026-11-021002-行空列表期间的-shell-排序计数对照)。

@@ -5968,3 +5968,5 @@ peer SysListView32 现读取 Shell 文件夹的名称、大小、项目类型、
 2026-11-02 生产 ExplorerBrowserHost 按需列复验：产品 adapter 的隐藏宿主读到 5/29 B、排序键升序且前台不变，但异步值到达后没有自动重排；显式 Shell 排序后顺序正确，同时 Shell/ListView/export 发生 0→2。可见原型验收前仍需解决异步排序触发与空列表帧问题；隐藏宿主不能证明像素闪烁。
 
 2026-11-02 更正递归大小列排序结论：固定 100 ms 延迟调度会抢在 Shell 异步值回填前执行，导致偶发未按大小排序。现在先轮询当前未解析排序列的 Shell `GetDetailsOf` 值，任一行为空则继续等待；不重复扫描磁盘。移除 HostProbe 手动补排序后，生产 adapter + ExplorerBrowserHost 连续 6/6 自动升序通过，行数全程 2，前台不变。只证明小型隐藏宿主合同；可见像素、大目录轮询成本和慢/失败扫描待验。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-02异步递归列排序等待值就绪更正固定延迟结论)。
+
+2026-11-02 1,002 行递归列排序诊断：隔离诊断 DLL 轻量计数显示 保留轨迹的隐藏探针 5 次中有 2 次短暂空列表，另有一次运行输出未留存，空窗期间递归列 CompareIDs 持续增长约 5k–10k；SyntheticSortFolder.EnumObjects 计数保持 0，最终排序正确。更像 DefView 在比较重排期间暂时撤项，不支持将其归因于应用分批就绪扫描；仍不能排除包装层之外的 Shell 枚举，也无可见帧证据。产品未改，redraw 抑制未接线。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-021002-行空列表期间的-shell-排序计数对照)。

@@ -166,10 +166,34 @@ namespace
 #if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
     std::mutex g_productCompareDiagnosticMutex;
     std::vector<std::wstring> g_productCompareDiagnostics;
+    volatile LONG g_productCompareTraceEnabled = 1;
+    volatile LONG g_productSyntheticEnumStarted = 0;
+    volatile LONG g_productSyntheticEnumCompleted = 0;
+    volatile LONG64 g_productSyntheticEnumItemCount = 0;
+    volatile LONG64 g_productSyntheticEnumTotalMilliseconds = 0;
+    volatile LONG64 g_productSyntheticEnumMaximumMilliseconds = 0;
+    volatile LONG64 g_productRecursiveCompareCount = 0;
+
+    void RecordProductSyntheticEnum(ULONGLONG startMilliseconds, size_t itemCount)
+    {
+        const auto elapsed = GetTickCount64() - startMilliseconds;
+        InterlockedIncrement(&g_productSyntheticEnumCompleted);
+        InterlockedAdd64(&g_productSyntheticEnumItemCount, static_cast<LONG64>(itemCount));
+        InterlockedAdd64(&g_productSyntheticEnumTotalMilliseconds, static_cast<LONG64>(elapsed));
+        auto maximum = InterlockedCompareExchange64(&g_productSyntheticEnumMaximumMilliseconds, 0, 0);
+        while (maximum < static_cast<LONG64>(elapsed))
+        {
+            const auto previous = InterlockedCompareExchange64(&g_productSyntheticEnumMaximumMilliseconds,
+                static_cast<LONG64>(elapsed), maximum);
+            if (previous == maximum) break;
+            maximum = previous;
+        }
+    }
 
     void RecordProductCompareDiagnostic(LPARAM column, PCWSTR leftName, ULONGLONG leftSize,
         PCWSTR rightName, ULONGLONG rightSize, short comparison)
     {
+        if (!InterlockedCompareExchange(&g_productCompareTraceEnabled, 0, 0)) return;
         std::lock_guard<std::mutex> lock(g_productCompareDiagnosticMutex);
         if (g_productCompareDiagnostics.size() >= 512) return;
         g_productCompareDiagnostics.push_back(L"column=" + std::to_wstring(LOWORD(column)) +
@@ -3294,8 +3318,21 @@ namespace
             if (!_inner) return E_UNEXPECTED;
             std::vector<SyntheticChild> children;
             HRESULT result = S_OK;
+#if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
+            const auto enumStartMilliseconds = GetTickCount64();
+            InterlockedIncrement(&g_productSyntheticEnumStarted);
+#endif
             try { result = EnumerateBackingChildren(_backingPath, flags, &children); }
-            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+            catch (const std::bad_alloc&)
+            {
+#if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
+                RecordProductSyntheticEnum(enumStartMilliseconds, 0);
+#endif
+                return E_OUTOFMEMORY;
+            }
+#if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
+            RecordProductSyntheticEnum(enumStartMilliseconds, children.size());
+#endif
             if (FAILED(result)) return result;
             if (_recursiveSizeStore &&
                 InterlockedCompareExchange(&g_syntheticTranslateChildNotificationsForProbe, 0, 0) &&
@@ -3446,6 +3483,9 @@ namespace
             {
             case 0: comparison = static_cast<short>(_wcsicmp(leftChild->name, rightChild->name)); break;
             case 1:
+#if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
+                InterlockedIncrement64(&g_productRecursiveCompareCount);
+#endif
                 if (!g_syntheticSizeMetricsObservation) ED_PROBE_METRIC_INCREMENT(g_syntheticSizeCompareCount);
             {
                 const bool ignoreFolderSize =
@@ -5196,7 +5236,34 @@ extern "C" void WINAPI ResetProductCompareDiagnostics()
 {
     std::lock_guard<std::mutex> lock(g_productCompareDiagnosticMutex);
     g_productCompareDiagnostics.clear();
+    InterlockedExchange(&g_productSyntheticEnumStarted, 0);
+    InterlockedExchange(&g_productSyntheticEnumCompleted, 0);
+    InterlockedExchange64(&g_productSyntheticEnumItemCount, 0);
+    InterlockedExchange64(&g_productSyntheticEnumTotalMilliseconds, 0);
+    InterlockedExchange64(&g_productSyntheticEnumMaximumMilliseconds, 0);
+    InterlockedExchange64(&g_productRecursiveCompareCount, 0);
 }
+
+extern "C" void WINAPI SetProductCompareTraceEnabled(BOOL enabled)
+{ InterlockedExchange(&g_productCompareTraceEnabled, enabled ? 1 : 0); }
+
+extern "C" LONG WINAPI GetProductSyntheticEnumStarted()
+{ return InterlockedCompareExchange(&g_productSyntheticEnumStarted, 0, 0); }
+
+extern "C" LONG WINAPI GetProductSyntheticEnumCompleted()
+{ return InterlockedCompareExchange(&g_productSyntheticEnumCompleted, 0, 0); }
+
+extern "C" LONGLONG WINAPI GetProductSyntheticEnumItemCount()
+{ return InterlockedCompareExchange64(&g_productSyntheticEnumItemCount, 0, 0); }
+
+extern "C" LONGLONG WINAPI GetProductSyntheticEnumTotalMilliseconds()
+{ return InterlockedCompareExchange64(&g_productSyntheticEnumTotalMilliseconds, 0, 0); }
+
+extern "C" LONGLONG WINAPI GetProductSyntheticEnumMaximumMilliseconds()
+{ return InterlockedCompareExchange64(&g_productSyntheticEnumMaximumMilliseconds, 0, 0); }
+
+extern "C" LONGLONG WINAPI GetProductRecursiveCompareCount()
+{ return InterlockedCompareExchange64(&g_productRecursiveCompareCount, 0, 0); }
 
 extern "C" LONG WINAPI GetProductCompareDiagnosticCount()
 {
