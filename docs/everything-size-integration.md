@@ -51,3 +51,7 @@ VerifyBackingColumnMetadataForProbe 在真实文件夹中确认修改/创建/访
 2026-11-02 普通窗格入口接线：MainWindow 从 FolderSize.ini 向每个 Pane 配置 Enabled，新增视图菜单的文件夹大小开关，先保存成功再更新 provider 和窗格。AddTab 配置新宿主；已有 provider 关闭时只刷新，不替换宿主；启用既有普通目录时导航到当前逻辑路径。标签遍历使用快照并检查归属，避免 Shell 重入关闭或转移。App 构建和数据源、native bridge、location policy 检查通过，无产品窗口。真实选区保持、历史重复条目、Shell 自发导航、默认列恢复和文件操作尚待验收，不能覆盖发布包。
 
 2026-11-02 导航审查修复：provider 编码根不代表真实磁盘根，原 GoParent 的 Shell BrowseParent 会走内部 namespace 父级。现在仅 provider 使用物理路径上一层，磁盘/UNC 共享根回到此电脑；普通 Shell 和搜索导航保持原行为。Program Starter/克隆选区共用的项目路径采集也将本 profile provider identity 解码为物理路径，避免内部解析名泄漏给外部程序或丢失物理路径筛选项。location-policy 测试覆盖物理上级、嵌套、磁盘根、UNC、其他 profile 和普通路径，并通过；App Release build 零警告错误。无真实 Shell view，原生选择、快捷键和历史可见验收仍待执行。
+
+2026-11-02 开关转换选区保护：对普通视图启用 provider 前采集真实选区，以 browser/read generation/selection version 检查 COM 重入后的快照；失败不强行转换。隐藏标签延迟至激活后转换，避免现有选择恢复定时器因不可见直接取消；关闭开关清除待转换状态。来源刷新遍历也改为快照并检查归属，避免刷新重入导致集合变化。App Release build 与既有 view-state-restore 后台检查通过；本次快照/隐藏标签恢复尚缺真实宿主验收。
+
+官方 BrowseToIDList 文档仅列出部分支持的 SBSP 标志，不包含 WRITENOHISTORY；未据此添加未经验证的无历史标志。原生 Travel Log 的同路径身份转换仍可能产生额外条目，待解决，不能用应用层历史去重替代。资料：https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-iexplorerbrowser-browsetoidlist

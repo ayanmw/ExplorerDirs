@@ -91,6 +91,7 @@ public partial class PaneControl : UserControl
         public Button? CloseButton { get; set; }
         public bool SearchRequestPending { get; set; }
         public IReadOnlyList<string>? StartupSelectItems { get; set; }
+        public bool FolderSizeRoutingPending { get; set; }
         public string? StartupSearchUri { get; set; }
         public bool ReplayClonedHistory { get; set; }
         public bool HistoryReplayReady { get; set; }
@@ -747,8 +748,9 @@ public partial class PaneControl : UserControl
 
     internal void RefreshFolderSizeData()
     {
-        foreach (var state in _tabOrder.Select(tab => (TabState)tab.Tag))
-            if (state.Browser.HasNativeView && (state.Browser.IsFolderSizeProvider ||
+        // Refresh can pump Shell callbacks just like navigation; preserve the iteration snapshot.
+        foreach (var state in _tabOrder.Select(tab => (TabState)tab.Tag).ToArray())
+            if (state.Owner == this && _tabOrder.Contains(state.Tab) && state.Browser.HasNativeView && (state.Browser.IsFolderSizeProvider ||
                 QdrShellPathCodec.TryGetProviderPath(state.Path, _shellNamespaceProfileClassId, out _)))
                 state.Browser.Refresh();
     }
@@ -762,12 +764,27 @@ public partial class PaneControl : UserControl
             if (state.Owner != this || !_tabOrder.Contains(state.Tab)) continue;
             var browser = state.Browser;
             browser.ConfigureFolderSizeLocations(_shellNamespaceProfileClassId, enabled);
+            state.FolderSizeRoutingPending = enabled && browser.HasNativeView && !browser.IsFolderSizeProvider &&
+                browser.IsFileSystemLocation && browser.CurrentSearchUri is null;
             // Existing provider hosts retain their travel log when totals are disabled.
             // Uncreated hosts pick up this configuration on their first navigation.
             if (browser.HasNativeView && browser.IsFolderSizeProvider) browser.Refresh();
-            else if (enabled && browser.HasNativeView && browser.IsFileSystemLocation && browser.CurrentSearchUri is null)
-                browser.Navigate(browser.CurrentPath);
+            else TryRouteFolderSizes(state);
         }
+    }
+
+    private void TryRouteFolderSizes(TabState state)
+    {
+        // Selection restoration runs only for visible views; postpone hidden tabs until activated.
+        if (!state.FolderSizeRoutingPending || !_folderSizesEnabled || Current != state || !state.Browser.IsVisible) return;
+        var browser = state.Browser;
+        var path = browser.CurrentPath;
+        if (!browser.TryCaptureFolderSizeTransitionSelection(out var selection) ||
+            state.Owner != this || !_tabOrder.Contains(state.Tab) || Current != state ||
+            !FavoritesStore.SamePath(path, browser.CurrentPath)) return;
+        state.FolderSizeRoutingPending = false;
+        state.StartupSelectItems = selection;
+        browser.Navigate(path);
     }
 
     internal IReadOnlyList<string> SetHiddenItemsPreference(HiddenItemsPreference preference)
@@ -2823,6 +2840,7 @@ public partial class PaneControl : UserControl
         Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
         {
             if (Current != state) return;
+            TryRouteFolderSizes(state);
             state.Tab.BringIntoView();
             UpdateTabScrollButtons();
             // A later click or Tab/arrow move may have chosen another pane,

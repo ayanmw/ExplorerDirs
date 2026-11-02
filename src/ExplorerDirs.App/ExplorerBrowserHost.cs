@@ -265,6 +265,26 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         return CaptureProgramStarterItemPaths(1).Where(name => !string.IsNullOrWhiteSpace(name)).ToArray();
     }
 
+    internal bool TryCaptureFolderSizeTransitionSelection(out IReadOnlyList<string> selectedItems)
+    {
+        selectedItems = [];
+        var browser = _browser;
+        var generation = _viewReadiness.Generation;
+        var selectionVersion = _browserSite.SelectionVersion;
+        if (browser is null || _viewReadiness.Pending || _locationUnconfirmed || _location.IsSearchActive) return false;
+        try
+        {
+            var snapshot = CaptureProgramStarterItemPaths(1);
+            // Hidden, already-created tabs also retain selection. COM reads may navigate or change it.
+            if (!ReferenceEquals(browser, _browser) || generation != _viewReadiness.Generation ||
+                selectionVersion != _browserSite.SelectionVersion || _viewReadiness.Pending || _locationUnconfirmed)
+                return false;
+            selectedItems = snapshot.Where(name => !string.IsNullOrWhiteSpace(name)).ToArray();
+            return true;
+        }
+        catch (Exception) { return false; }
+    }
+
     internal IReadOnlyList<string> CaptureSelectedPathsForClipboard()
     {
         if (_browser is null || !IsVisible || _viewReadiness.Pending)
