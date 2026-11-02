@@ -12,16 +12,14 @@ internal static class ProfileOwnerSessionRecoveryProbe
     {
         var root = Path.Combine(Path.GetTempPath(), "ExplorerDirs-ProfileOwnerSession-" + Guid.NewGuid().ToString("N"));
         var profile = Path.Combine(root, "profile");
-        var folder = Path.Combine(root, "fixture");
+        var folders = new[] { Path.Combine(root, "fixture-one"), Path.Combine(root, "fixture-two") };
         var sessionPath = Path.Combine(profile, "ExplorerDirs.ini");
         object? owner = null;
         try
         {
             Directory.CreateDirectory(profile);
-            Directory.CreateDirectory(Path.Combine(folder, "folder-small"));
-            Directory.CreateDirectory(Path.Combine(folder, "folder-large"));
-            File.WriteAllBytes(Path.Combine(folder, "folder-small", "payload.bin"), new byte[5]);
-            File.WriteAllBytes(Path.Combine(folder, "folder-large", "payload.bin"), new byte[29]);
+            CreateFixture(folders[0], 5, 29);
+            CreateFixture(folders[1], 7, 31);
 
             var appAssembly = Assembly.Load("ExplorerDirs.App");
             var profileStoreType = appAssembly.GetType("ExplorerDirs.App.ShellNamespaceProfileStore", throwOnError: true)!;
@@ -34,19 +32,33 @@ internal static class ProfileOwnerSessionRecoveryProbe
 
             var codec = appAssembly.GetType("ExplorerDirs.App.QdrShellPathCodec", throwOnError: true)!;
             var identity = (string)codec.GetMethod("ToProviderIdentity", BindingFlags.Static | BindingFlags.NonPublic)!
-                .Invoke(null, [folder, classId])!;
+                .Invoke(null, [folders[0], classId])!;
+            var secondIdentity = (string)codec.GetMethod("ToProviderIdentity", BindingFlags.Static | BindingFlags.NonPublic)!
+                .Invoke(null, [folders[1], classId])!;
             var viewState = ProfileOwnerMultiRootShellHostProbe.CreateViewStateForProbe(appAssembly);
             SaveSession(appAssembly, sessionPath, identity, viewState);
-            if (!Directory.Exists(folder) || !File.Exists(sessionPath))
+            var registryType = appAssembly.GetType("ExplorerDirs.App.WindowSessionRegistry", throwOnError: true)!;
+            var registry = Activator.CreateInstance(registryType,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, [sessionPath], null)!;
+            var loadedPaths = (System.Collections.IEnumerable)registryType.GetMethod("Load")!.Invoke(registry, null)!;
+            var initialPaths = loadedPaths.Cast<string>().ToArray();
+            if (initialPaths.Length != 1 || !string.Equals(initialPaths[0], sessionPath, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("A new profile did not begin with only its primary window session.");
+            var secondaryState = CreateSessionState(appAssembly, secondIdentity, viewState);
+            var pinnedTabsType = appAssembly.GetType("ExplorerDirs.App.PinnedTabEntry", throwOnError: true)!;
+            var emptyPins = Array.CreateInstance(pinnedTabsType, 0);
+            var secondarySessionPath = (string)registryType.GetMethod("Create")!.Invoke(registry, [secondaryState, emptyPins])!;
+            if (!Directory.Exists(folders[0]) || !Directory.Exists(folders[1]) || !File.Exists(sessionPath) ||
+                !File.Exists(secondarySessionPath))
                 throw new InvalidOperationException("The profile session fixture was not persisted.");
 
             (owner as IDisposable)?.Dispose();
             owner = null;
             var child = StartChild(sessionPath, profile);
             if (child.ExitCode != 0)
-                throw new InvalidOperationException($"Fresh-process session recovery failed (exit {child.ExitCode}). stdout=[{child.StdOut}] stderr=[{child.StdErr}]");
+                throw new InvalidOperationException($"Fresh-process multi-window session recovery failed (exit {child.ExitCode}). stdout=[{child.StdOut}] stderr=[{child.StdErr}]");
 
-            Console.WriteLine($"profile-owner-session-recovery: fresh-process=True; stable-profile-id=True; session-tab-path=True; view-columns=3; recursive-values=[5|29]; child-exit={child.ExitCode}; child-output=[{child.StdOut.Trim()}]");
+            Console.WriteLine($"profile-owner-session-recovery: fresh-process=True; registered-windows=2; stable-profile-id=True; view-columns=3; recursive-values=[5|29 || 7|31]; child-exit={child.ExitCode}; child-output=[{child.StdOut.Trim()}]");
             return 0;
         }
         finally
@@ -69,62 +81,99 @@ internal static class ProfileOwnerSessionRecoveryProbe
         var classKeyPath = $@"Software\Classes\CLSID\{{{classId:D}}}";
         var namespaceKeyPath = $@"Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{{{classId:D}}}";
         HwndSource? source = null;
+        var hosts = new List<HwndHost>();
         try
         {
-            var sessionStoreType = appAssembly.GetType("ExplorerDirs.App.SessionStore", throwOnError: true)!;
-            var sessionStore = Activator.CreateInstance(sessionStoreType,
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null,
-                [sessionPath, Path.Combine(profile, "legacy-session.json")], null)!;
-            var session = sessionStoreType.GetMethod("Load")!.Invoke(sessionStore, null)
-                ?? throw new InvalidOperationException("The fresh process could not load its persisted session.");
-            var firstPane = ((System.Collections.IEnumerable)session.GetType().GetProperty("Panes")!.GetValue(session)!)
-                .Cast<object>().First();
-            var tab = ((System.Collections.IEnumerable)firstPane).Cast<object>().First();
-            var identity = (string)tab.GetType().GetProperty("Path")!.GetValue(tab)!;
-            var viewState = tab.GetType().GetProperty("View")!.GetValue(tab)!;
-            var codec = appAssembly.GetType("ExplorerDirs.App.QdrShellPathCodec", throwOnError: true)!;
-            var path = codec.GetMethod("ToQdrTextPath", BindingFlags.Static | BindingFlags.NonPublic)!
-                .Invoke(null, [identity, (Guid?)classId]) as string;
-            if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
-                throw new InvalidOperationException("The persisted provider tab no longer resolves to its physical folder.");
+            var registryType = appAssembly.GetType("ExplorerDirs.App.WindowSessionRegistry", throwOnError: true)!;
+            var registry = Activator.CreateInstance(registryType,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, [sessionPath], null)!;
+            var sessionPaths = ((System.Collections.IEnumerable)registryType.GetMethod("Load")!.Invoke(registry, null)!)
+                .Cast<string>().ToArray();
+            if (sessionPaths.Length != 2 || !string.Equals(sessionPaths[0], Path.GetFullPath(sessionPath), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"The fresh process did not restore both registered window sessions: [{string.Join('|', sessionPaths)}].");
 
-            var viewColumns = ((System.Collections.IEnumerable)viewState.GetType().GetProperty("DisplayColumns")!.GetValue(viewState)!)
-                .Cast<object>().ToArray();
-            if (viewColumns.Length != 3 || !viewColumns.Any(column =>
-                    column.GetType().GetProperty("Key")!.GetValue(column)!.ToString() ==
-                    "{9e5e05ac-1936-4a75-94f7-4704b8b01923}:1"))
-                throw new InvalidOperationException("The persisted session did not restore the recursive size column.");
+            var sessionStoreType = appAssembly.GetType("ExplorerDirs.App.SessionStore", throwOnError: true)!;
+            var restoredSessions = sessionPaths.Select(path =>
+            {
+                var store = Activator.CreateInstance(sessionStoreType,
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null,
+                    [path, Path.Combine(profile, "legacy-session.json")], null)!;
+                return sessionStoreType.GetMethod("Load")!.Invoke(store, null)
+                    ?? throw new InvalidOperationException($"The fresh process could not load window session '{Path.GetFileName(path)}'.");
+            }).ToArray();
+            var identities = new string[restoredSessions.Length];
+            var viewStates = new object[restoredSessions.Length];
+            var expectedSizes = new[] { new ulong[] { 5, 29 }, new ulong[] { 7, 31 } };
+            for (var index = 0; index < restoredSessions.Length; index++)
+            {
+                var firstPane = ((System.Collections.IEnumerable)restoredSessions[index].GetType()
+                    .GetProperty("Panes")!.GetValue(restoredSessions[index])!).Cast<object>().First();
+                var tab = ((System.Collections.IEnumerable)firstPane).Cast<object>().First();
+                identities[index] = (string)tab.GetType().GetProperty("Path")!.GetValue(tab)!;
+                viewStates[index] = tab.GetType().GetProperty("View")!.GetValue(tab)!;
+            }
+            var codec = appAssembly.GetType("ExplorerDirs.App.QdrShellPathCodec", throwOnError: true)!;
+            var viewColumns = new object[viewStates.Length][];
+            var paths = new string[identities.Length];
+            for (var index = 0; index < identities.Length; index++)
+            {
+                paths[index] = codec.GetMethod("ToQdrTextPath", BindingFlags.Static | BindingFlags.NonPublic)!
+                    .Invoke(null, [identities[index], (Guid?)classId]) as string ?? "";
+                if (!Directory.Exists(paths[index]))
+                    throw new InvalidOperationException($"Restored window {index + 1} provider tab no longer resolves to its physical folder.");
+                viewColumns[index] = ((System.Collections.IEnumerable)viewStates[index].GetType()
+                    .GetProperty("DisplayColumns")!.GetValue(viewStates[index])!).Cast<object>().ToArray();
+                if (viewColumns[index].Length != 3 || !viewColumns[index].Any(column =>
+                        column.GetType().GetProperty("Key")!.GetValue(column)!.ToString() ==
+                        "{9e5e05ac-1936-4a75-94f7-4704b8b01923}:1"))
+                    throw new InvalidOperationException($"Restored window {index + 1} did not retain the recursive size column.");
+            }
 
             var hostType = appAssembly.GetType("ExplorerDirs.App.ExplorerBrowserHost", throwOnError: true)!;
-            var host = (HwndHost)Activator.CreateInstance(hostType, identity, viewState)!;
-            var grid = new Grid { Width = 700, Height = 360 };
-            grid.Children.Add(host);
-            source = new HwndSource(new HwndSourceParameters("ExplorerDirs fresh-process session recovery")
+            var grid = new Grid { Width = 1400, Height = 500 };
+            grid.ColumnDefinitions.Add(new ColumnDefinition());
+            grid.ColumnDefinitions.Add(new ColumnDefinition());
+            for (var index = 0; index < identities.Length; index++)
             {
-                WindowStyle = unchecked((int)0x80000000), Width = 700, Height = 360
+                var host = (HwndHost)Activator.CreateInstance(hostType, identities[index], viewStates[index])!;
+                hosts.Add(host);
+                Grid.SetColumn(host, index);
+                grid.Children.Add(host);
+            }
+            source = new HwndSource(new HwndSourceParameters("ExplorerDirs fresh-process multi-window session recovery")
+            {
+                WindowStyle = unchecked((int)0x80000000), Width = 1400, Height = 500
             });
             source.RootVisual = grid;
-            grid.Measure(new Size(700, 360));
-            grid.Arrange(new Rect(0, 0, 700, 360));
+            grid.Measure(new Size(1400, 500));
+            grid.Arrange(new Rect(0, 0, 1400, 500));
             grid.UpdateLayout();
             if (source.Handle == 0 || IsWindowVisible(source.Handle))
                 throw new InvalidOperationException("The fresh-process recovery host became visible.");
 
             var navigated = hostType.GetField("_hasNavigated", BindingFlags.Instance | BindingFlags.NonPublic)!;
             var viewWindow = hostType.GetField("_viewWindow", BindingFlags.Instance | BindingFlags.NonPublic)!;
-            WaitUntil(() => Equals(navigated.GetValue(host), true) && (nint)viewWindow.GetValue(host)! != 0,
-                TimeSpan.FromSeconds(15), "The fresh process could not navigate to the saved provider tab.");
+            for (var index = 0; index < hosts.Count; index++)
+            {
+                var host = hosts[index];
+                var hostIndex = index;
+                WaitUntil(() => Equals(navigated.GetValue(host), true) && (nint)viewWindow.GetValue(host)! != 0,
+                    TimeSpan.FromSeconds(15), $"Fresh process could not navigate to registered window session {hostIndex + 1}.");
+            }
             var valuesReader = typeof(ShellProviderLocationProbe).GetMethod("ReadRecursiveValues",
                 BindingFlags.Static | BindingFlags.NonPublic)!;
-            string[] values = [];
-            WaitUntil(() =>
+            var allValues = new string[hosts.Count][];
+            for (var index = 0; index < hosts.Count; index++)
             {
-                values = (string[])valuesReader.Invoke(null, [hostType, host, 2])!;
-                return values.Length == 2 && values.Select(value => ulong.TryParse(value, out var bytes)
-                        ? bytes : ulong.MaxValue)
-                    .Order().SequenceEqual([5UL, 29UL]);
-            }, TimeSpan.FromSeconds(20), "The fresh process did not restore the persisted recursive values.");
-            Console.WriteLine($"fresh-process-provider-session: profile-id={classId:D}; provider-path={identity}; physical-path={path}; columns={viewColumns.Length}; recursive-values=[{string.Join('|', values.OrderBy(ulong.Parse))}]; parent-visible=False");
+                var host = hosts[index];
+                WaitUntil(() =>
+                {
+                    allValues[index] = (string[])valuesReader.Invoke(null, [hostType, host, 2])!;
+                    return allValues[index].Select(value => ulong.TryParse(value, out var bytes) ? bytes : ulong.MaxValue)
+                        .Order().SequenceEqual(expectedSizes[index]);
+                }, TimeSpan.FromSeconds(20), $"Fresh process did not restore recursive values for window session {index + 1}.");
+            }
+            Console.WriteLine($"fresh-process-provider-session: profile-id={classId:D}; registered-window-sessions={sessionPaths.Length}; provider-paths=[{string.Join('|', identities)}]; columns=[{string.Join('|', viewColumns.Select(columns => columns.Length))}]; recursive-values=[{string.Join(" || ", allValues.Select(values => string.Join('|', values.OrderBy(ulong.Parse))))}]; parent-visible=False");
             return 0;
         }
         finally
@@ -150,7 +199,7 @@ internal static class ProfileOwnerSessionRecoveryProbe
             .Invoke(null, [classId, profile, ProfileOwnerMultiRootShellHostProbe.FindProductAdapterForProbe()])!;
     }
 
-    private static void SaveSession(Assembly appAssembly, string path, string identity, object viewState)
+    private static object CreateSessionState(Assembly appAssembly, string identity, object viewState)
     {
         var tabType = appAssembly.GetType("ExplorerDirs.App.TabSettings", throwOnError: true)!;
         var tab = Activator.CreateInstance(tabType, [identity, viewState, null, false, false])!;
@@ -161,13 +210,26 @@ internal static class ProfileOwnerSessionRecoveryProbe
         var panes = Activator.CreateInstance(panesType)!;
         panesType.GetMethod("Add")!.Invoke(panes, [pane]);
         var sessionType = appAssembly.GetType("ExplorerDirs.App.SessionState", throwOnError: true)!;
-        var state = sessionType.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+        return sessionType.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
             .Single(constructor => constructor.GetParameters().Length == 11)
             .Invoke([1, 4u, panes, 0, new[] { 0 }, -1, null, null, null, null, null]);
+    }
+
+    private static void SaveSession(Assembly appAssembly, string path, string identity, object viewState)
+    {
+        var state = CreateSessionState(appAssembly, identity, viewState);
         var storeType = appAssembly.GetType("ExplorerDirs.App.SessionStore", throwOnError: true)!;
         var store = Activator.CreateInstance(storeType, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
             null, [path, Path.Combine(Path.GetDirectoryName(path)!, "legacy-session.json")], null)!;
         storeType.GetMethod("Save")!.Invoke(store, [state]);
+    }
+
+    private static void CreateFixture(string root, int smallBytes, int largeBytes)
+    {
+        Directory.CreateDirectory(Path.Combine(root, "folder-small"));
+        Directory.CreateDirectory(Path.Combine(root, "folder-large"));
+        File.WriteAllBytes(Path.Combine(root, "folder-small", "payload.bin"), new byte[smallBytes]);
+        File.WriteAllBytes(Path.Combine(root, "folder-large", "payload.bin"), new byte[largeBytes]);
     }
 
     private static (int ExitCode, string StdOut, string StdErr) StartChild(string sessionPath, string profile)

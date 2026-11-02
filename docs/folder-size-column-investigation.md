@@ -2855,4 +2855,6 @@ HostProbe Release 构建 0 警告/错误。探针先把四个 host 放在各自�
 
 新增隔离 HostProbe：父进程通过生产 `ShellNamespaceProfileStore` 创建稳定 profile CLSID，以生产 `ProfileShellNamespaceOwner` 注册 provider，并通过真实 `SessionStore` 写入一个包含 provider parsing path 和 Name / Recursive Size / Type 三列的标签；父进程释放 owner 后再启动全新 HostProbe 进程。子进程从同一 profile INI 读回 CLSID，从 session INI 读回标签与列状态，重新注册 volatile Shell namespace，再由生产 `ExplorerBrowserHost` 打开保存路径。
 
-HostProbe Release build 0 警告/错误，`--profile-owner-session-recovery` exit 0；新进程读回相同 profile ID、三列状态和 5/29 B 递归值，隐藏宿主未显示，退出时 volatile CLSID / NameSpace 注册清理。此项证明 profile ID、SessionStore 标签路径与视图列状态能在新进程中重新解析；没有启动真正 App，也未覆盖 WindowSessionRegistry 的多窗口恢复、可见焦点/排序/文件操作、发布隔离 profile 身份重写或用户数据迁移，不能代替桌面验收。
+HostProbe Release build 0 警告/错误，`--profile-owner-session-recovery` exit 0；新进程通过生产 `WindowSessionRegistry` 读回主窗口和一个独立窗口的两份 session INI，并以两个生产 ExplorerBrowserHost 同时恢复标签。两个标签都保留三列状态，分别读到 5/29 B 与 7/31 B；隐藏宿主未显示，退出时 volatile CLSID / NameSpace 注册清理。该探针验证 registry/session/provider 在新进程中的组合恢复，但没有启动真正 App 或创建两个可见 MainWindow，因此可见多窗口布局、焦点、排序和文件操作仍待验收。
+
+同批运行 `scripts/publish-smoke.ps1` 通过：它用生成的 fixture profile 调用真实 `publish.ps1`（只替换 dotnet publish 为假实现，不运行伪二进制），检查隔离副本获得新 CLSID，主/附加窗口 session、收藏、固定标签、Q-Dir 工作区扩展和 Quick Link identity 均重写旧 CLSID，且源 profile hash 不变。该脚本证明复制/文本重写规则；不证明复制后的 provider 在真实 Shell 注册后成功解析，亦不涉及可见 UI、用户真实 profile 或发布目录。
