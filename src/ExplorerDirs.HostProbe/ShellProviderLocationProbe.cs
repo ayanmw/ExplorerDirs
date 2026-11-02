@@ -111,7 +111,7 @@ internal static class ShellProviderLocationProbe
             var sortColumnType = appAssembly.GetType("ExplorerDirs.App.SortColumnState", throwOnError: true)!;
             var displayColumnType = appAssembly.GetType("ExplorerDirs.App.DisplayColumnState", throwOnError: true)!;
             var recursiveSortKey = Activator.CreateInstance(propertyKeyType,
-                Guid.Parse("9E5E05AC-1936-4A75-94F7-4704B8B01923"), 1u)!;
+                Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 12u)!;
             var sorts = Array.CreateInstance(sortColumnType, 1);
             sorts.SetValue(Activator.CreateInstance(sortColumnType, [recursiveSortKey, 1]), 0);
             var displayColumns = Array.CreateInstance(displayColumnType, 2);
@@ -731,7 +731,7 @@ internal static class ShellProviderLocationProbe
             var displayColumnType = appAssembly.GetType("ExplorerDirs.App.DisplayColumnState", throwOnError: true)!;
             var basicFormat = new Guid("B725F130-47EF-101A-A5F1-02608C9EEBAC");
             var recursiveSortKey = Activator.CreateInstance(propertyKeyType,
-                Guid.Parse("9E5E05AC-1936-4A75-94F7-4704B8B01923"), 1u)!;
+                Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 12u)!;
             var sortColumns = Array.CreateInstance(sortColumnType, 1);
             var initialDirection = descending ? -1 : 1;
             sortColumns.SetValue(Activator.CreateInstance(sortColumnType, [recursiveSortKey, initialDirection]), 0);
@@ -818,7 +818,7 @@ internal static class ShellProviderLocationProbe
             var (columnNames, rows) = ReadExportRows(snapshot);
             var sizeColumnIndex = Array.FindIndex(columnNames, name =>
                 name.Contains("Recursive Size", StringComparison.OrdinalIgnoreCase) ||
-                name.Contains("9e5e05ac-1936-4a75-94f7-4704b8b01923", StringComparison.OrdinalIgnoreCase));
+                name.Equals("Size", StringComparison.OrdinalIgnoreCase) || name.Equals("大小", StringComparison.Ordinal) || name.Contains("{b725f130-47ef-101a-a5f1-02608c9eebac}:12", StringComparison.OrdinalIgnoreCase));
             if (sizeColumnIndex < 0) throw new InvalidOperationException($"The product view omitted the restored recursive-size column: [{string.Join('|', columnNames)}].");
             if (rows.Length != expectedRows) throw new InvalidOperationException($"The product export snapshot returned {rows.Length} rows; expected {expectedRows}.");
 
@@ -905,7 +905,7 @@ internal static class ShellProviderLocationProbe
                 (columnNames, rows) = ReadExportRows(capture.Invoke(host, null)!);
                 sizeColumnIndex = Array.FindIndex(columnNames, name =>
                     name.Contains("Recursive Size", StringComparison.OrdinalIgnoreCase) ||
-                    name.Contains("9e5e05ac-1936-4a75-94f7-4704b8b01923", StringComparison.OrdinalIgnoreCase));
+                    name.Equals("Size", StringComparison.OrdinalIgnoreCase) || name.Equals("大小", StringComparison.Ordinal) || name.Contains("{b725f130-47ef-101a-a5f1-02608c9eebac}:12", StringComparison.OrdinalIgnoreCase));
                 nameColumnIndex = Array.FindIndex(columnNames, name =>
                     name.Equals("Name", StringComparison.OrdinalIgnoreCase) || name.Equals("名称", StringComparison.Ordinal));
                 if (sizeColumnIndex < 0 || nameColumnIndex < 0)
@@ -1085,7 +1085,7 @@ internal static class ShellProviderLocationProbe
         var sortFormat = (Guid)sortKey.GetType().GetProperty("FormatId")!.GetValue(sortKey)!;
         var sortId = (uint)sortKey.GetType().GetProperty("PropertyId")!.GetValue(sortKey)!;
         var sortDirection = (int)sort.GetType().GetProperty("Direction")!.GetValue(sort)!;
-        if (sortFormat != Guid.Parse("9E5E05AC-1936-4A75-94F7-4704B8B01923") || sortId != 1 || sortDirection != expectedSortDirection)
+        if (sortFormat != Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC") || sortId != 12 || sortDirection != expectedSortDirection)
             throw new InvalidOperationException("The INI round trip changed the recursive sort key or direction.");
         var restoredDisplayKeys = displayColumns.Select(column =>
         {
@@ -1094,7 +1094,7 @@ internal static class ShellProviderLocationProbe
                 (uint)key.GetType().GetProperty("PropertyId")!.GetValue(key)!,
                 (int)column.GetType().GetProperty("Width")!.GetValue(column)!);
         }).ToArray();
-        if (restoredDisplayKeys[0] != (Guid.Parse("9E5E05AC-1936-4A75-94F7-4704B8B01923"), 1u, 180) ||
+        if (restoredDisplayKeys[0] != (Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 12u, 180) ||
             restoredDisplayKeys[1] != (Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 10u, 240))
             throw new InvalidOperationException("The INI round trip changed recursive/name column keys or widths.");
         return loadedTab;
@@ -1155,11 +1155,11 @@ internal static class ShellProviderLocationProbe
             }, TimeSpan.FromSeconds(20), "the child process did not restore the registered path into the product ExplorerBrowserHost");
 
             var displayColumns = CaptureDisplayColumns(hostType, host);
-            if (displayColumns.Length != 2 || !displayColumns.Any(value => value.Contains("9e5e05ac-1936-4a75-94f7-4704b8b01923", StringComparison.OrdinalIgnoreCase)))
+            if (displayColumns.Length != 2 || !displayColumns.Any(value => value.Contains("{b725f130-47ef-101a-a5f1-02608c9eebac}:12", StringComparison.OrdinalIgnoreCase)))
                 throw new InvalidOperationException($"The child process did not restore the recursive display column: [{string.Join('|', displayColumns)}].");
             var sortColumns = CaptureSortColumns(hostType, host);
             if (sortColumns.Length != 1 ||
-                !sortColumns[0].Contains("9e5e05ac-1936-4a75-94f7-4704b8b01923", StringComparison.OrdinalIgnoreCase))
+                !sortColumns[0].Contains("{b725f130-47ef-101a-a5f1-02608c9eebac}:12", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException($"The child process did not restore the recursive sort key: [{string.Join('|', sortColumns)}].");
             var recursiveValues = ReadRecursiveValues(hostType, host, 3);
             if (recursiveValues.Length != 3 || recursiveValues.Any(value => !TryReadBytes(value, out _)) ||

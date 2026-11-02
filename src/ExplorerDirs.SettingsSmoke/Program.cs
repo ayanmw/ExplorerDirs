@@ -16,6 +16,20 @@ if (args is ["--folder-size-location-policy-smoke"])
     return;
 }
 
+if (args is ["--qdr-location-roundtrip-only"])
+{
+    // Dispatch before the broad environment/UI-adjacent suite so this flag is truly isolated.
+    var fixture = Path.Combine(AppContext.BaseDirectory, "qdr-roundtrip-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(fixture);
+    try { QdrExportSmoke.Run(fixture); Console.WriteLine("Q-Dir Shell location export/import smoke: PASS"); }
+    finally
+    {
+        if (Path.GetDirectoryName(Path.GetFullPath(fixture)) == Path.TrimEndingDirectorySeparator(Path.GetFullPath(AppContext.BaseDirectory)))
+            Directory.Delete(fixture, true);
+    }
+    return;
+}
+
 if (args is ["--folder-size-native-bridge-smoke", var bridgeLibrary])
 {
     FolderSizeNativeBridgeSmoke.Run(bridgeLibrary);
@@ -732,12 +746,6 @@ if (args.Length == 1 && args[0] == "--shell-location-qdr-smoke")
     ExplorerDirs.SettingsSmoke.ShellLocationIdentitySmoke.Run();
     QdrImportSmoke.Run(root);
     Console.WriteLine("Shell location and Q-Dir import smoke: PASS");
-    return;
-}
-if (args.Length == 1 && args[0] == "--qdr-location-roundtrip-only")
-{
-    QdrExportSmoke.Run(root);
-    Console.WriteLine("Q-Dir Shell location export/import smoke: PASS");
     return;
 }
 ExplorerDirs.SettingsSmoke.ShellSelectionRestoreGateSmoke.Run();

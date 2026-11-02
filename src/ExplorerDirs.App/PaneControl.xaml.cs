@@ -683,11 +683,10 @@ public partial class PaneControl : UserControl
         var path = state.Browser.CurrentPath;
         var identity = QdrShellPathCodec.ToProviderIdentity(path, classId);
         var basic = new Guid("B725F130-47EF-101A-A5F1-02608C9EEBAC");
-        var recursiveSort = new Guid("9E5E05AC-1936-4A75-94F7-4704B8B01923");
         var view = new ViewState(4, 16, [], null, true,
         [
             new(new PropertyKeyState(basic, 10), 240),
-            new(new PropertyKeyState(recursiveSort, 1), 176),
+            new(FolderSizeLocationPolicy.SizeColumn, 176),
             new(new PropertyKeyState(basic, 4), 160)
         ]);
         if (!CanAddTabs(1)) return;

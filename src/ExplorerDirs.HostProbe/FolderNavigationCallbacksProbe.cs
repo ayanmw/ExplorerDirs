@@ -51,8 +51,12 @@ internal static class FolderNavigationCallbacksProbe
         var namespaceKey = $@"Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{{{classId:D}}}";
         IDisposable? owner = null;
         Directory.CreateDirectory(grandchild);
+        var fixtureIndex = 0;
         foreach (var directory in new[] { root, child, grandchild })
+        {
             File.WriteAllText(Path.Combine(directory, "selected.txt"), directory);
+            File.SetLastWriteTimeUtc(Path.Combine(directory, "selected.txt"), new DateTime(2020 + fixtureIndex++, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        }
         try
         {
             var ownerType = HostType.Assembly.GetType("ExplorerDirs.App.ProfileShellNamespaceOwner", true)!;
@@ -80,6 +84,9 @@ internal static class FolderNavigationCallbacksProbe
                     var nativeIdentity = (string?)Call(host, "NativeNavigationIdentity", pidl);
                     Ensure(nativeIdentity is not null && nativeIdentity.StartsWith("::{" + classId.ToString(), StringComparison.OrdinalIgnoreCase),
                         "provider callback matching retains the namespace identity");
+                    Marshal.ThrowExceptionForHR(SHParseDisplayName(nativeIdentity!, 0, out var roundTrip, 0, out _));
+                    try { Ensure(ILIsEqual(pidl, roundTrip), "native folder parsing preserves the exact PIDL hierarchy"); }
+                    finally { Marshal.FreeCoTaskMem(roundTrip); }
                     Call(host, "TrackIssuedPath", physical);
                     Event(host, "OnNavigationPending", pidl);
                     Event(host, "OnNavigationComplete", pidl);
@@ -124,6 +131,20 @@ internal static class FolderNavigationCallbacksProbe
         Marshal.ThrowExceptionForHR(SHParseDisplayName(nativeFile, 0, out var pidl, 0, out _));
         try
         {
+            Marshal.ThrowExceptionForHR(SHParseDisplayName(file, 0, out var physicalPidl, 0, out _));
+            try
+            {
+                var modified = new NativePropertyKey(new Guid("b725f130-47ef-101a-a5f1-02608c9eebac"), 14);
+                var size = new NativePropertyKey(new Guid("b725f130-47ef-101a-a5f1-02608c9eebac"), 12);
+                var expectedModified = ReadParentProperty(physicalPidl, modified);
+                var expectedSize = ReadParentProperty(physicalPidl, size);
+                Ensure(expectedModified is not null && Equals(ReadParentProperty(pidl, modified), expectedModified),
+                    "nested provider backing properties come from the correct physical parent");
+                Ensure(expectedSize is ulong bytes && bytes == (ulong)new FileInfo(file).Length &&
+                    Equals(ReadParentProperty(pidl, size), expectedSize),
+                    "nested provider file size agrees with its real filesystem item");
+            }
+            finally { Marshal.FreeCoTaskMem(physicalPidl); }
             Marshal.ThrowExceptionForHR(SHGetNameFromIDList(pidl, 0x80028000, out var name));
             try
             {
@@ -135,6 +156,26 @@ internal static class FolderNavigationCallbacksProbe
             finally { Marshal.FreeCoTaskMem(name); }
         }
         finally { Marshal.FreeCoTaskMem(pidl); }
+    }
+
+    private static object? ReadParentProperty(nint pidl, NativePropertyKey key)
+    {
+        var folderId = new Guid("93f2f68c-1d1b-11d3-a30e-00c04f79abd1");
+        Marshal.ThrowExceptionForHR(SHBindToParent(pidl, ref folderId, out var folder, out var child));
+        try
+        {
+            var read = Marshal.GetDelegateForFunctionPointer<GetDetailsEx>(
+                Marshal.ReadIntPtr(Marshal.ReadIntPtr(folder), 17 * nint.Size));
+            var variant = Marshal.AllocCoTaskMem(nint.Size == 8 ? 24 : 16);
+            Marshal.WriteInt16(variant, 0);
+            try
+            {
+                Marshal.ThrowExceptionForHR(read(folder, child, ref key, variant));
+                return Marshal.GetObjectForNativeVariant(variant);
+            }
+            finally { VariantClear(variant); Marshal.FreeCoTaskMem(variant); }
+        }
+        finally { Marshal.Release(folder); }
     }
 
     private static bool TryBindDirectChild(string parent, string file)
@@ -407,5 +448,19 @@ internal static class FolderNavigationCallbacksProbe
     private static extern int SHParseDisplayName(string name, nint bind, out nint pidl, uint attributes, out uint received);
     [DllImport("shell32.dll")]
     private static extern int SHGetNameFromIDList(nint pidl, uint kind, out nint name);
+    [DllImport("shell32.dll")]
+    private static extern int SHBindToParent(nint pidl, ref Guid iid, out nint folder, out nint child);
+    [DllImport("shell32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ILIsEqual(nint first, nint second);
+    [DllImport("oleaut32.dll")] private static extern int VariantClear(nint variant);
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePropertyKey(Guid formatId, uint propertyId)
+    {
+        internal Guid FormatId = formatId;
+        internal uint PropertyId = propertyId;
+    }
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int GetDetailsEx(nint self, nint child, ref NativePropertyKey key, nint variant);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
 }

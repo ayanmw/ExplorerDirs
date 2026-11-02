@@ -52,7 +52,7 @@ internal static class ProfileOwnerShellHostProbe
             columns.SetValue(Activator.CreateInstance(columnType,
                 [Activator.CreateInstance(keyType, [basic, 10u])!, 240]), 0);
             columns.SetValue(Activator.CreateInstance(columnType,
-                [Activator.CreateInstance(keyType, [Guid.Parse("9E5E05AC-1936-4A75-94F7-4704B8B01923"), 1u])!, 176]), 1);
+                [Activator.CreateInstance(keyType, [Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 12u])!, 176]), 1);
             columns.SetValue(Activator.CreateInstance(columnType,
                 [Activator.CreateInstance(keyType, [basic, 4u])!, 160]), 2);
             var constructor = viewStateType.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
@@ -113,7 +113,7 @@ internal static class ProfileOwnerShellHostProbe
                 .Cast<object>().ToArray();
             if (capturedColumns.Length != 3 || !capturedColumns.Any(column =>
                     column.GetType().GetProperty("Key")!.GetValue(column)!.ToString() ==
-                    "{9e5e05ac-1936-4a75-94f7-4704b8b01923}:1"))
+                    "{b725f130-47ef-101a-a5f1-02608c9eebac}:12"))
                 throw new InvalidOperationException("The production host did not retain the experiment's three-column view state.");
 
             Console.WriteLine($"profile-owner-shell-host: volatile-owner=True; path-identity=True; qdr-path-roundtrip=True; filesystem-location=False; columns={capturedColumns.Length}; recursive-bytes=[{string.Join('|', byteValues)}]; parent-visible=False; foreground-unchanged={GetForegroundWindow() == foreground}");

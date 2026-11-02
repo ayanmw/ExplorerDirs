@@ -159,7 +159,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                     .GetProperty("DisplayColumns")!.GetValue(captured)!).Cast<object>().ToArray();
                 if (capturedColumns.Length != 3 || !capturedColumns.Any(column =>
                         column.GetType().GetProperty("Key")!.GetValue(column)!.ToString() ==
-                        "{9e5e05ac-1936-4a75-94f7-4704b8b01923}:1"))
+                        "{b725f130-47ef-101a-a5f1-02608c9eebac}:12"))
                     throw new InvalidOperationException($"Product pane {index + 1} did not retain its own recursive column state.");
 
                 var expectedOrder = index % 2 == 0 ? expectedSizes[index] : expectedSizes[index].Reverse();
@@ -314,13 +314,13 @@ internal static class ProfileOwnerMultiRootShellHostProbe
         var columns = Array.CreateInstance(columnType, 3);
         columns.SetValue(Activator.CreateInstance(columnType, [Activator.CreateInstance(keyType, [basic, 10u])!, 240]), 0);
         columns.SetValue(Activator.CreateInstance(columnType, [Activator.CreateInstance(keyType,
-            [Guid.Parse("9E5E05AC-1936-4A75-94F7-4704B8B01923"), 1u])!, 176]), 1);
+            [Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 12u])!, 176]), 1);
         columns.SetValue(Activator.CreateInstance(columnType, [Activator.CreateInstance(keyType, [basic, 4u])!, 160]), 2);
         var sortColumnType = appAssembly.GetType("ExplorerDirs.App.SortColumnState", throwOnError: true)!;
         var sortColumns = Array.CreateInstance(sortColumnType, recursiveSortDirection == 0 ? 0 : 1);
         if (recursiveSortDirection != 0)
             sortColumns.SetValue(Activator.CreateInstance(sortColumnType,
-                [Activator.CreateInstance(keyType, [Guid.Parse("9E5E05AC-1936-4A75-94F7-4704B8B01923"), 1u])!, recursiveSortDirection]), 0);
+                [Activator.CreateInstance(keyType, [Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 12u])!, recursiveSortDirection]), 0);
         var constructor = viewStateType.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
             .Single(candidate => candidate.GetParameters().Length == 6);
         return constructor.Invoke([4u, 16, sortColumns, null, true, columns]);

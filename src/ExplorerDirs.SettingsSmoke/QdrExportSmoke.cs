@@ -150,7 +150,7 @@ internal static class QdrExportSmoke
         Check(ordinaryPrepared.Text == text && ordinaryPrepared.UnencodedLocationCount == 0,
             "ordinary and offline paths without percent signs retain the original export without Shell binding");
         var recursiveSizeKey = new PropertyKeyState(Guid.Parse("7E1F84B7-C052-4E51-8A3C-869254A6B910"), 1);
-        var recursiveSortKey = new PropertyKeyState(Guid.Parse("9E5E05AC-1936-4A75-94F7-4704B8B01923"), 1);
+        var recursiveSortKey = new PropertyKeyState(Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 12);
         var expectedRecursiveColumns = new[]
         {
             new DisplayColumnState(typeKey, 160),

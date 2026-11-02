@@ -125,7 +125,7 @@ internal static class ProfileOwnerSessionRecoveryProbe
                     .GetProperty("DisplayColumns")!.GetValue(viewStates[index])!).Cast<object>().ToArray();
                 if (viewColumns[index].Length != 3 || !viewColumns[index].Any(column =>
                         column.GetType().GetProperty("Key")!.GetValue(column)!.ToString() ==
-                        "{9e5e05ac-1936-4a75-94f7-4704b8b01923}:1"))
+                        "{b725f130-47ef-101a-a5f1-02608c9eebac}:12"))
                     throw new InvalidOperationException($"Restored window {index + 1} did not retain the recursive size column.");
             }
 

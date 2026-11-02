@@ -7,6 +7,8 @@ internal static class FolderSizeLocationPolicySmoke
     {
         var profile = Guid.NewGuid();
         var initial = ViewState.Default();
+        if (FolderSizeLocationPolicy.SizeColumn != new PropertyKeyState(new Guid("b725f130-47ef-101a-a5f1-02608c9eebac"), 12))
+            throw new Exception("Default folder size column is not Windows System.Size/PKEY_Size.");
         var defaults = FolderSizeLocationPolicy.WithSizeColumn(initial, true);
         if (defaults.DisplayColumns?.Count != 4 || defaults.DisplayColumns[^1].Key != FolderSizeLocationPolicy.SizeColumn ||
             initial.DisplayColumns is not null || defaults.Mode != initial.Mode)

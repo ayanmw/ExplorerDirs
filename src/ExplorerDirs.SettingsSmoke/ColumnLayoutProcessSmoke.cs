@@ -10,7 +10,7 @@ internal static class ColumnLayoutProcessSmoke
     private static readonly PropertyKeyState RecursiveSizeKey = new(
         Guid.Parse("7E1F84B7-C052-4E51-8A3C-869254A6B910"), 1);
     private static readonly PropertyKeyState ShellRecursiveSortKey = new(
-        Guid.Parse("9E5E05AC-1936-4A75-94F7-4704B8B01923"), 1);
+        Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 12);
 
     internal static void Run()
     {

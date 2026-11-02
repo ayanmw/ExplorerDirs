@@ -4,7 +4,7 @@ namespace ExplorerDirs.App;
 
 internal static class FolderSizeLocationPolicy
 {
-    internal static readonly PropertyKeyState SizeColumn = new(new Guid("9e5e05ac-1936-4a75-94f7-4704b8b01923"), 1);
+    internal static readonly PropertyKeyState SizeColumn = new(new Guid("b725f130-47ef-101a-a5f1-02608c9eebac"), 12);
 
     internal static ViewState WithSizeColumn(ViewState view, bool enabled)
     {
