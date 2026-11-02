@@ -2882,3 +2882,11 @@ HostProbe Release build 0 警告/错误，`--profile-owner-session-recovery` exi
 诊断 adapter 的 8,192 容量在一次早先运行中保留了 4,100 条快照、0 次淘汰，快照载荷 1,476,000 B（约 1.41 MiB）；后续三次诊断复跑均未淘汰，但在不同 pane 出现部分排序并于 75 秒超时。探针已关闭每次比较的字符串轨迹记录，把值就绪全列轮询降至每 250 ms 一次，并在原生行名达到候选次序前避免重复 COM 读取整列值；异常仍复现，诊断构建路径存在间歇性排序不稳定，根因未定。载荷不含 map 节点、分配器及其他进程开销，不等于 Private Bytes 增量。该异常未在正式产品 adapter 的三轮 4×1,024/1,025 复验中重现，但需保留为待查风险，不记作诊断复跑通过。
 
 所有结果来自当前机器的 synthetic 文件夹夹具和隐藏生产 ExplorerBrowserHost；不代表可见帧、真实慢盘/网络路径或长期内存曲线。逐行递归列仍未启用普通物理文件夹，也未做用户可见 UI 验收或发布。
+
+### 2026-11-02：诊断通知身份采集对大列表排序的扰动验证
+
+对照 `EXPLORERDIRS_PRODUCT_DIAGNOSTICS` 的通知路径后，发现诊断 DLL 会在每条异步 item 更新上调用 `SHGetNameFromIDList(SIGDN_DESKTOPABSOLUTEPARSING)`、锁住身份列表并追加完整解析名；视图收到 `SFVM_FSNOTIFY` 时也逐项解析身份。此工作只用于诊断输出，不存在于正式 product DLL。
+
+新增仅供 HostProbe 使用的运行时开关，在保留通知发送、Shell 回调和标量计数器的前提下关闭逐项身份字符串采集。诊断 HostProbe 关闭比较轨迹与身份采集后，4×1,025 独立目录压力场景连续两轮完整通过：每窗格 1,025 行、四种升降序边界正确、缓存 4,100 条且 0 次淘汰，选区/焦点正确、前台不变。命令：`dotnet run --project src/ExplorerDirs.HostProbe/ExplorerDirs.HostProbe.csproj -c Release --no-build -- --profile-owner-multi-root-shell-host-cache-overflow-8192`。Native adapter 与 HostProbe Release 构建均为 0 警告/错误。
+
+这支持“诊断身份解析/字符串分配会扰动并行 Shell 排序”的解释，但两轮通过不足以证明它是此前间歇性部分排序的唯一根因；之前身份采集开启时也曾有一次通过。正式产品行为未改变，后续仍需在低观测负担下重复压力运行，并将这些诊断捕获限制为明确需要 PIDL 身份证据的专用探针。

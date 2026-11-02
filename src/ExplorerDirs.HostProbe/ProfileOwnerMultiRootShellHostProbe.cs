@@ -65,6 +65,8 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 adapterModule = NativeLibrary.Load(adapterPath);
                 Marshal.GetDelegateForFunctionPointer<SetProductCompareTraceEnabled>(
                     NativeLibrary.GetExport(adapterModule, "SetProductCompareTraceEnabled"))(0);
+                Marshal.GetDelegateForFunctionPointer<SetProductNotificationIdentityCaptureEnabled>(
+                    NativeLibrary.GetExport(adapterModule, "SetProductNotificationIdentityCaptureEnabledForProbe"))(0);
                 var configureCache = Marshal.GetDelegateForFunctionPointer<ConfigureCacheCapacity>(
                     NativeLibrary.GetExport(adapterModule, "SetSyntheticRecursiveSizeCacheCapacityForProbe"));
                 var configureResult = configureCache(cacheCapacity);
@@ -249,7 +251,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 throw new InvalidOperationException("The product panes changed the foreground window.");
             var valueEdges = paneValues.Select(values => $"{values.Length}:{values[0]}..{values[^1]}");
             var cacheMetrics = adapterModule == 0 ? "diagnostic-counters=unavailable" : ReadCacheMetrics(adapterModule);
-            Console.WriteLine($"profile-owner-multi-root-shell-host: large={large}; simultaneous-hosts={hosts.Count}; rows-per-pane={expectedItemCount}; roots=independent; value-ready-ms=[{string.Join('|', paneValueReadyMilliseconds)}]; sort-ready-ms=[{string.Join('|', paneSortReadyMilliseconds)}]; recursive-sort-value-edges=[{string.Join(" || ", valueEdges)}]; source-cache-capacity={cacheCapacity}; cache=[{cacheMetrics}]; selections=[{string.Join('|', paneSelections.Select(values => string.Join(',', values)))}]; focused-rows=[{string.Join('|', paneFocus)}]; parents-hidden=True; foreground-unchanged=True");
+            Console.WriteLine($"profile-owner-multi-root-shell-host: large={large}; diagnostic-notification-identity-capture-disabled={adapterModule != 0}; simultaneous-hosts={hosts.Count}; rows-per-pane={expectedItemCount}; roots=independent; value-ready-ms=[{string.Join('|', paneValueReadyMilliseconds)}]; sort-ready-ms=[{string.Join('|', paneSortReadyMilliseconds)}]; recursive-sort-value-edges=[{string.Join(" || ", valueEdges)}]; source-cache-capacity={cacheCapacity}; cache=[{cacheMetrics}]; selections=[{string.Join('|', paneSelections.Select(values => string.Join(',', values)))}]; focused-rows=[{string.Join('|', paneFocus)}]; parents-hidden=True; foreground-unchanged=True");
             return 0;
         }
         finally
@@ -386,6 +388,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
     [DllImport("user32.dll", EntryPoint = "IsWindowVisible")] private static extern bool IsWindowVisible(nint window);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ConfigureCacheCapacity(int capacity);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void SetProductCompareTraceEnabled(int enabled);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void SetProductNotificationIdentityCaptureEnabled(int enabled);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCounter32();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate long GetCounter64();
 

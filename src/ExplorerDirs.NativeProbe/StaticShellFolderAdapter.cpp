@@ -1926,6 +1926,8 @@ namespace
     volatile LONG g_productAsyncItemNotificationAttempts = 0;
     volatile LONG g_productAsyncItemNotificationUnderSyntheticRoot = 0;
     volatile LONG g_productAsyncDirectoryNotificationAttempts = 0;
+    // Large sorting probes can opt out of per-notification PIDL string capture while retaining counters.
+    volatile LONG g_productNotificationIdentityCaptureEnabled = 1;
     volatile LONG g_productNotificationFlushForProbe = 0;
     volatile LONG g_productNotificationDelayMsForProbe = 0;
     std::mutex g_productAsyncItemNotificationIdentityMutex;
@@ -1941,6 +1943,7 @@ namespace
 
     void RecordProductAsyncItemNotificationIdentity(PCIDLIST_ABSOLUTE itemPidl)
     {
+        if (!InterlockedCompareExchange(&g_productNotificationIdentityCaptureEnabled, 0, 0)) return;
         LPWSTR parsingName = nullptr;
         if (FAILED(SHGetNameFromIDList(itemPidl, SIGDN_DESKTOPABSOLUTEPARSING, &parsingName)) || !parsingName) return;
         try
@@ -1954,6 +1957,7 @@ namespace
 
     void RecordProductViewItemNotificationIdentity(PCIDLIST_ABSOLUTE itemPidl)
     {
+        if (!InterlockedCompareExchange(&g_productNotificationIdentityCaptureEnabled, 0, 0)) return;
         if (!itemPidl) return;
         LPWSTR parsingName = nullptr;
         if (FAILED(SHGetNameFromIDList(itemPidl, SIGDN_DESKTOPABSOLUTEPARSING, &parsingName)) || !parsingName) return;
@@ -4731,7 +4735,7 @@ namespace
 #if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
                                 RecordProductAsyncItemNotificationIdentity(
                                     reinterpret_cast<PCIDLIST_ABSOLUTE>(notification.second));
-                                if (self->_root && ILIsParent(self->_root,
+                                if (InterlockedCompareExchange(&g_productNotificationIdentityCaptureEnabled, 0, 0) && self->_root && ILIsParent(self->_root,
                                     reinterpret_cast<PCIDLIST_ABSOLUTE>(notification.second), TRUE))
                                     InterlockedIncrement(&g_productAsyncItemNotificationUnderSyntheticRoot);
 #endif
@@ -5401,6 +5405,9 @@ extern "C" void WINAPI ResetProductCompareDiagnostics()
 
 extern "C" void WINAPI SetProductCompareTraceEnabled(BOOL enabled)
 { InterlockedExchange(&g_productCompareTraceEnabled, enabled ? 1 : 0); }
+
+extern "C" void WINAPI SetProductNotificationIdentityCaptureEnabledForProbe(BOOL enabled)
+{ InterlockedExchange(&g_productNotificationIdentityCaptureEnabled, enabled ? 1 : 0); }
 
 extern "C" LONG WINAPI GetProductSyntheticEnumStarted()
 { return InterlockedCompareExchange(&g_productSyntheticEnumStarted, 0, 0); }
