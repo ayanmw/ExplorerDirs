@@ -63,6 +63,7 @@ internal static class PaneTabTransferProbe
             {
                 CheckUnhostedActivePaneGeometry(sourcePane);
                 CheckUnhostedTabChrome(sourcePane);
+                CheckUnhostedTabChrome(targetPane);
                 CheckUnhostedCopyOrder(sourcePane, targetPane);
                 CheckUnhostedSettledPath(sourcePane, targetPane);
                 CheckUnhostedReopenHistory(sourcePane);
@@ -532,6 +533,9 @@ internal static class PaneTabTransferProbe
         var modeType = setMode.GetParameters()[0].ParameterType;
         try
         {
+            setMode.Invoke(pane, [Enum.Parse(modeType, "Multiple")]);
+            Ensure(row.Visibility == (tabs.Items.Count > 1 ? Visibility.Visible : Visibility.Collapsed),
+                "multiple-only mode hides the complete row for a single tab");
             setMode.Invoke(pane, [Enum.Parse(modeType, "Hidden")]);
             Ensure(tabs.Visibility == Visibility.Collapsed && row.Visibility == Visibility.Collapsed,
                 "hiding the tab strip hides its action row rather than leaving an empty toolbar");
@@ -541,6 +545,57 @@ internal static class PaneTabTransferProbe
                 "hidden tab actions do not retain keyboard focus stops");
         }
         finally { setMode.Invoke(pane, [Enum.Parse(modeType, "Always")]); }
+        CheckUnhostedTabOverflow(pane, tabs);
+    }
+
+    private static void CheckUnhostedTabOverflow(UIElement pane, TabControl tabs)
+    {
+        var originals = tabs.Items.OfType<TabItem>().Select(tab => (Tab: tab, Width: tab.ReadLocalValue(FrameworkElement.WidthProperty))).ToArray();
+        foreach (var item in originals) item.Tab.Width = 160;
+        tabs.ApplyTemplate();
+        var left = (Button)tabs.Template.FindName("ScrollTabsLeft", tabs);
+        var right = (Button)tabs.Template.FindName("ScrollTabsRight", tabs);
+        var scroll = (ScrollViewer)tabs.Template.FindName("TabHeaderScroll", tabs);
+        var setMultiline = pane.GetType().GetMethod("SetMultilineTabHeaders", InstanceMembers)!;
+        void Layout(double width)
+        {
+            for (var iteration = 0; iteration < 4; iteration++)
+            {
+                pane.InvalidateMeasure(); pane.Measure(new Size(width, 600)); pane.Arrange(new Rect(0, 0, width, 600));
+                pane.UpdateLayout();
+                pane.GetType().GetMethod("UpdateTabScrollButtons", InstanceMembers)!.Invoke(pane, null);
+            }
+        }
+        try
+        {
+            Layout(800);
+            Ensure(left.Visibility == Visibility.Collapsed && right.Visibility == Visibility.Collapsed,
+                "tab arrows remain hidden when headers fit");
+            Layout(160);
+            Ensure(left.Visibility == Visibility.Visible && right.Visibility == Visibility.Visible && left.Width >= 28 && right.Width >= 28,
+                $"overflow exposes both comfortably sized tab-scroll targets: left={left.Visibility}/{left.ActualWidth}; right={right.Visibility}/{right.ActualWidth}; extent={scroll.ExtentWidth}; viewport={scroll.ViewportWidth}; tabs={tabs.ActualWidth}; headers={string.Join(',', originals.Select(item => item.Tab.DesiredSize.Width))}");
+            scroll.ScrollToHorizontalOffset(0); Layout(160);
+            Ensure(!left.IsEnabled && right.IsEnabled, "tab-scroll controls reflect the start boundary");
+            scroll.ScrollToHorizontalOffset(scroll.ScrollableWidth); Layout(160);
+            Ensure(left.IsEnabled && !right.IsEnabled, "tab-scroll controls reflect the end boundary");
+            setMultiline.Invoke(pane, [true]); Layout(160);
+            Ensure(left.Visibility == Visibility.Collapsed && right.Visibility == Visibility.Collapsed,
+                "multiline tab headers do not retain horizontal scroll arrows");
+            setMultiline.Invoke(pane, [false]); Layout(160);
+            Ensure(left.Visibility == Visibility.Visible && right.Visibility == Visibility.Visible,
+                "returning to one row restores overflow controls");
+            Layout(800);
+            Ensure(left.Visibility == Visibility.Collapsed && right.Visibility == Visibility.Collapsed,
+                "restoring width hides arrows without preserving their own overflow");
+        }
+        finally
+        {
+            setMultiline.Invoke(pane, [false]);
+            foreach (var item in originals)
+                if (item.Width == DependencyProperty.UnsetValue) item.Tab.ClearValue(FrameworkElement.WidthProperty);
+                else item.Tab.SetValue(FrameworkElement.WidthProperty, item.Width);
+            Layout(800);
+        }
     }
 
     private static void CheckUnhostedSettledPath(UIElement source, UIElement destination)
