@@ -780,6 +780,7 @@ public partial class PaneControl : UserControl
         var browser = state.Browser;
         var path = browser.CurrentPath;
         if (!browser.TryCaptureFolderSizeTransitionSelection(out var selection) ||
+            !_folderSizesEnabled || !state.FolderSizeRoutingPending ||
             state.Owner != this || !_tabOrder.Contains(state.Tab) || Current != state ||
             !FavoritesStore.SamePath(path, browser.CurrentPath)) return;
         state.FolderSizeRoutingPending = false;

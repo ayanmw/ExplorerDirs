@@ -1749,8 +1749,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     physical, _folderSizeProfileClassId, out var providerChild))
                 ShellSelectionPidl.TryGetDirectChild(_nativeDirectoryIdentity!, providerChild, out clone);
             else clone = ILClone(absolutePidl);
-            if (clone == IntPtr.Zero)
+            // Provider binding can pump navigation/input callbacks, unlike the former ILClone-only path.
+            if (clone == IntPtr.Zero || !IsCreatedFileSelectionRequestCurrent(request))
             {
+                if (clone != IntPtr.Zero) Marshal.FreeCoTaskMem(clone);
                 foreach (var pidl in clones) Marshal.FreeCoTaskMem(pidl);
                 return false;
             }

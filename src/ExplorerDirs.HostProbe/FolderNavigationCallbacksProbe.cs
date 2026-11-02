@@ -51,6 +51,8 @@ internal static class FolderNavigationCallbacksProbe
         var namespaceKey = $@"Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{{{classId:D}}}";
         IDisposable? owner = null;
         Directory.CreateDirectory(grandchild);
+        foreach (var directory in new[] { root, child, grandchild })
+            File.WriteAllText(Path.Combine(directory, "selected.txt"), directory);
         try
         {
             var ownerType = HostType.Assembly.GetType("ExplorerDirs.App.ProfileShellNamespaceOwner", true)!;
@@ -63,7 +65,11 @@ internal static class FolderNavigationCallbacksProbe
                 (identity + @"\中文子目录\第二层", grandchild) })
             {
                 var parseResult = SHParseDisplayName(native, 0, out var pidl, 0, out _);
-                if (parseResult < 0) throw new InvalidOperationException($"Provider parsing failed for {physical}: 0x{parseResult:X8}");
+                if (parseResult < 0)
+                {
+                    if (pidl != 0) Marshal.FreeCoTaskMem(pidl);
+                    throw new InvalidOperationException($"Provider parsing failed for {physical}: 0x{parseResult:X8}");
+                }
                 try
                 {
                     using var host = NewHost();
@@ -83,10 +89,15 @@ internal static class FolderNavigationCallbacksProbe
                         "published location retains the native parent for selection binding");
                     Ensure(((IDictionary)Field(host, "_issuedBrowserPaths")!).Count == 0,
                         "provider completion retires its physical request registration");
+                    CheckProviderSelection(nativeIdentity!, physical, classId);
                     EnsureUnhosted(host);
                 }
                 finally { Marshal.FreeCoTaskMem(pidl); }
             }
+            Ensure(!TryBindDirectChild(identity, identity + @"\中文子目录\selected.txt"),
+                "provider selection rejects a non-direct descendant even when it exists");
+            Ensure(!TryBindDirectChild(identity + @"\中文子目录", identity + @"\selected.txt"),
+                "provider selection rejects a same-name file from another parent");
         }
         finally
         {
@@ -97,8 +108,45 @@ internal static class FolderNavigationCallbacksProbe
             Directory.Delete(root, true);
         }
         Ensure(GetForegroundWindow() == foreground, "provider callbacks preserved foreground");
-        Console.WriteLine("Provider callbacks: PASS (real product provider PIDLs, Unicode nested folder, logical/native identities, registration cleanup; no HWND/ExplorerBrowser/file view)");
+        Console.WriteLine("Provider callbacks: PASS (real product PIDLs, Unicode nested folders, logical/native identities, direct-child selection and wrong-parent rejection, registration cleanup; no HWND/ExplorerBrowser/file view)");
         return 0;
+    }
+
+    private static void CheckProviderSelection(string nativeParent, string physicalParent, Guid classId)
+    {
+        var file = Path.Combine(physicalParent, "selected.txt");
+        var policy = HostType.Assembly.GetType("ExplorerDirs.App.FolderSizeLocationPolicy", true)!;
+        object?[] arguments = [nativeParent, physicalParent, file, classId, null];
+        Ensure((bool)policy.GetMethod("TryGetProviderChildIdentity", BindingFlags.Static | BindingFlags.NonPublic)!
+            .Invoke(null, arguments)!, "physical selected file maps into its current provider parent");
+        var nativeFile = (string)arguments[4]!;
+        Ensure(TryBindDirectChild(nativeParent, nativeFile), "mapped selection binds as one native child");
+        Marshal.ThrowExceptionForHR(SHParseDisplayName(nativeFile, 0, out var pidl, 0, out _));
+        try
+        {
+            Marshal.ThrowExceptionForHR(SHGetNameFromIDList(pidl, 0x80028000, out var name));
+            try
+            {
+                var parsingName = Marshal.PtrToStringUni(name)!;
+                Ensure((string?)policy.GetMethod("LogicalPath", BindingFlags.Static | BindingFlags.NonPublic)!
+                    .Invoke(null, [parsingName, classId]) == file,
+                    "selected file absolute parsing name round-trips to its physical file");
+            }
+            finally { Marshal.FreeCoTaskMem(name); }
+        }
+        finally { Marshal.FreeCoTaskMem(pidl); }
+    }
+
+    private static bool TryBindDirectChild(string parent, string file)
+    {
+        var type = HostType.Assembly.GetType("ExplorerDirs.App.ShellSelectionPidl", true)!;
+        object?[] arguments = [parent, file, nint.Zero];
+        var success = (bool)type.GetMethod("TryGetDirectChild", BindingFlags.Static | BindingFlags.NonPublic)!
+            .Invoke(null, arguments)!;
+        var child = (nint)arguments[2]!;
+        Ensure(success == (child != 0), "child binding success agrees with PIDL ownership");
+        if (child != 0) Marshal.FreeCoTaskMem(child);
+        return success;
     }
 
     private static void CheckCompletion(string path, nint pidl)
@@ -357,5 +405,7 @@ internal static class FolderNavigationCallbacksProbe
     }
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern int SHParseDisplayName(string name, nint bind, out nint pidl, uint attributes, out uint received);
+    [DllImport("shell32.dll")]
+    private static extern int SHGetNameFromIDList(nint pidl, uint kind, out nint name);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
 }
