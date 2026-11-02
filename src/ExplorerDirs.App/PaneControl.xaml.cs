@@ -747,7 +747,8 @@ public partial class PaneControl : UserControl
     internal void RefreshFolderSizeData()
     {
         foreach (var state in _tabOrder.Select(tab => (TabState)tab.Tag))
-            if (state.Browser.HasNativeView && QdrShellPathCodec.TryGetProviderPath(state.Path, _shellNamespaceProfileClassId, out _))
+            if (state.Browser.HasNativeView && (state.Browser.IsFolderSizeProvider ||
+                QdrShellPathCodec.TryGetProviderPath(state.Path, _shellNamespaceProfileClassId, out _)))
                 state.Browser.Refresh();
     }
 

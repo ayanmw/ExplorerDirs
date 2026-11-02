@@ -193,7 +193,7 @@ internal static class ShellLocationIdentity
         return false;
     }
 
-    private static bool TryGetAttributes(nint pidl, out uint attributes)
+    internal static bool TryGetAttributes(nint pidl, out uint attributes)
     {
         attributes = 0;
         if (SHCreateItemFromIDList(pidl, in ShellItemId, out var item) < 0 || item == 0) return false;
@@ -201,7 +201,7 @@ internal static class ShellLocationIdentity
         {
             var getAttributes = Marshal.GetDelegateForFunctionPointer<GetAttributes>(
                 Marshal.ReadIntPtr(Marshal.ReadIntPtr(item), 6 * nint.Size));
-            return getAttributes(item, FolderAttribute | FileSystemAttribute, out attributes) >= 0;
+            return getAttributes(item, FolderAttribute | FileSystemAttribute | 0x00400000, out attributes) >= 0;
         }
         finally { Marshal.Release(item); }
     }

@@ -193,6 +193,18 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private ExplorerShellPane _visibleShellPane;
 
     public string CurrentPath => _location.DirectoryPath;
+    private Guid? _folderSizeProfileClassId;
+    private bool _folderSizesEnabled;
+    private string? _nativeDirectoryIdentity;
+    internal bool IsFolderSizeProvider => _nativeDirectoryIdentity is { } identity &&
+        QdrShellPathCodec.TryGetProviderPath(identity, _folderSizeProfileClassId, out _);
+
+    internal void ConfigureFolderSizeLocations(Guid? profileClassId, bool enabled)
+    {
+        _folderSizeProfileClassId = profileClassId;
+        _folderSizesEnabled = enabled;
+    }
+
     internal bool HasNativeView => _browser is not null && _viewWindow != IntPtr.Zero;
     internal string? CurrentSearchUri => _location.SearchUri;
     internal long NavigationVersion => _viewReadiness.NavigationVersion;
@@ -1661,7 +1673,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         foreach (var name in parsingNames.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             if (!IsCreatedFileSelectionRequestCurrent(request)) break;
-            if (ShellSelectionPidl.TryGetDirectChild(CurrentPath, name, out var childPidl))
+            var nativeName = name;
+            if (_nativeDirectoryIdentity is { } nativeParent &&
+                FolderSizeLocationPolicy.TryGetProviderChildIdentity(nativeParent, CurrentPath, name,
+                    _folderSizeProfileClassId, out var providerChild)) nativeName = providerChild;
+            if (ShellSelectionPidl.TryGetDirectChild(_nativeDirectoryIdentity ?? CurrentPath, nativeName, out var childPidl))
                 childPidls.Add(childPidl);
         }
         if (childPidls.Count == 0 || !IsCreatedFileSelectionRequestCurrent(request))
@@ -1697,7 +1713,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         List<IntPtr> clones = new(absolutePidls.Count);
         foreach (var absolutePidl in absolutePidls)
         {
-            var clone = ILClone(absolutePidl);
+            var clone = IntPtr.Zero;
+            if (IsFolderSizeProvider && FileSystemPath(absolutePidl) is { } physical &&
+                FolderSizeLocationPolicy.TryGetProviderChildIdentity(_nativeDirectoryIdentity!, CurrentPath,
+                    physical, _folderSizeProfileClassId, out var providerChild))
+                ShellSelectionPidl.TryGetDirectChild(_nativeDirectoryIdentity!, providerChild, out clone);
+            else clone = ILClone(absolutePidl);
             if (clone == IntPtr.Zero)
             {
                 foreach (var pidl in clones) Marshal.FreeCoTaskMem(pidl);
@@ -2311,6 +2332,18 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             // the same confirmed identity used by navigation callbacks.
             var issuedPath = ShellLocationIdentity.TryGetPersistedIdentity(pidl, out var canonicalPath, out _)
                 ? canonicalPath : path;
+            if (ShellLocationIdentity.TryGetAttributes(pidl, out var attributes))
+            {
+                var nativeIdentity = FolderSizeLocationPolicy.NativeIdentity(issuedPath, attributes,
+                    _folderSizeProfileClassId, _folderSizesEnabled);
+                if (!string.Equals(nativeIdentity, issuedPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    Check(SHParseDisplayName(nativeIdentity, IntPtr.Zero, out var routedPidl, 0, out _));
+                    Marshal.FreeCoTaskMem(pidl);
+                    pidl = routedPidl;
+                }
+            }
+            issuedPath = FolderSizeLocationPolicy.LogicalPath(issuedPath, _folderSizeProfileClassId);
             // A newer request may cancel this probe while Shell parses or
             // reads the folder identity; do not register stale preparation.
             if (!_navigationGate.IsCurrent(probe) || _browser is null) return;
@@ -2685,7 +2718,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         _viewRestoreFailed = true;
         var browser = _browser;
         var generation = _viewReadiness.Generation;
-        var saved = ShellGroupingPolicy.ForNativeRestore(_viewState.Copy(), _disableGrouping);
+        var presentation = IsFolderSizeProvider
+            ? FolderSizeLocationPolicy.WithSizeColumn(_viewState, _folderSizesEnabled) : _viewState.Copy();
+        var saved = ShellGroupingPolicy.ForNativeRestore(presentation, _disableGrouping);
         var filterRequest = _quickFilterRequestVersion;
         bool Current() => ReferenceEquals(browser, _browser) && generation == _viewReadiness.Generation &&
             filterRequest == _quickFilterRequestVersion;
@@ -2706,7 +2741,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             {
                 _viewRestoreFailed = !restored;
                 if (restored) _quickFilterGroupToRestore = null;
-                if (restored && !_location.IsFileSystemLocation && saved.GroupKey is null &&
+                if (restored && (!_location.IsFileSystemLocation || IsFolderSizeProvider) && saved.GroupKey is null &&
                     saved.SortColumns.Count == 1 &&
                     ShellFileViewExportCapture.HasVisibleUnresolvedColumn(view, saved.SortColumns[0].Key))
                     ScheduleInitialVirtualSort(saved.SortColumns[0], Current);
@@ -5263,6 +5298,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         QueueNativeThemeRefresh();
         var identity = NavigationIdentity(pidl);
         var targetPath = FileSystemPath(pidl);
+        if (targetPath is null && identity is not null && Path.IsPathFullyQualified(identity)) targetPath = identity;
         var isSearchTarget = _searchHistory.TryResolve(pidl, out _);
         if (isSearchTarget)
         {
@@ -5370,6 +5406,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         if (!_viewReadiness.IsCurrent(navigationVersion)) return 0;
         if (ShellLocationIdentity.TryGetPersistedIdentity(pidl, out var path, out var isFileSystemLocation))
         {
+            _nativeDirectoryIdentity = path;
+            if (QdrShellPathCodec.TryGetProviderPath(path, _folderSizeProfileClassId, out var physicalPath))
+            {
+                path = physicalPath;
+                isFileSystemLocation = true;
+            }
             var returningFromSearch = _location.IsSearchActive;
             _locationUnconfirmed = false;
             _location.CompleteDirectory(path, isFileSystemLocation);
@@ -5408,6 +5450,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             _viewReadiness.IsCurrent(navigationVersion) &&
             _location.TryCompleteSearch(searchUri))
         {
+            _nativeDirectoryIdentity = null;
             try { UpdateQuickFilterAttachment(searchActive: true); }
             catch (Exception ex) { MenuError?.Invoke(this, $"切换搜索视图筛选状态失败：{ex.Message}"); }
             _locationUnconfirmed = false;
@@ -5465,7 +5508,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private static string NormalizePathKey(string path) => Path.TrimEndingDirectorySeparator(path);
     private string? NavigationIdentity(IntPtr pidl) =>
         _searchHistory.TryResolve(pidl, out var searchUri) ? searchUri :
-        ShellLocationIdentity.TryGetPersistedIdentity(pidl, out var identity, out _) ? identity : null;
+        ShellLocationIdentity.TryGetPersistedIdentity(pidl, out var identity, out _)
+            ? FolderSizeLocationPolicy.LogicalPath(identity, _folderSizeProfileClassId) : null;
 
     private void TrackIssuedPath(string path)
     {
