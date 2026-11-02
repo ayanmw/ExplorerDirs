@@ -78,6 +78,7 @@ internal static class FolderNavigationCallbacksProbe
                 {
                     using var host = NewHost();
                     Call(host, "ConfigureFolderSizeLocations", classId, true);
+                    SeedLegacyProviderView(host);
                     var logicalIdentity = (string?)Call(host, "NavigationIdentity", pidl);
                     Ensure(logicalIdentity == physical,
                         $"provider callbacks retain the physical logical identity: expected={physical}; actual={logicalIdentity}; native={Call(host, "NativeNavigationIdentity", pidl)}");
@@ -96,6 +97,10 @@ internal static class FolderNavigationCallbacksProbe
                         "published location retains the native parent for selection binding");
                     Ensure(((IDictionary)Field(host, "_issuedBrowserPaths")!).Count == 0,
                         "provider completion retires its physical request registration");
+                    var cached = Call(host, "CachedViewState")!;
+                    Ensure(cached.GetType().GetProperty("GroupKey")!.GetValue(cached)!.ToString() ==
+                        "{b725f130-47ef-101a-a5f1-02608c9eebac}:12",
+                        "confirmed provider navigation migrates the old experimental size key before restoration");
                     CheckProviderSelection(nativeIdentity!, physical, classId);
                     EnsureUnhosted(host);
                 }
@@ -156,6 +161,18 @@ internal static class FolderNavigationCallbacksProbe
             finally { Marshal.FreeCoTaskMem(name); }
         }
         finally { Marshal.FreeCoTaskMem(pidl); }
+    }
+
+    private static void SeedLegacyProviderView(object host)
+    {
+        var view = Field(host, "_viewState")!;
+        var keyType = HostType.Assembly.GetType("ExplorerDirs.App.PropertyKeyState", true)!;
+        var oldKey = Activator.CreateInstance(keyType, [new Guid("9e5e05ac-1936-4a75-94f7-4704b8b01923"), 1u])!;
+        var sortType = HostType.Assembly.GetType("ExplorerDirs.App.SortColumnState", true)!;
+        var sorts = Array.CreateInstance(sortType, 1);
+        sorts.SetValue(Activator.CreateInstance(sortType, [oldKey, -1]), 0);
+        var constructor = view.GetType().GetConstructors(Members).Single(candidate => candidate.GetParameters().Length == 6);
+        HostType.GetField("_viewState", Members)!.SetValue(host, constructor.Invoke([4u, 16, sorts, oldKey, false, null]));
     }
 
     private static object? ReadParentProperty(nint pidl, NativePropertyKey key)

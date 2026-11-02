@@ -5,6 +5,22 @@ namespace ExplorerDirs.App;
 internal static class FolderSizeLocationPolicy
 {
     internal static readonly PropertyKeyState SizeColumn = new(new Guid("b725f130-47ef-101a-a5f1-02608c9eebac"), 12);
+    private static readonly PropertyKeyState LegacySizeColumn = new(new Guid("9e5e05ac-1936-4a75-94f7-4704b8b01923"), 1);
+
+    internal static ViewState MigrateLegacySizeKey(ViewState view, bool isProvider)
+    {
+        // This mistaken key belonged to our earlier provider experiment. Do not reinterpret keys in ordinary Shell views.
+        if (!isProvider) return view.Copy();
+        var hasCanonicalColumn = view.DisplayColumns?.Any(column => column.Key == SizeColumn) == true;
+        return view with
+        {
+            DisplayColumns = view.DisplayColumns?.Where(column => !hasCanonicalColumn || column.Key != LegacySizeColumn)
+                .Select(column => column.Key == LegacySizeColumn ? column with { Key = SizeColumn } : column).ToArray(),
+            SortColumns = view.SortColumns.Select(column => column.Key == LegacySizeColumn ? column with { Key = SizeColumn } : column)
+                .DistinctBy(column => column.Key).ToArray(),
+            GroupKey = view.GroupKey == LegacySizeColumn ? SizeColumn : view.GroupKey
+        };
+    }
 
     internal static ViewState WithSizeColumn(ViewState view, bool enabled)
     {

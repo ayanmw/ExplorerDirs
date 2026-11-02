@@ -10,6 +10,7 @@ internal static class FolderSizeLocationPolicySmoke
         if (FolderSizeLocationPolicy.SizeColumn != new PropertyKeyState(new Guid("b725f130-47ef-101a-a5f1-02608c9eebac"), 12))
             throw new Exception("Default folder size column is not Windows System.Size/PKEY_Size.");
         var defaults = FolderSizeLocationPolicy.WithSizeColumn(initial, true);
+        CheckLegacySizeMigration(initial);
         if (defaults.DisplayColumns?.Count != 4 || defaults.DisplayColumns[^1].Key != FolderSizeLocationPolicy.SizeColumn ||
             initial.DisplayColumns is not null || defaults.Mode != initial.Mode)
             throw new Exception("Default size columns mutated the saved view or changed its mode.");
@@ -51,5 +52,30 @@ internal static class FolderSizeLocationPolicySmoke
         try { FolderSizeLocationPolicy.LogicalPath(provider + @"\..\outside", profile); throw new Exception("Ambiguous provider traversal accepted."); }
         catch (InvalidDataException) { }
         Console.WriteLine("Folder size location policy smoke: PASS (physical/native identities, nested paths, ZIP streams, virtual/off routing, history identity and direct-child selection; no Shell/IO)");
+    }
+
+    private static void CheckLegacySizeMigration(ViewState initial)
+    {
+        var oldKey = new PropertyKeyState(new Guid("9e5e05ac-1936-4a75-94f7-4704b8b01923"), 1);
+        var name = new PropertyKeyState(new Guid("b725f130-47ef-101a-a5f1-02608c9eebac"), 10);
+        var legacy = initial with { DisplayColumns = [new(name, 240), new(oldKey, 176)],
+            SortColumns = [new(oldKey, -1)], GroupKey = oldKey, GroupAscending = false };
+        var migrated = FolderSizeLocationPolicy.MigrateLegacySizeKey(legacy, isProvider: true);
+        var disabled = FolderSizeLocationPolicy.WithSizeColumn(migrated, enabled: false);
+        var ordinary = FolderSizeLocationPolicy.MigrateLegacySizeKey(legacy, isProvider: false);
+        var size = FolderSizeLocationPolicy.SizeColumn;
+        if (migrated.DisplayColumns![1] != new DisplayColumnState(size, 176) ||
+            migrated.SortColumns.Single() != new SortColumnState(size, -1) || migrated.GroupKey != size || migrated.GroupAscending ||
+            legacy.DisplayColumns![1].Key != oldKey || ordinary.DisplayColumns![1].Key != oldKey || ordinary.SortColumns[0].Key != oldKey ||
+            !disabled.DisplayColumns!.SequenceEqual(migrated.DisplayColumns!) || !disabled.SortColumns.SequenceEqual(migrated.SortColumns))
+            throw new Exception("Legacy provider size migration changed ordinary views or lost width/sort/group intent.");
+        var mixed = legacy with { DisplayColumns = [new(oldKey, 111), new(size, 222), new(name, 333)],
+            SortColumns = [new(oldKey, -1), new(size, 1), new(name, 1)] };
+        var merged = FolderSizeLocationPolicy.MigrateLegacySizeKey(mixed, true);
+        var repeated = FolderSizeLocationPolicy.MigrateLegacySizeKey(merged, true);
+        if (!merged.DisplayColumns!.SequenceEqual(new[] { new DisplayColumnState(size, 222), new DisplayColumnState(name, 333) }) ||
+            !merged.SortColumns.SequenceEqual(new[] { new SortColumnState(size, -1), new SortColumnState(name, 1) }) ||
+            !repeated.DisplayColumns!.SequenceEqual(merged.DisplayColumns!) || !repeated.SortColumns.SequenceEqual(merged.SortColumns))
+            throw new Exception("Mixed legacy/current provider keys duplicated columns or changed migration on repeat.");
     }
 }

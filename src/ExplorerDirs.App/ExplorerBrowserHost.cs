@@ -5472,6 +5472,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             _nativeDirectoryIdentity = path;
             if (QdrShellPathCodec.TryGetProviderPath(path, _folderSizeProfileClassId, out var physicalPath))
             {
+                _viewState = FolderSizeLocationPolicy.MigrateLegacySizeKey(_viewState, isProvider: true);
                 path = physicalPath;
                 isFileSystemLocation = true;
             }
