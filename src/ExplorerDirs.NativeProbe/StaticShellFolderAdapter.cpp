@@ -4033,8 +4033,8 @@ namespace
                 // Files retain their ordinary size property; no directory scan is needed for this result.
                 if ((sizeChild->attributes & FILE_ATTRIBUTE_DIRECTORY) &&
                     !InterlockedCompareExchange(&g_folderSizeEnabled, 0, 0)) return S_OK;
-                if (*key == kSyntheticRecursiveSizeKey &&
-                    InterlockedCompareExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, 0, 0) &&
+                // Shell may request only standard PKEY_Size, without calling GetDetailsOf first.
+                if (InterlockedCompareExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, 0, 0) &&
                     sizeChild && (sizeChild->attributes & FILE_ATTRIBUTE_DIRECTORY) &&
                     !(sizeChild->attributes & FILE_ATTRIBUTE_REPARSE_POINT))
                 {
@@ -4053,9 +4053,12 @@ namespace
                     std::wstring parsingName;
                     ULONGLONG cachedBytes = 0;
                     bool available = true;
-                    if (SUCCEEDED(GetAbsoluteParsingName(sizeChild, &parsingName)) &&
-                        _recursiveSizeStore->TryGet(parsingName, sizeChild->identity, &cachedBytes, nullptr, nullptr, nullptr, &available) &&
-                        !available) VariantClear(value); // Unknown is VT_EMPTY, not a zero-byte directory.
+                    const bool cached = SUCCEEDED(GetAbsoluteParsingName(sizeChild, &parsingName)) &&
+                        _recursiveSizeStore->TryGet(parsingName, sizeChild->identity, &cachedBytes, nullptr, nullptr, nullptr, &available);
+                    // Before the first async result, the PIDL's placeholder is not a real zero-byte total.
+                    // Keep synchronous probe behavior, but expose pending and unavailable async values as empty.
+                    if ((cached && !available) || (!cached &&
+                        InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanForProbe, 0, 0))) VariantClear(value);
                 }
             }
             else
@@ -5707,6 +5710,37 @@ extern "C" ED_PROBE_EXPORT HRESULT WINAPI VerifyBackingColumnMetadataForProbe(PC
             }
         }
         InterlockedExchange(&g_folderSizeEnabled, previousEnabled);
+        if (SUCCEEDED(result))
+        {
+            const auto previousAsync = InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanForProbe, 1);
+            const auto previousDemand = InterlockedExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, 0);
+            VARIANT pending{}; VariantInit(&pending);
+            result = folder->GetDetailsEx(directory, &kSizeKey, &pending);
+            if (SUCCEEDED(result) && pending.vt != VT_EMPTY) result = E_FAIL;
+            VariantClear(&pending);
+            if (SUCCEEDED(result))
+            {
+                InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanForProbe, 0);
+                InterlockedExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, 1);
+                result = folder->GetDetailsEx(directory, &kSizeKey, &pending);
+                if (SUCCEEDED(result) && (pending.vt != VT_UI8 || pending.ullVal != 5 ||
+                    folder->RecursiveSizeSnapshotCountForProbe() == 0)) result = E_FAIL;
+                VariantClear(&pending);
+                InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanForProbe, 1);
+                InterlockedExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, 0);
+            }
+            if (SUCCEEDED(result))
+            {
+                const auto* child = SyntheticData(directory);
+                const auto childPath = std::wstring(path) + L"\\small";
+                result = folder->SetRecursiveSizeSnapshotForProbe(directory, childPath.c_str(), child->identity, 0);
+                if (SUCCEEDED(result)) result = folder->GetDetailsEx(directory, &kSizeKey, &pending);
+                if (SUCCEEDED(result) && (pending.vt != VT_UI8 || pending.ullVal != 0)) result = E_FAIL;
+                VariantClear(&pending);
+            }
+            InterlockedExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, previousDemand);
+            InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanForProbe, previousAsync);
+        }
         if (directory) CoTaskMemFree(directory);
     }
     if (earlier) CoTaskMemFree(earlier);

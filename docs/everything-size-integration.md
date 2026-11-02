@@ -57,3 +57,5 @@ VerifyBackingColumnMetadataForProbe 在真实文件夹中确认修改/创建/访
 官方 BrowseToIDList 文档仅列出部分支持的 SBSP 标志，不包含 WRITENOHISTORY；未据此添加未经验证的无历史标志。原生 Travel Log 的同路径身份转换仍可能产生额外条目，待解决，不能用应用层历史去重替代。资料：https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-iexplorerbrowser-browsetoidlist
 
 2026-11-02 原生关闭行为修复：新增 no-view 测试先复现关闭后目录 PKEY_Size 仍返回数字（HRESULT E_FAIL），而停止查询测试此前未覆盖该属性层。GetDetailsEx 现在对关闭后的目录返回 VT_EMPTY，GetDetailsOf 大小列返回空文本，不调用扫描；普通文件仍保持可读取的 1 B 大小。新增测试修复后通过。native probe 与 product C++ /W4 /WX 构建通过，native bridge 与目录树原生测试通过（嵌套解析/绑定/存储、菜单/数据对象、多选真实复制移动删除、冲突重命名和缓存失效），均未创建 Shell view。可见视图排序/选择/刷新仍需集中验证。
+
+2026-11-02 标准大小属性补全：新增测试复现首个异步快照前 GetDetailsEx(PKEY_Size) 返回 PIDL 数字占位值，现 async 缓存未命中与已知不可用均返回 VT_EMPTY，真实缓存零仍返回 VT_UI8=0。另一新增测试复现仅读取标准 PKEY_Size 不触发按需查询（此前只有自定义 key 触发），现两个属性入口均走既有按需调度，产品仍为异步；无视图同步夹具确认读回 5 B 并产生快照。两项测试均先失败再修复通过；native bridge、folder-tree、product/probe /W4 /WX build 通过。未运行可见宿主，标准属性读回正确不替代 Shell 实际补值通知与排序验收。
