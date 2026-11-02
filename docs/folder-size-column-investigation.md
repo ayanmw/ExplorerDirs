@@ -2737,6 +2737,12 @@ HostProbe 在同一 STA 调度流程内先发相反方向 Shell 排序，再发�
 复跑 1,002 行生产 ExplorerBrowserHost 隐藏探针时，完整就绪扫描约 3.56 秒，126 个 8 行批次约 3.74 秒，单批峰值约 41.9 ms；行数全程保持 1,002，最终顺序正确。定位到生产循环每批都重新捕获列布局、读取视觉标题、映射 `GetDetailsOf` ordinal 并取得 `IShellFolder2`。现在每轮就绪扫描只捕获一次上下文，并在每个让步后的批次复用；每批仍重新读取 Shell 行数，行数变化时仍放弃旧轮并重试。上下文在扫描结束、导航失效或异常返回时释放其 COM 引用。
 
 改后 1,002 行 HostProbe 的四轮完整独立扫描约 810–961 ms、复用上下文的 126 批约 649–978 ms，最大批次约 6.5–11.2 ms。三轮 Shell、ListView 与导出行数都保持 1,002；另一轮仍最终升序正确、前台未变化，但在约 2.17–3.29 秒及 3.44–4.41 秒各观测到一次 Shell/ListView `1002→0→1002`。空窗期间 comparer 计数快速增长，而 provider adapter 的 `EnumObjects` 计数保持 0；这与 DefView 内部排序重建时撤行的解释一致，不能证明可见像素为空的准确时长。将完整扫描也切到同一复用上下文后，最近一轮继续通过且完整扫描约 812 ms。Release App 与 HostProbe 构建均为 0 警告/错误；递归扫描器定向 SettingsSmoke 通过，包含 ACL 拒绝目录仍保留可读兄弟累计值。计时来自隐藏本机 synthetic provider，不代表真实磁盘或网络性能；异步排序仍未满足稳定行数门槛，递归列不接入普通文件夹视图。
+
+### 2026-11-02：递归列比较器的缓存查找路径审阅
+
+复核 `SyntheticSortFolder::CompareIDs` → `SizeForItem` → `GetAbsoluteParsingName` → `SyntheticRecursiveSizeSnapshotStore::TryGet`。每次比较目录值时，左右两项分别重新执行 backing folder `ParseDisplayName`、`ILCombine` 和 `SHGetNameFromIDList`，构造 parsing name 后再进入带互斥锁的快照 map 查找。大列表空窗期间 comparer 计数达数千至一万余次，因此这段路径是明确存在的重复工作，可能增加排序重建耗时；现有轨迹没有逐次耗时，也不能证明它导致 DefView 短暂撤行。
+
+本轮仅完成源码路径诊断，未改排序行为或产品接线。下一步在隔离 adapter 中测量 comparer 累计/最大耗时，再验证按当前 folder 预先解析子项身份或 parsing name 是否能显著降低排序时间，同时保持缓存失效、重命名、目录替换和异步扫描并发语义。只有计时与回归通过后才考虑复用该优化；Shell `ItemCount 0` 是否仍出现需独立观察。
 ### 2026-11-02：500 个目录下的按需读取与整视图刷新
 
 使用既有 Private Desktop 隔离探针，将合成夹具扩至 500 个同级目录（每目录 10 个 1 B 子文件），并明确选择 `full-view-refresh-background-scan-live-cache-publish` 策略。首次读完 502 行列表后记录 501 次递归目录扫描、5,003 个子项指标读取，累计约 70.3 ms；这是本机热临时目录的合成 provider 结果，不代表慢盘/网络耗时。初始读列表约 502 次请求递归值，重复读命中缓存。
