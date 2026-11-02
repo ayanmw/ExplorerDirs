@@ -2842,7 +2842,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                         batchPending = readinessSession.HasPendingUnresolvedValues(readinessRow,
                             ShellFileViewExportCapture.ReadinessBatchSize, out shellItemCount);
                     }
-                    catch (Exception exception) when (exception is COMException or InvalidDataException)
+                    // DefView may replace row PIDLs during a concurrent sort; Shell reports that short read as E_INVALIDARG.
+                    catch (Exception exception) when (exception is COMException or InvalidDataException ||
+                        exception is ArgumentException { HResult: unchecked((int)0x80070057) })
                     {
                         batchPending = true;
                         shellItemCount = -1;
@@ -2866,7 +2868,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     await Dispatcher.Yield(DispatcherPriority.Background);
                 }
             }
-            catch (Exception exception) when (exception is COMException or InvalidDataException)
+            catch (Exception exception) when (exception is COMException or InvalidDataException ||
+                exception is ArgumentException { HResult: unchecked((int)0x80070057) })
             {
                 // A failed Shell context read is retried on the next background turn.
                 timer.Start();

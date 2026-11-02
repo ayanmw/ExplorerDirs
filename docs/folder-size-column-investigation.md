@@ -2858,3 +2858,11 @@ HostProbe Release 构建 0 警告/错误。探针先把四个 host 放在各自�
 HostProbe Release build 0 警告/错误，`--profile-owner-session-recovery` exit 0；新进程通过生产 `WindowSessionRegistry` 读回主窗口和一个独立窗口的两份 session INI，并以两个生产 ExplorerBrowserHost 同时恢复标签。两个标签都保留三列状态，分别读到 5/29 B 与 7/31 B；隐藏宿主未显示，退出时 volatile CLSID / NameSpace 注册清理。该探针验证 registry/session/provider 在新进程中的组合恢复，但没有启动真正 App 或创建两个可见 MainWindow，因此可见多窗口布局、焦点、排序和文件操作仍待验收。
 
 同批运行 `scripts/publish-smoke.ps1` 通过：它用生成的 fixture profile 调用真实 `publish.ps1`（只替换 dotnet publish 为假实现，不运行伪二进制），检查隔离副本获得新 CLSID，主/附加窗口 session、收藏、固定标签、Q-Dir 工作区扩展和 Quick Link identity 均重写旧 CLSID，且源 profile hash 不变。该脚本证明复制/文本重写规则；不证明复制后的 provider 在真实 Shell 注册后成功解析，亦不涉及可见 UI、用户真实 profile 或发布目录。
+
+### 2026-11-02：四窗格自动排序期间 Shell 就绪读取的 E_INVALIDARG
+
+将生产 `ExplorerBrowserHost` 的多根隐藏 2×2 探针扩展为同时恢复四个标签的递归列排序状态，pane 1/3 要求升序、pane 2/4 要求降序，并在所有视图排序完成后逐个设置选区。旧的就绪批扫描仅重试 `COMException` 与 `InvalidDataException`；四个 Shell view 并行进行初始重排时，一轮观察到 `IShellFolder2::GetDetailsOf` 返回 `E_INVALIDARG`，经 `Marshal.ThrowExceptionForHR` 映射为 `ArgumentException`，该异常越过 Dispatcher 未处理。堆栈落在 `ScheduleInitialVirtualSort` 的批量就绪读取中。
+
+现在该调度器仅将 HRESULT 为 `0x80070057` 的 `ArgumentException` 视为当前批次暂不可读，并沿既有行数一致性检查和 100 ms 重试继续；其他 `ArgumentException` 仍不会被吞掉，12 秒等待上限不变。修复后同一四窗格生产 host 探针连续 5/5 通过：各自递归值与方向正确（5→29、31→7、11→37、41→13 B）；排序结束后再逐窗格设置选区，ListView/Shell 焦点均对应各自窗格，前台未变。该实验没有验证排序期间的选区保留。
+
+这项隔离验证证明隐藏 Shell 宿主可并行恢复四个方向不同的初始递归列排序，且就绪读取遇到该 Shell HRESULT 时不会再让 Dispatcher 直接逸出异常。没有测量 0 行区间的桌面像素，也没有证明边排序边接收真实鼠标/键盘输入、慢盘/网络访问或大型真实目录体验；逐行递归列仍未接入普通物理文件夹视图，未做可见 UI 验收或发布。一次性直接发送 Shell 方向切换命令的探针曾超时/错序，该结果不计为自动恢复调度通过。

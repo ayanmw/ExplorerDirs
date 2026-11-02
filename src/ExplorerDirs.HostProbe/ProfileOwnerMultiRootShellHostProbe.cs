@@ -8,7 +8,7 @@ using System.Windows.Threading;
 
 internal static class ProfileOwnerMultiRootShellHostProbe
 {
-    internal static object CreateViewStateForProbe(Assembly appAssembly) => CreateViewState(appAssembly);
+    internal static object CreateViewStateForProbe(Assembly appAssembly) => CreateViewState(appAssembly, 0);
     internal static string FindProductAdapterForProbe() => FindProductAdapter();
 
     internal static int Run()
@@ -42,7 +42,6 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             if (owner is not IDisposable) throw new InvalidOperationException("The production profile owner is not disposable.");
 
             var codec = appAssembly.GetType("ExplorerDirs.App.QdrShellPathCodec", throwOnError: true)!;
-            var viewState = CreateViewState(appAssembly);
             var hostType = appAssembly.GetType("ExplorerDirs.App.ExplorerBrowserHost", throwOnError: true)!;
             var hostNavigated = hostType.GetField("_hasNavigated", BindingFlags.Instance | BindingFlags.NonPublic)!;
             var hostViewWindow = hostType.GetField("_viewWindow", BindingFlags.Instance | BindingFlags.NonPublic)!;
@@ -63,6 +62,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             {
                 var identity = (string)codec.GetMethod("ToProviderIdentity", BindingFlags.Static | BindingFlags.NonPublic)!
                     .Invoke(null, [folders[index], classId])!;
+                var viewState = CreateViewState(appAssembly, index % 2 == 0 ? 1 : -1);
                 var host = (HwndHost)Activator.CreateInstance(hostType, identity, viewState)!;
                 hosts.Add(host);
                 Grid.SetRow(host, index / 2);
@@ -118,10 +118,21 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                         column.GetType().GetProperty("Key")!.GetValue(column)!.ToString() ==
                         "{9e5e05ac-1936-4a75-94f7-4704b8b01923}:1"))
                     throw new InvalidOperationException($"Product pane {index + 1} did not retain its own recursive column state.");
+
+                var expectedOrder = index % 2 == 0 ? expectedSizes[index] : expectedSizes[index].Reverse();
+                WaitUntil(() =>
+                {
+                    paneValues[index] = (string[])readValues.Invoke(null, [hostType, host, 2])!;
+                    return paneValues[index].Select(value => ulong.TryParse(value, out var bytes) ? bytes : ulong.MaxValue)
+                        .SequenceEqual(expectedOrder);
+                }, TimeSpan.FromSeconds(15), $"Product pane {index + 1} did not restore its independent saved recursive-size sort.");
             }
 
+            // The production initial-sort timers run concurrently; inject selections only after every
+            // pane has settled so this probe measures per-pane sort state, not synthetic input races.
             for (var index = 0; index < hosts.Count; index++)
                 selectItem.Invoke(null, [hostType, hosts[index], Path.Combine(folders[index], index % 2 == 0 ? "folder-small" : "folder-large")]);
+
             var paneSelections = hosts.Select(host =>
             {
                 var viewWindow = (nint)hostViewWindow.GetValue(host)!;
@@ -135,9 +146,29 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                     throw new InvalidOperationException($"Selection crossed pane {index + 1} identity: [{string.Join('|', paneSelections[index])}].");
             }
 
+            var readFocusedRow = typeof(ShellProviderLocationProbe).GetMethod("ReadShellFocusedRow",
+                BindingFlags.Static | BindingFlags.NonPublic)!;
+            var paneFocus = new string?[hosts.Count];
+            for (var index = 0; index < hosts.Count; index++)
+            {
+                var host = hosts[index];
+                paneValues[index] = (string[])readValues.Invoke(null, [hostType, host, 2])!;
+
+                var viewWindow = (nint)hostViewWindow.GetValue(host)!;
+                var selection = readSelection.Invoke(null, [viewWindow])!;
+                var selected = (string[])selection.GetType().GetField("Item1")!.GetValue(selection)!;
+                var listViewFocus = (string?)selection.GetType().GetField("Item2")!.GetValue(selection);
+                paneFocus[index] = (string?)readFocusedRow.Invoke(null, [hostType, host]);
+                var expectedFocused = index % 2 == 0 ? "folder-small" : "folder-large";
+                if (!selected.SequenceEqual([expectedFocused], StringComparer.OrdinalIgnoreCase) ||
+                    !string.Equals(listViewFocus, expectedFocused, StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(paneFocus[index], expectedFocused, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"Product pane {index + 1} lost its independent selection/focus after sort: selected=[{string.Join('|', selected)}]; listview-focus={listViewFocus}; shell-focus={paneFocus[index]}.");
+            }
+
             if (GetForegroundWindow() != foreground)
                 throw new InvalidOperationException("The product panes changed the foreground window.");
-            Console.WriteLine($"profile-owner-multi-root-shell-host: simultaneous-hosts={hosts.Count}; roots=independent; recursive-values=[{string.Join(" || ", paneValues.Select(values => string.Join('|', values.OrderBy(ulong.Parse)) ))}]; selections=[{string.Join('|', paneSelections.Select(values => string.Join(',', values)))}]; parents-hidden=True; foreground-unchanged=True");
+            Console.WriteLine($"profile-owner-multi-root-shell-host: simultaneous-hosts={hosts.Count}; roots=independent; recursive-sort-orders=[{string.Join(" || ", paneValues.Select(values => string.Join('|', values)))}]; selections=[{string.Join('|', paneSelections.Select(values => string.Join(',', values)))}]; focused-rows=[{string.Join('|', paneFocus)}]; parents-hidden=True; foreground-unchanged=True");
             return 0;
         }
         finally
@@ -171,7 +202,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
         File.WriteAllBytes(Path.Combine(folder, "payload.bin"), new byte[bytes]);
     }
 
-    private static object CreateViewState(Assembly appAssembly)
+    private static object CreateViewState(Assembly appAssembly, int recursiveSortDirection)
     {
         var viewStateType = appAssembly.GetType("ExplorerDirs.App.ViewState", throwOnError: true)!;
         var keyType = appAssembly.GetType("ExplorerDirs.App.PropertyKeyState", throwOnError: true)!;
@@ -182,10 +213,14 @@ internal static class ProfileOwnerMultiRootShellHostProbe
         columns.SetValue(Activator.CreateInstance(columnType, [Activator.CreateInstance(keyType,
             [Guid.Parse("9E5E05AC-1936-4A75-94F7-4704B8B01923"), 1u])!, 176]), 1);
         columns.SetValue(Activator.CreateInstance(columnType, [Activator.CreateInstance(keyType, [basic, 4u])!, 160]), 2);
+        var sortColumnType = appAssembly.GetType("ExplorerDirs.App.SortColumnState", throwOnError: true)!;
+        var sortColumns = Array.CreateInstance(sortColumnType, recursiveSortDirection == 0 ? 0 : 1);
+        if (recursiveSortDirection != 0)
+            sortColumns.SetValue(Activator.CreateInstance(sortColumnType,
+                [Activator.CreateInstance(keyType, [Guid.Parse("9E5E05AC-1936-4A75-94F7-4704B8B01923"), 1u])!, recursiveSortDirection]), 0);
         var constructor = viewStateType.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
             .Single(candidate => candidate.GetParameters().Length == 6);
-        return constructor.Invoke([4u, 16, Array.CreateInstance(
-            appAssembly.GetType("ExplorerDirs.App.SortColumnState", throwOnError: true)!, 0), null, true, columns]);
+        return constructor.Invoke([4u, 16, sortColumns, null, true, columns]);
     }
 
     private static string FindProductAdapter()
