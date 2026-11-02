@@ -2828,3 +2828,11 @@ NativeProbe registration-owner smoke 验证正常创建/清理、陈旧自有注
 扩展同步按需列合同，将隔离快照容量设为 1。首次读取深层 `child` 得到 26 B，重复读取和读取对应 `VT_UI8` 属性均命中缓存且不增加扫描；再读取 `unreadable-root` 发布其可访问部分摘要并挤出 `child` 快照。随后重新请求原 `child` 行，值仍为 26 B，按预期新增一次递归扫描；此后对该行调用 `CompareIDs` 不再增加目录指标调用或访问条目数。由此确认小于回看工作集的容量会在 Shell 再次请求已淘汰行时重复扫描，但不会返回错误旧值；缓存命中时排序比较不做磁盘扫描。
 
 NativeProbe 通过出口将容量限制为 1，App Release 构建同时重建原生 adapter；同步深层/ACL按需 smoke 和异步 8 请求队列 smoke 均通过（App、NativeProbe Release 0 警告/错误）。本项直接使用隔离 `IShellFolder` 合同，没有创建 Shell view；未证明 DefView 会在真实滚动/排序中以何种频率重读淘汰行，也不代表 ExplorerBrowser 产品启用。日志输出由两条 NativeProbe CLI 命令直接返回，临时 ACL/夹具清理在 smoke `finally` 中完成。
+
+### 2026-11-02：四视图共享根目录下的缓存抖动边界
+
+使用同一 500 个同级目录、502 行 backing root 和 4 个共享该根的隐藏 `IShellView`，只改变共享快照容量。容量 128 时场景未收敛：列值仍有 501/502 行为空，扫描 56,942 次、缓存淘汰 56,814 次、淘汰查找约 7.33M 步/205 ms，队列拒绝为 0；watchdog 以探针合同失败退出，但前台、last-input、Private Desktop 与临时夹具清理守卫均通过。失败来自缓存保留不足导致 Shell 回读已淘汰值后反复重扫，不是扫描队列容量拒绝。
+
+同样负载将容量提高到 512 后通过：4 个 view 均读回 502/502 行，唯一扫描 501 次、重复 0、淘汰 0、通知 2、聚合重枚举 4 次；峰值 worker 2，四份选区/焦点均保留。缓存快照 501 条、载荷 163,316 B；进程 Private Bytes 约 89.2 MB 是单次绝对读数，没有同进程基线，不能归因于缓存实占。该结果只说明固定 500 同根场景 512 条足以避免本轮抖动；四个不同根目录会同时需要约 2,004 条摘要，不能据此将原型容量普遍调成 512。现有探针默认容量仍为 4,096；产品没有启用逐行递归列。
+
+两轮均通过 watchdog 隔离桌面守卫。日志：低容量未收敛 `src/.state/native-probe-watchdog/20261102-085656-41008315.stdout.log`（exit 1，预期暴露容量边界）；512 容量通过 `src/.state/native-probe-watchdog/20261102-085818-2365c7e5.stdout.log`（exit 0）。这仍是 synthetic provider 的隐藏 view 结果，未验证普通产品 Shell view、真实路径长度/慢 I/O、长期缓存回收或用户可见体验。
