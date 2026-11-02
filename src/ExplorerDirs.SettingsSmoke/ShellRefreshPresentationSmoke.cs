@@ -53,10 +53,11 @@ internal static class ShellRefreshPresentationSmoke
             viewProcPath.Contains("programmaticSortCommand", StringComparison.Ordinal),
             "Shell child command notifications do not masquerade as user input and cancel paired sorting");
         Check(refreshPath.Contains("shellView.Refresh()", StringComparison.Ordinal) &&
+            !refreshPath.Contains("TryNotifyDirectoryRefresh(", StringComparison.Ordinal) &&
             !refreshPath.Contains("ShellViewRedrawLease.TrySuppress(folderView)", StringComparison.Ordinal) &&
             !refreshPath.Contains("refreshRedrawLease", StringComparison.Ordinal) &&
             refreshPath.Contains("TimeSpan.FromMilliseconds(1500)", StringComparison.Ordinal),
-            "F5 leaves native redraw enabled while its bounded timer coordinates selection recovery");
+            "F5 directly refreshes the current view without directory broadcast or redraw suppression; its bounded timer coordinates selection recovery");
         Check(redrawLease.Contains("activeLease.Count++", StringComparison.Ordinal) &&
             redrawLease.Contains("--activeLease.Count == 0", StringComparison.Ordinal),
             "overlapping redraw leases for the same native Shell view restore painting only after the last owner releases");
