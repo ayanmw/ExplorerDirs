@@ -2738,10 +2738,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         {
             Interval = TimeSpan.FromMilliseconds(100)
         };
+        // Four-pane recursive-value readiness can exceed the former 12-second cutoff on large folders; keep a finite 30-second bound.
         timer.Tick += async (_, _) =>
         {
             timer.Stop();
-            if (!IsCurrent() || readinessWait.Elapsed >= TimeSpan.FromSeconds(12))
+            if (!IsCurrent() || readinessWait.Elapsed >= TimeSpan.FromSeconds(30))
             {
                 FinishSortRecovery();
                 return;
@@ -2833,7 +2834,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 }
                 if (readinessSession is null) return;
 
-                while (IsCurrent() && readinessWait.Elapsed < TimeSpan.FromSeconds(12))
+                while (IsCurrent() && readinessWait.Elapsed < TimeSpan.FromSeconds(30))
                 {
                     bool batchPending;
                     int shellItemCount;
@@ -2881,7 +2882,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 Marshal.Release(view);
             }
 
-            if (!IsCurrent() || readinessWait.Elapsed >= TimeSpan.FromSeconds(12)) return;
+            if (!IsCurrent() || readinessWait.Elapsed >= TimeSpan.FromSeconds(30)) return;
             if (readinessFoundPendingValue)
             {
                 readinessItemCount = null;

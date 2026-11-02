@@ -136,7 +136,8 @@ namespace
     volatile LONG g_syntheticChildNotificationTranslationSent = 0;
     volatile LONG g_syntheticTranslateChildNotificationsForProbe = 0;
     volatile LONG g_syntheticAttributeNotificationTranslationCount = 0;
-    volatile LONG g_syntheticRecursiveSizeCacheCapacityForProbe = 4096;
+    // Four independent 1,025-row product panes need 4,100 snapshots; keep a measured, bounded margin above that working set.
+    volatile LONG g_syntheticRecursiveSizeCacheCapacityForProbe = 8192;
     bool ShouldTranslateSyntheticChildNotification(LONG event)
     {
         // UPDATEITEM carries property changes for an existing child; the custom
@@ -8038,7 +8039,7 @@ extern "C" ED_PROBE_EXPORT HRESULT WINAPI SetSyntheticAsyncRecursiveSizeEntryDel
 
 extern "C" ED_PROBE_EXPORT HRESULT WINAPI SetSyntheticRecursiveSizeCacheCapacityForProbe(LONG capacity)
 {
-    // The larger bound lets isolated stress probes compare cache churn without changing product defaults.
+    // Probe overrides share the product store's hard bound so capacity tests stay representative.
     if (capacity < 1 || capacity > 8192) return E_INVALIDARG;
     AcquireSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
     if (g_sharedRecursiveSizeStore)

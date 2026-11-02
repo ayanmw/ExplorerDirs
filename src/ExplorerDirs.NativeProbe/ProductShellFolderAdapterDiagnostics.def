@@ -26,6 +26,15 @@ EXPORTS
     GetProductRecursiveCompareMaximumSampleTicks
     GetProductRecursiveCompareFastPathHits
     GetProductRecursiveCompareFastPathMisses
+    SetSyntheticRecursiveSizeCacheCapacityForProbe
+    GetSyntheticRecursiveSizeCacheSnapshotCountForProbe
+    GetSyntheticRecursiveSizeCachePayloadBytesForProbe
+    GetSyntheticRecursiveSizeCacheLookupHitsForProbe
+    GetSyntheticRecursiveSizeCacheLookupMissesForProbe
+    GetSyntheticRecursiveSizeCacheEvictionsForProbe
+    GetSyntheticDirectoryMetricsCallCount
+    GetSyntheticOnDemandSizeScanCount
+    GetSyntheticOnDemandSizeScanMicroseconds
     GetProductViewGetNotifyCallCount
     GetProductViewGetNotifyEventMask
     GetProductViewGetNotifyRootIdentity

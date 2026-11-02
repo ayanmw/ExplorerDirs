@@ -38,6 +38,12 @@ internal static class Program
         if (args is ["--profile-owner-shell-host"]) return ProfileOwnerShellHostProbe.Run();
         if (args is ["--profile-owner-multi-root-shell-host"]) return ProfileOwnerMultiRootShellHostProbe.Run();
         if (args is ["--profile-owner-multi-root-shell-host-large"]) return ProfileOwnerMultiRootShellHostProbe.Run(large: true);
+        if (args is ["--profile-owner-multi-root-shell-host-cache-near-boundary"]) return ProfileOwnerMultiRootShellHostProbe.Run(folderCount: 1000);
+        if (args is ["--profile-owner-multi-root-shell-host-cache-boundary"]) return ProfileOwnerMultiRootShellHostProbe.Run(folderCount: 1024, cacheCapacity: 4096);
+        if (args is ["--profile-owner-multi-root-shell-host-cache-boundary-product"]) return ProfileOwnerMultiRootShellHostProbe.Run(folderCount: 1024, diagnosticAdapter: false);
+        if (args is ["--profile-owner-multi-root-shell-host-cache-overflow"]) return ProfileOwnerMultiRootShellHostProbe.Run(folderCount: 1025, cacheCapacity: 4096);
+        if (args is ["--profile-owner-multi-root-shell-host-cache-overflow-8192"]) return ProfileOwnerMultiRootShellHostProbe.Run(folderCount: 1025, cacheCapacity: 8192);
+        if (args is ["--profile-owner-multi-root-shell-host-cache-overflow-product"]) return ProfileOwnerMultiRootShellHostProbe.Run(folderCount: 1025, diagnosticAdapter: false);
         if (args is ["--profile-owner-session-recovery"]) return ProfileOwnerSessionRecoveryProbe.RunParent();
         if (args is ["--profile-owner-session-recovery-child", var sessionPath, var profile])
             return ProfileOwnerSessionRecoveryProbe.RunChild(sessionPath, profile);

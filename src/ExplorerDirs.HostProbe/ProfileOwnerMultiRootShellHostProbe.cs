@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -13,21 +14,25 @@ internal static class ProfileOwnerMultiRootShellHostProbe
     internal static object CreateViewStateForProbe(Assembly appAssembly) => CreateViewState(appAssembly, 0);
     internal static string FindProductAdapterForProbe() => FindProductAdapter();
 
-    internal static int Run(bool large = false)
+    internal static int Run(bool large = false, int folderCount = 0, bool diagnosticAdapter = true,
+        int cacheCapacity = 8192)
     {
         var root = Path.Combine(Path.GetTempPath(), "ExplorerDirs-ProfileOwnerMultiRoot-" + Guid.NewGuid().ToString("N"));
         var profile = Path.Combine(root, "profile");
         var folders = Enumerable.Range(0, 4).Select(index => Path.Combine(root, $"pane-{index + 1}")).ToArray();
+        var itemCount = folderCount > 0 ? folderCount : large ? LargeFolderCount : 2;
+        large = itemCount > 2;
         var expectedSizes = large
-            ? Enumerable.Range(0, 4).Select(pane => Enumerable.Range(0, LargeFolderCount)
-                .Select(index => (ulong)((pane + 1) * 10_000 + LargeFolderCount - index)).Order().ToArray()).ToArray()
+            ? Enumerable.Range(0, 4).Select(pane => Enumerable.Range(0, itemCount)
+                .Select(index => (ulong)((pane + 1) * 10_000 + itemCount - index)).Order().ToArray()).ToArray()
             : new[] { new ulong[] { 5, 29 }, new ulong[] { 7, 31 }, new ulong[] { 11, 37 }, new ulong[] { 13, 41 } };
-        var expectedItemCount = large ? LargeFolderCount : 2;
+        var expectedItemCount = itemCount;
         var classId = Guid.NewGuid();
         var classKeyPath = $@"Software\Classes\CLSID\{{{classId:D}}}";
         var namespaceKeyPath = $@"Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{{{classId:D}}}";
         object? owner = null;
         HwndSource? source = null;
+        nint adapterModule = 0;
         var hosts = new List<HwndHost>();
         var foreground = GetForegroundWindow();
         try
@@ -38,10 +43,10 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 Directory.CreateDirectory(folders[index]);
                 if (large)
                 {
-                    for (var itemIndex = 0; itemIndex < LargeFolderCount; itemIndex++)
+                    for (var itemIndex = 0; itemIndex < expectedItemCount; itemIndex++)
                     {
-                        var name = $"folder-extra-{itemIndex:D3}";
-                        var bytes = checked((int)((index + 1) * 10_000 + LargeFolderCount - itemIndex));
+                        var name = $"folder-extra-{itemIndex:D4}";
+                        var bytes = checked((int)((index + 1) * 10_000 + expectedItemCount - itemIndex));
                         CreateFolder(folders[index], name, bytes);
                     }
                 }
@@ -54,8 +59,17 @@ internal static class ProfileOwnerMultiRootShellHostProbe
 
             var appAssembly = Assembly.Load("ExplorerDirs.App");
             var ownerType = appAssembly.GetType("ExplorerDirs.App.ProfileShellNamespaceOwner", throwOnError: true)!;
+            var adapterPath = large && diagnosticAdapter ? FindProductDiagnosticAdapter() : FindProductAdapter();
+            if (large && diagnosticAdapter)
+            {
+                adapterModule = NativeLibrary.Load(adapterPath);
+                var configureCache = Marshal.GetDelegateForFunctionPointer<ConfigureCacheCapacity>(
+                    NativeLibrary.GetExport(adapterModule, "SetSyntheticRecursiveSizeCacheCapacityForProbe"));
+                var configureResult = configureCache(cacheCapacity);
+                if (configureResult < 0) Marshal.ThrowExceptionForHR(configureResult);
+            }
             owner = ownerType.GetMethod("Start", BindingFlags.Public | BindingFlags.Static)!
-                .Invoke(null, [classId, profile, FindProductAdapter()]);
+                .Invoke(null, [classId, profile, adapterPath]);
             if (owner is not IDisposable) throw new InvalidOperationException("The production profile owner is not disposable.");
 
             var codec = appAssembly.GetType("ExplorerDirs.App.QdrShellPathCodec", throwOnError: true)!;
@@ -64,6 +78,8 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             var hostViewWindow = hostType.GetField("_viewWindow", BindingFlags.Instance | BindingFlags.NonPublic)!;
             var readCounts = hostType.GetMethod("ReadItemCounts", BindingFlags.Instance | BindingFlags.NonPublic)!;
             var readValues = typeof(ShellProviderLocationProbe).GetMethod("ReadRecursiveValues",
+                BindingFlags.Static | BindingFlags.NonPublic)!;
+            var readNativeRows = typeof(ShellProviderLocationProbe).GetMethod("ReadNativeListViewSnapshot",
                 BindingFlags.Static | BindingFlags.NonPublic)!;
             var selectItem = typeof(ShellProviderLocationProbe).GetMethod("SelectShellViewItemByPath",
                 BindingFlags.Static | BindingFlags.NonPublic)!;
@@ -117,15 +133,20 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             }
 
             var paneValues = new string[hosts.Count][];
+            var paneValueReadyMilliseconds = new long[hosts.Count];
+            var paneSortReadyMilliseconds = new long[hosts.Count];
             for (var index = 0; index < hosts.Count; index++)
             {
                 var host = hosts[index];
+                var valueReadyClock = Stopwatch.StartNew();
                 WaitUntil(() =>
                 {
                     paneValues[index] = (string[])readValues.Invoke(null, [hostType, host, expectedItemCount])!;
                     return paneValues[index].Select(value => ulong.TryParse(value, out var bytes) ? bytes : ulong.MaxValue)
                         .Order().SequenceEqual(expectedSizes[index]);
-                }, TimeSpan.FromSeconds(45), $"Product pane {index + 1} received another pane's recursive values.");
+                }, TimeSpan.FromSeconds(45), $"Product pane {index + 1} received another pane's recursive values.",
+                    pollMilliseconds: 100);
+                paneValueReadyMilliseconds[index] = valueReadyClock.ElapsedMilliseconds;
 
                 var captured = hostType.GetMethod("CaptureViewState", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!
                     .Invoke(host, null)!;
@@ -137,18 +158,54 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                     throw new InvalidOperationException($"Product pane {index + 1} did not retain its own recursive column state.");
 
                 var expectedOrder = index % 2 == 0 ? expectedSizes[index] : expectedSizes[index].Reverse();
-                WaitUntil(() =>
+                var expectedNames = large
+                    ? (index % 2 == 0 ? Enumerable.Range(0, expectedItemCount).Reverse() : Enumerable.Range(0, expectedItemCount))
+                        .Select(itemIndex => $"folder-extra-{itemIndex:D4}").ToArray()
+                    : index % 2 == 0 ? ["folder-small", "folder-large"] : ["folder-large", "folder-small"];
+                try
+                {
+                    var sortReadyClock = Stopwatch.StartNew();
+                    WaitUntil(() =>
+                    {
+                        paneValues[index] = (string[])readValues.Invoke(null, [hostType, host, expectedItemCount])!;
+                        return paneValues[index].Select(value => ulong.TryParse(value, out var bytes) ? bytes : ulong.MaxValue)
+                            .SequenceEqual(expectedOrder);
+                    }, TimeSpan.FromSeconds(75), $"Product pane {index + 1} did not restore its independent saved recursive-size sort.",
+                        pollMilliseconds: 100);
+                    paneSortReadyMilliseconds[index] = sortReadyClock.ElapsedMilliseconds;
+                    var viewWindow = (nint)hostViewWindow.GetValue(host)!;
+                    var nativeRows = readNativeRows.Invoke(null, [viewWindow])!;
+                    var namesAfterSort = (string[])nativeRows.GetType().GetField("Item2")!.GetValue(nativeRows)!;
+                    if (!namesAfterSort.SequenceEqual(expectedNames, StringComparer.OrdinalIgnoreCase))
+                        throw new InvalidOperationException($"Product pane {index + 1} Shell values sorted, but native ListView names disagreed with Shell row order: {namesAfterSort.Length} rows; first=[{string.Join('|', namesAfterSort.Take(5))}]; last=[{string.Join('|', namesAfterSort.TakeLast(5))}].");
+                }
+                catch (TimeoutException exception)
                 {
                     paneValues[index] = (string[])readValues.Invoke(null, [hostType, host, expectedItemCount])!;
-                    return paneValues[index].Select(value => ulong.TryParse(value, out var bytes) ? bytes : ulong.MaxValue)
-                        .SequenceEqual(expectedOrder);
-                }, TimeSpan.FromSeconds(30), $"Product pane {index + 1} did not restore its independent saved recursive-size sort.");
+                    var viewWindow = (nint)hostViewWindow.GetValue(host)!;
+                    var nativeRows = readNativeRows.Invoke(null, [viewWindow])!;
+                    var actualNames = (string[])nativeRows.GetType().GetField("Item2")!.GetValue(nativeRows)!;
+                    var counts = readCounts.Invoke(host, [false, false]);
+                    var totalRows = counts is null ? -1 :
+                        (int)counts.GetType().GetProperty("Total")!.GetValue(counts)!;
+                    var sortState = hostType.GetMethod("CaptureViewState", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!
+                        .Invoke(host, null)!;
+                    var actualSorts = ((System.Collections.IEnumerable)sortState.GetType()
+                            .GetProperty("SortColumns")!.GetValue(sortState)!).Cast<object>()
+                        .Select(column => $"{column.GetType().GetProperty("Key")!.GetValue(column)}/{column.GetType().GetProperty("Direction")!.GetValue(column)}");
+                    var failureValueEdges = paneValues[index].Length == 0 ? "empty" :
+                        $"{paneValues[index].Length}:{string.Join('|', paneValues[index].Take(3))}..{string.Join('|', paneValues[index].TakeLast(3))}";
+                    var failureNameEdges = actualNames.Length == 0 ? "empty" :
+                        $"{actualNames.Length}:{string.Join('|', actualNames.Take(4))}..{string.Join('|', actualNames.TakeLast(4))}";
+                    var failureCacheMetrics = adapterModule == 0 ? "diagnostic-counters=unavailable" : ReadCacheMetrics(adapterModule);
+                    throw new InvalidOperationException($"Product pane {index + 1} saved sort timed out: value-ready-ms={paneValueReadyMilliseconds[index]}; rows={totalRows}/{expectedItemCount}; actual-names={failureNameEdges}; actual-values={failureValueEdges}; actual-sort=[{string.Join('|', actualSorts)}]; cache=[{failureCacheMetrics}]; expected-direction={(index % 2 == 0 ? 1 : -1)}.", exception);
+                }
             }
 
             // The production initial-sort timers run concurrently; inject selections only after every
             // pane has settled so this probe measures per-pane sort state, not synthetic input races.
             for (var index = 0; index < hosts.Count; index++)
-                selectItem.Invoke(null, [hostType, hosts[index], Path.Combine(folders[index], SelectionName(index, large))]);
+                selectItem.Invoke(null, [hostType, hosts[index], Path.Combine(folders[index], SelectionName(index, expectedItemCount))]);
 
             var paneSelections = hosts.Select(host =>
             {
@@ -158,7 +215,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             }).ToArray();
             for (var index = 0; index < paneSelections.Length; index++)
             {
-                var expectedSelection = SelectionName(index, large);
+                var expectedSelection = SelectionName(index, expectedItemCount);
                 if (!paneSelections[index].SequenceEqual([expectedSelection], StringComparer.OrdinalIgnoreCase))
                     throw new InvalidOperationException($"Selection crossed pane {index + 1} identity: [{string.Join('|', paneSelections[index])}].");
             }
@@ -176,7 +233,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 var selected = (string[])selection.GetType().GetField("Item1")!.GetValue(selection)!;
                 var listViewFocus = (string?)selection.GetType().GetField("Item2")!.GetValue(selection);
                 paneFocus[index] = (string?)readFocusedRow.Invoke(null, [hostType, host]);
-                var expectedFocused = SelectionName(index, large);
+                var expectedFocused = SelectionName(index, expectedItemCount);
                 if (!selected.SequenceEqual([expectedFocused], StringComparer.OrdinalIgnoreCase) ||
                     !string.Equals(listViewFocus, expectedFocused, StringComparison.OrdinalIgnoreCase) ||
                     !string.Equals(paneFocus[index], expectedFocused, StringComparison.OrdinalIgnoreCase))
@@ -186,7 +243,8 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             if (GetForegroundWindow() != foreground)
                 throw new InvalidOperationException("The product panes changed the foreground window.");
             var valueEdges = paneValues.Select(values => $"{values.Length}:{values[0]}..{values[^1]}");
-            Console.WriteLine($"profile-owner-multi-root-shell-host: large={large}; simultaneous-hosts={hosts.Count}; rows-per-pane={expectedItemCount}; roots=independent; recursive-sort-value-edges=[{string.Join(" || ", valueEdges)}]; selections=[{string.Join('|', paneSelections.Select(values => string.Join(',', values)))}]; focused-rows=[{string.Join('|', paneFocus)}]; parents-hidden=True; foreground-unchanged=True");
+            var cacheMetrics = adapterModule == 0 ? "diagnostic-counters=unavailable" : ReadCacheMetrics(adapterModule);
+            Console.WriteLine($"profile-owner-multi-root-shell-host: large={large}; simultaneous-hosts={hosts.Count}; rows-per-pane={expectedItemCount}; roots=independent; value-ready-ms=[{string.Join('|', paneValueReadyMilliseconds)}]; sort-ready-ms=[{string.Join('|', paneSortReadyMilliseconds)}]; recursive-sort-value-edges=[{string.Join(" || ", valueEdges)}]; source-cache-capacity={cacheCapacity}; cache=[{cacheMetrics}]; selections=[{string.Join('|', paneSelections.Select(values => string.Join(',', values)))}]; focused-rows=[{string.Join('|', paneFocus)}]; parents-hidden=True; foreground-unchanged=True");
             return 0;
         }
         finally
@@ -203,6 +261,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             }
             PumpDispatcher(TimeSpan.FromMilliseconds(200));
             if (owner is IDisposable lifetime) lifetime.Dispose();
+            if (adapterModule != 0) NativeLibrary.Free(adapterModule);
             var registrationRemains = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(classKeyPath) is not null ||
                 Microsoft.Win32.Registry.CurrentUser.OpenSubKey(namespaceKeyPath) is not null;
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
@@ -220,8 +279,8 @@ internal static class ProfileOwnerMultiRootShellHostProbe
         File.WriteAllBytes(Path.Combine(folder, "payload.bin"), new byte[bytes]);
     }
 
-    private static string SelectionName(int paneIndex, bool large) => large
-        ? $"folder-extra-{(paneIndex % 2 == 0 ? LargeFolderCount - 1 : 0):D3}"
+    private static string SelectionName(int paneIndex, int itemCount) => itemCount > 2
+        ? $"folder-extra-{(paneIndex % 2 == 0 ? itemCount - 1 : 0):D4}"
         : paneIndex % 2 == 0 ? "folder-small" : "folder-large";
 
     private static object CreateViewState(Assembly appAssembly, int recursiveSortDirection)
@@ -256,9 +315,58 @@ internal static class ProfileOwnerMultiRootShellHostProbe
         throw new FileNotFoundException("Build the product Shell namespace adapter before this probe.");
     }
 
-    private static void WaitUntil(Func<bool> condition, TimeSpan timeout, string message) =>
-        typeof(ShellProviderLocationProbe).GetMethod("WaitUntil", BindingFlags.Static | BindingFlags.NonPublic)!
-            .Invoke(null, [condition, timeout, message]);
+    private static string FindProductDiagnosticAdapter()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        {
+            var path = Path.Combine(directory.FullName, "ExplorerDirs.NativeProbe", "bin", "native-product-diagnostics-x64",
+                "ExplorerDirs.ShellNamespace.Diagnostics.dll");
+            if (File.Exists(path)) return path;
+        }
+        throw new FileNotFoundException("Build the diagnostic-only product Shell namespace adapter before this probe.");
+    }
+
+    private static string ReadCacheMetrics(nint module)
+    {
+        var snapshots = Marshal.GetDelegateForFunctionPointer<GetCounter32>(
+            NativeLibrary.GetExport(module, "GetSyntheticRecursiveSizeCacheSnapshotCountForProbe"))();
+        var payload = Marshal.GetDelegateForFunctionPointer<GetCounter32>(
+            NativeLibrary.GetExport(module, "GetSyntheticRecursiveSizeCachePayloadBytesForProbe"))();
+        var hits = Marshal.GetDelegateForFunctionPointer<GetCounter64>(
+            NativeLibrary.GetExport(module, "GetSyntheticRecursiveSizeCacheLookupHitsForProbe"))();
+        var misses = Marshal.GetDelegateForFunctionPointer<GetCounter64>(
+            NativeLibrary.GetExport(module, "GetSyntheticRecursiveSizeCacheLookupMissesForProbe"))();
+        var evictions = Marshal.GetDelegateForFunctionPointer<GetCounter64>(
+            NativeLibrary.GetExport(module, "GetSyntheticRecursiveSizeCacheEvictionsForProbe"))();
+        var scans = Marshal.GetDelegateForFunctionPointer<GetCounter32>(
+            NativeLibrary.GetExport(module, "GetSyntheticOnDemandSizeScanCount"))();
+        var metricsCalls = Marshal.GetDelegateForFunctionPointer<GetCounter32>(
+            NativeLibrary.GetExport(module, "GetSyntheticDirectoryMetricsCallCount"))();
+        return $"entries={snapshots};payload={payload};hits={hits};misses={misses};evictions={evictions};scans={scans};metric-calls={metricsCalls}";
+    }
+
+    private static void WaitUntil(Func<bool> condition, TimeSpan timeout, string message, int pollMilliseconds = 20)
+    {
+        var frame = new DispatcherFrame();
+        var timer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(pollMilliseconds)
+        };
+        var clock = Stopwatch.StartNew();
+        var complete = false;
+        timer.Tick += (_, _) =>
+        {
+            complete = condition();
+            if (complete || clock.Elapsed >= timeout)
+            {
+                timer.Stop();
+                frame.Continue = false;
+            }
+        };
+        timer.Start();
+        Dispatcher.PushFrame(frame);
+        if (!complete) throw new TimeoutException(message);
+    }
 
     private static void PumpDispatcher(TimeSpan duration)
     {
@@ -271,4 +379,8 @@ internal static class ProfileOwnerMultiRootShellHostProbe
 
     [DllImport("user32.dll", EntryPoint = "GetForegroundWindow")] private static extern nint GetForegroundWindow();
     [DllImport("user32.dll", EntryPoint = "IsWindowVisible")] private static extern bool IsWindowVisible(nint window);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ConfigureCacheCapacity(int capacity);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCounter32();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate long GetCounter64();
+
 }
