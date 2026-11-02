@@ -2136,11 +2136,16 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     return false;
                 }
             }
-            Check(SHParseDisplayName(created, IntPtr.Zero, out var absolutePidl, 0, out _));
+            // The new folder must be selected with a child PIDL from this view's namespace.
+            var nativeName = created;
+            if (_nativeDirectoryIdentity is { } nativeParent &&
+                FolderSizeLocationPolicy.TryGetProviderChildIdentity(nativeParent, parentPath, created,
+                    _folderSizeProfileClassId, out var providerChild)) nativeName = providerChild;
+            if (!ShellSelectionPidl.TryGetDirectChild(_nativeDirectoryIdentity ?? parentPath, nativeName, out var childPidl))
+                return false;
             try
             {
                 if (!IsCurrent()) return true;
-                var childPidl = ILFindLastID(absolutePidl);
                 var iid = ShellViewId;
                 if (browser.GetCurrentView(ref iid, out var viewObject) < 0) return false;
                 try
@@ -2155,7 +2160,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 }
                 finally { Marshal.ReleaseComObject(viewObject); }
             }
-            finally { Marshal.FreeCoTaskMem(absolutePidl); }
+            finally { Marshal.FreeCoTaskMem(childPidl); }
         }
         catch (Exception ex)
         {
@@ -2188,26 +2193,34 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 return null;
             try
             {
-                if (SHParseDisplayName(parentPath, IntPtr.Zero, out var parentPidl, 0, out _) < 0)
-                    return null;
-                try
-                {
-                    var absolutePidl = ILCombine(parentPidl, childPidl);
-                    if (absolutePidl == IntPtr.Zero) return null;
-                    try
-                    {
-                        if (SHGetNameFromIDList(absolutePidl, 0x80058000, out var pathPtr) < 0)
-                            return null;
-                        try { return Marshal.PtrToStringUni(pathPtr); }
-                        finally { Marshal.FreeCoTaskMem(pathPtr); }
-                    }
-                    finally { Marshal.FreeCoTaskMem(absolutePidl); }
-                }
-                finally { Marshal.FreeCoTaskMem(parentPidl); }
+                return GetFocusedItemPathFromChild(parentPath, childPidl);
             }
             finally { Marshal.FreeCoTaskMem(childPidl); }
         }
         finally { Marshal.ReleaseComObject(viewObject); }
+    }
+
+    private string? GetFocusedItemPathFromChild(string parentPath, IntPtr childPidl)
+    {
+        // A provider child PIDL belongs to the native view parent, not its displayed physical path.
+        if (SHParseDisplayName(_nativeDirectoryIdentity ?? parentPath, IntPtr.Zero, out var parentPidl, 0, out _) < 0)
+            return null;
+        try
+        {
+            var absolutePidl = ILCombine(parentPidl, childPidl);
+            if (absolutePidl == IntPtr.Zero) return null;
+            try
+            {
+                if (ShellLocationIdentity.TryGetProviderParsingIdentity(absolutePidl, _folderSizeProfileClassId, out var identity))
+                    return FolderSizeLocationPolicy.LogicalPath(identity, _folderSizeProfileClassId);
+                if (SHGetNameFromIDList(absolutePidl, 0x80058000, out var pathPtr) < 0)
+                    return null;
+                try { return Marshal.PtrToStringUni(pathPtr); }
+                finally { Marshal.FreeCoTaskMem(pathPtr); }
+            }
+            finally { Marshal.FreeCoTaskMem(absolutePidl); }
+        }
+        finally { Marshal.FreeCoTaskMem(parentPidl); }
     }
 
     private bool BrowseRelative(uint flag)

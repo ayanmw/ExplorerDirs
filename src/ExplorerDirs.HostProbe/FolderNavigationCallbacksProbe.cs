@@ -101,7 +101,7 @@ internal static class FolderNavigationCallbacksProbe
                     Ensure(cached.GetType().GetProperty("GroupKey")!.GetValue(cached)!.ToString() ==
                         "{b725f130-47ef-101a-a5f1-02608c9eebac}:12",
                         "confirmed provider navigation migrates the old experimental size key before restoration");
-                    CheckProviderSelection(nativeIdentity!, physical, classId);
+                    CheckProviderSelection(host, nativeIdentity!, physical, classId);
                     EnsureUnhosted(host);
                 }
                 finally { Marshal.FreeCoTaskMem(pidl); }
@@ -124,7 +124,7 @@ internal static class FolderNavigationCallbacksProbe
         return 0;
     }
 
-    private static void CheckProviderSelection(string nativeParent, string physicalParent, Guid classId)
+    private static void CheckProviderSelection(object host, string nativeParent, string physicalParent, Guid classId)
     {
         var file = Path.Combine(physicalParent, "selected.txt");
         var policy = HostType.Assembly.GetType("ExplorerDirs.App.FolderSizeLocationPolicy", true)!;
@@ -133,6 +133,23 @@ internal static class FolderNavigationCallbacksProbe
             .Invoke(null, arguments)!, "physical selected file maps into its current provider parent");
         var nativeFile = (string)arguments[4]!;
         Ensure(TryBindDirectChild(nativeParent, nativeFile), "mapped selection binds as one native child");
+        var selectionPidlType = HostType.Assembly.GetType("ExplorerDirs.App.ShellSelectionPidl", true)!;
+        var newFolder = Path.Combine(physicalParent, "新建文件夹");
+        Directory.CreateDirectory(newFolder);
+        foreach (var (nativeItem, physicalItem) in new[] { (nativeFile, file), (nativeParent + @"\新建文件夹", newFolder) })
+        {
+            object?[] childArguments = [nativeParent, nativeItem, nint.Zero];
+            Ensure((bool)selectionPidlType.GetMethod("TryGetDirectChild", BindingFlags.Static | BindingFlags.NonPublic)!
+                .Invoke(null, childArguments)!, "focus fixture binds a native child");
+            var focusChild = (nint)childArguments[2]!;
+            try
+            {
+                Ensure((string?)HostType.GetMethod("GetFocusedItemPathFromChild", Members)!
+                    .Invoke(host, [physicalParent, focusChild]) == physicalItem,
+                    "focused provider file/new-folder resolves against its native parent, not the physical PIDL namespace");
+            }
+            finally { Marshal.FreeCoTaskMem(focusChild); }
+        }
         Marshal.ThrowExceptionForHR(SHParseDisplayName(nativeFile, 0, out var pidl, 0, out _));
         try
         {
