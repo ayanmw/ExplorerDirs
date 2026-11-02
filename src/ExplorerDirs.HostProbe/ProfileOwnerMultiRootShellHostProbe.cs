@@ -8,6 +8,9 @@ using System.Windows.Threading;
 
 internal static class ProfileOwnerMultiRootShellHostProbe
 {
+    internal static object CreateViewStateForProbe(Assembly appAssembly) => CreateViewState(appAssembly);
+    internal static string FindProductAdapterForProbe() => FindProductAdapter();
+
     internal static int Run()
     {
         var root = Path.Combine(Path.GetTempPath(), "ExplorerDirs-ProfileOwnerMultiRoot-" + Guid.NewGuid().ToString("N"));

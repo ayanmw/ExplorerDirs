@@ -37,6 +37,9 @@ internal static class Program
         if (args is ["--shell-provider-location"]) return ShellProviderLocationProbe.Run();
         if (args is ["--profile-owner-shell-host"]) return ProfileOwnerShellHostProbe.Run();
         if (args is ["--profile-owner-multi-root-shell-host"]) return ProfileOwnerMultiRootShellHostProbe.Run();
+        if (args is ["--profile-owner-session-recovery"]) return ProfileOwnerSessionRecoveryProbe.RunParent();
+        if (args is ["--profile-owner-session-recovery-child", var sessionPath, var profile])
+            return ProfileOwnerSessionRecoveryProbe.RunChild(sessionPath, profile);
         if (args is ["--shell-provider-product-async"])
             return ShellProviderLocationProbe.RunProductAdapterOnDemandAsync();
         if (args is ["--shell-provider-product-async-large-sort-readiness"])

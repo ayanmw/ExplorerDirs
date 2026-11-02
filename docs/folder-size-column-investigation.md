@@ -2850,3 +2850,9 @@ NativeProbe 通过出口将容量限制为 1，App Release 构建同时重建原
 扩展 profile owner 隐藏 HostProbe，在同一个 profile CLSID 与生产 `ProfileShellNamespaceOwner` 下同时创建四个生产 `ExplorerBrowserHost`，每个 host 导航到独立物理根目录。四根各含相同名称的 `folder-small` / `folder-large`，但递归值分别为 5/29、7/31、11/37、13/41 B；四个 view 均各自枚举两行并读回正确值，未串用其它 pane 的缓存。随后在四个 view 中分别选择 small/large/small/large，原生 ListView 选区保持各自身份；父 HWND 隐藏、foreground 不变，退出后 volatile CLSID 与 NameSpace 注册清除、临时夹具清理。
 
 HostProbe Release 构建 0 警告/错误。探针先把四个 host 放在各自的隐藏顶层窗口中，其中一轮第 4 个 view 等待枚举超时，另两轮通过；将布局改成一个隐藏 2×2 宿主（与产品单窗口多窗格结构一致）后，`--profile-owner-multi-root-shell-host` 连续 3 轮 exit 0。观察结果支持保留单宿主结构，但不能断言初次超时的唯一根因已经查明。该结果只验证当前机器上的四个并行隐藏产品 Shell host、独立路径/递归值/列状态/选区和 profile owner 生命周期；不证明可见 App 四窗格的焦点、列绘制、跨重启 session、排序稳定性、文件操作或慢/网络目录体验。逐行列继续作为单独实验入口，不推广到普通物理目录视图，也未发布。
+
+### 2026-11-02：实验标签跨进程会话恢复
+
+新增隔离 HostProbe：父进程通过生产 `ShellNamespaceProfileStore` 创建稳定 profile CLSID，以生产 `ProfileShellNamespaceOwner` 注册 provider，并通过真实 `SessionStore` 写入一个包含 provider parsing path 和 Name / Recursive Size / Type 三列的标签；父进程释放 owner 后再启动全新 HostProbe 进程。子进程从同一 profile INI 读回 CLSID，从 session INI 读回标签与列状态，重新注册 volatile Shell namespace，再由生产 `ExplorerBrowserHost` 打开保存路径。
+
+HostProbe Release build 0 警告/错误，`--profile-owner-session-recovery` exit 0；新进程读回相同 profile ID、三列状态和 5/29 B 递归值，隐藏宿主未显示，退出时 volatile CLSID / NameSpace 注册清理。此项证明 profile ID、SessionStore 标签路径与视图列状态能在新进程中重新解析；没有启动真正 App，也未覆盖 WindowSessionRegistry 的多窗口恢复、可见焦点/排序/文件操作、发布隔离 profile 身份重写或用户数据迁移，不能代替桌面验收。
