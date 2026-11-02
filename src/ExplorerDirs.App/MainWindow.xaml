@@ -60,6 +60,8 @@
             </MenuItem>
             <MenuItem Header="视图(_V)" SubmenuOpened="ViewMenu_SubmenuOpened">
                 <MenuItem x:Name="CurrentViewMenu" Header="当前标签查看方式"/>
+                <MenuItem x:Name="ShowFolderSizesMenu" Header="显示文件夹大小" IsCheckable="True"
+                          ToolTip="异步显示文件夹汇总大小；数据来源在工具选项中设置。" Click="ShowFolderSizes_Click"/>
                 <MenuItem x:Name="MouseWheelFocusMenu" Header="鼠标悬停滚轮" IsCheckable="True"
                           ToolTip="启用后，普通滚轮由鼠标所在的 Shell 文件视图或目录树处理。Ctrl+滚轮仍切换查看方式。"
                           Click="MouseWheelFocus_Click"/>

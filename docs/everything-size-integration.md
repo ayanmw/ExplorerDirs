@@ -47,3 +47,5 @@ VerifyBackingColumnMetadataForProbe 在真实文件夹中确认修改/创建/访
 2026-11-02 默认大小列策略补全：WithSizeColumn 在启用时补充缺失的标准大小列，未捕获列布局时提供名称/修改时间/类型/大小；保留已有列顺序、宽度、模式、排序和分组，不修改输入快照。关闭文件夹汇总时不删除普通文件大小列；重复调用不重复添加，达到列数上限时保留用户布局。folder-size-location-policy-smoke 已覆盖默认和自定义布局、重复启用及关闭后的排序保留并通过；该策略尚待宿主调用，不能记为视图入口完成。
 
 2026-11-02 宿主接线第一步：ExplorerBrowserHost 增加显式 profile/enabled 配置，应用发起导航在 Shell 确认普通文件夹属性后转换 provider PIDL；导航登记和回调使用同一物理身份，发布位置另保留 native identity。provider 位置按真实路径恢复目录监视、快速筛选和地址通知；物理选区映射为当前 provider 的直接子 PIDL，搜索完成清除 provider 身份。provider 恢复使用默认大小列策略，未知大小排序仍走既有延迟排序路径。来源刷新同时识别宿主内部 provider 身份。App Release build 零警告错误，location-policy、view-state-restore 和 selection-folder-resolver 定向后台检查通过。普通窗格尚未调用配置入口；Shell 自发导航、历史、真实选择/操作及大目录性能仍待验证，不能发布或视为默认大小列已完成。
+
+2026-11-02 普通窗格入口接线：MainWindow 从 FolderSize.ini 向每个 Pane 配置 Enabled，新增视图菜单的文件夹大小开关，先保存成功再更新 provider 和窗格。AddTab 配置新宿主；已有 provider 关闭时只刷新，不替换宿主；启用既有普通目录时导航到当前逻辑路径。标签遍历使用快照并检查归属，避免 Shell 重入关闭或转移。App 构建和数据源、native bridge、location policy 检查通过，无产品窗口。真实选区保持、历史重复条目、Shell 自发导航、默认列恢复和文件操作尚待验收，不能覆盖发布包。

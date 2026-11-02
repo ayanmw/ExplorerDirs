@@ -34,6 +34,7 @@ public partial class PaneControl : UserControl
     private bool? _fullRowSelection;
     private bool _disableGrouping;
     private bool _softRefresh;
+    private bool _folderSizesEnabled;
     private bool _showSelectionSizeInStatusBar = true;
     private bool _showFolderSizeWhenEmpty;
     private bool _updatingFilterPresets;
@@ -750,6 +751,23 @@ public partial class PaneControl : UserControl
             if (state.Browser.HasNativeView && (state.Browser.IsFolderSizeProvider ||
                 QdrShellPathCodec.TryGetProviderPath(state.Path, _shellNamespaceProfileClassId, out _)))
                 state.Browser.Refresh();
+    }
+
+    internal void ConfigureFolderSizes(bool enabled)
+    {
+        _folderSizesEnabled = enabled;
+        // Navigation may pump Shell callbacks that close or transfer tabs; do not enumerate the live strip.
+        foreach (var state in _tabOrder.Select(tab => (TabState)tab.Tag).ToArray())
+        {
+            if (state.Owner != this || !_tabOrder.Contains(state.Tab)) continue;
+            var browser = state.Browser;
+            browser.ConfigureFolderSizeLocations(_shellNamespaceProfileClassId, enabled);
+            // Existing provider hosts retain their travel log when totals are disabled.
+            // Uncreated hosts pick up this configuration on their first navigation.
+            if (browser.HasNativeView && browser.IsFolderSizeProvider) browser.Refresh();
+            else if (enabled && browser.HasNativeView && browser.IsFileSystemLocation && browser.CurrentSearchUri is null)
+                browser.Navigate(browser.CurrentPath);
+        }
     }
 
     internal IReadOnlyList<string> SetHiddenItemsPreference(HiddenItemsPreference preference)
@@ -1819,6 +1837,7 @@ public partial class PaneControl : UserControl
         var browser = new ExplorerBrowserHost(path, view ?? _newTabView(), quickFilter ?? QuickFilterSettings.Empty,
             previewPaneVisible, detailsPaneVisible, _hiddenItemsPreference, _selectionCheckBoxes, _fullRowSelection,
             _disableGrouping, _softRefresh);
+        browser.ConfigureFolderSizeLocations(_shellNamespaceProfileClassId, _folderSizesEnabled);
         var tab = new TabItem();
         if (_compactMode) tab.Padding = new Thickness(4, 1, 4, 1);
         var state = new TabState { Owner = this, Tab = tab, Browser = browser, IsPinned = pinned,

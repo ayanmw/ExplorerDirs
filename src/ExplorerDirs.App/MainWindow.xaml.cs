@@ -418,6 +418,7 @@ public partial class MainWindow : Window
                 _selectionCheckBoxes, _fullRowSelection, _disableGrouping, _softRefresh,
                 _shellNamespaceProfileClassId);
             _panes[index] = pane;
+            pane.ConfigureFolderSizes(_folderSizeOptions.Enabled);
             pane.FavoriteLocations = () => _favorites.Select(_favoritesStore.Describe).ToArray();
             pane.CommonLocations = () => _commonLocations.ToArray();
             pane.RecentLocations = () => _recentAddresses.Paths;
@@ -2791,9 +2792,24 @@ public partial class MainWindow : Window
 
     private void UpdateFolderSizeSourceMenus()
     {
+        ShowFolderSizesMenu.IsChecked = _folderSizeOptions.Enabled;
         FolderSizeAutoMenu.IsChecked = _folderSizeOptions.Source == FolderSizeSource.Auto;
         FolderSizeEverythingMenu.IsChecked = _folderSizeOptions.Source == FolderSizeSource.Everything;
         FolderSizeBuiltInMenu.IsChecked = _folderSizeOptions.Source == FolderSizeSource.BuiltIn;
+    }
+
+    private void ShowFolderSizes_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var options = _folderSizeOptions with { Enabled = ShowFolderSizesMenu.IsChecked };
+            _folderSizeOptionsStore.Save(options);
+            _folderSizeOptions = options;
+            if (Application.Current is App application) application.SetFolderSizeSource(options.Source, options.Enabled);
+            foreach (var pane in _panes) pane.ConfigureFolderSizes(options.Enabled);
+        }
+        catch (Exception error) { EnvironmentStatus.Text = $"文件夹大小设置失败：{error.Message}"; }
+        UpdateFolderSizeSourceMenus();
     }
 
     private void FolderSizeSource_Click(object sender, RoutedEventArgs e)
