@@ -35,7 +35,9 @@ internal static class ShellProviderLocationProbe
         var extraFolderCount = notificationBurst ? 14 : notificationDirectoryLarge ? 100 : largeSortReadiness ? 1000 : 0;
         var expectedFolderCount = 2 + extraFolderCount;
         var expectedSizeSortedNames = new[] { "folder-small", "folder-large" }
-            .Concat(Enumerable.Range(0, extraFolderCount).Select(index => $"folder-extra-{index:D2}"))
+            .Concat((largeSortReadiness
+                ? Enumerable.Range(0, extraFolderCount).Reverse()
+                : Enumerable.Range(0, extraFolderCount)).Select(index => $"folder-extra-{index:D2}"))
             .ToArray();
         var expectedRecursiveValues = extraFolderCount > 0
             ? Enumerable.Range(101, extraFolderCount).Select(value => (ulong)value).Append(5UL).Append(29UL).Order().ToArray()
@@ -69,7 +71,8 @@ internal static class ShellProviderLocationProbe
                 {
                     var path = Path.Combine(viewRoot, $"folder-extra-{index:D2}");
                     Directory.CreateDirectory(path);
-                    File.WriteAllBytes(Path.Combine(path, "payload.bin"), new byte[index + 101]);
+                    var payloadSize = largeSortReadiness ? extraFolderCount - index + 100 : index + 101;
+                    File.WriteAllBytes(Path.Combine(path, "payload.bin"), new byte[payloadSize]);
                     expectedItemPaths.Add(path);
                 }
             }
@@ -571,6 +574,16 @@ internal static class ShellProviderLocationProbe
                 string? largeSortShellFocusAfter = null;
                 if (largeSortReadiness)
                 {
+                    WaitUntil(() =>
+                    {
+                        var selection = ReadNativeListViewSelectionState((nint)viewWindowField.GetValue(host)!);
+                        var selected = selection.Selected.Order(StringComparer.OrdinalIgnoreCase).ToArray();
+                        var listViewFocus = selection.Focused;
+                        var shellFocus = ReadShellFocusedRow(hostType, host);
+                        return largeSortSelectedBefore.SequenceEqual(selected, StringComparer.OrdinalIgnoreCase) &&
+                            string.Equals(largeSortListViewFocusBefore, listViewFocus, StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(largeSortShellFocusBefore, shellFocus, StringComparison.OrdinalIgnoreCase);
+                    }, TimeSpan.FromSeconds(13), "The Shell sort did not restore the selected rows and focused row within the product sort-recovery window.");
                     var largeSortOrderValid = observation.Names.SequenceEqual(expectedSizeSortedNames, StringComparer.OrdinalIgnoreCase);
                     var selection = ReadNativeListViewSelectionState((nint)viewWindowField.GetValue(host)!);
                     largeSortSelectedAfter = selection.Selected.Order(StringComparer.OrdinalIgnoreCase).ToArray();
@@ -586,7 +599,18 @@ internal static class ShellProviderLocationProbe
                     throw new TimeoutException("The production navigation restore did not sort by recursive size after asynchronous values completed.");
                 if (largeSortReadiness)
                 {
+                    var compareCount = ReadProductLongCounter(adapter, "GetProductRecursiveCompareCount") ?? 0;
+                    var timingSamples = ReadProductLongCounter(adapter, "GetProductRecursiveCompareTimingSamples") ?? 0;
+                    var sampledTicks = ReadProductLongCounter(adapter, "GetProductRecursiveCompareSampledTicks") ?? 0;
+                    var maximumSampleTicks = ReadProductLongCounter(adapter, "GetProductRecursiveCompareMaximumSampleTicks") ?? 0;
+                    var fastPathHits = ReadProductLongCounter(adapter, "GetProductRecursiveCompareFastPathHits") ?? 0;
+                    var fastPathMisses = ReadProductLongCounter(adapter, "GetProductRecursiveCompareFastPathMisses") ?? 0;
+                    var sampledLookupMilliseconds = sampledTicks * 1000d / Stopwatch.Frequency;
+                    var maximumLookupMicroseconds = maximumSampleTicks * 1_000_000d / Stopwatch.Frequency;
+                    var estimatedLookupMilliseconds = timingSamples == 0 ? 0 :
+                        sampledLookupMilliseconds / timingSamples * compareCount;
                     Console.WriteLine($"shell-provider-product-async-large-readiness: rows={expectedFolderCount}; complete-readiness-scan-ms={readinessClock.Elapsed.TotalMilliseconds:F2}; batched-scan-ms={batchReadinessClock.Elapsed.TotalMilliseconds:F2}; batches={readinessBatchCount}; max-batch-ms={maximumBatchMilliseconds:F2}; auto-resorted-before-observation={autoResorted}; final-order-valid=True; first={observation.Names[0]}; last={observation.Names[^1]}; shell-counts=[{string.Join('|', observation.ShellItemCounts)}]; listview-counts=[{string.Join('|', observation.NativeListViewCounts)}]; export-counts=[{string.Join('|', observation.ExportRowCounts)}]; count-transitions=[{string.Join('|', largeReadinessCountTrace ?? [])}]; paint-messages=[{string.Join('|', initialVirtualSortPaintProbe?.Messages ?? [])}]; selected=[{string.Join('|', largeSortSelectedBefore)}]=>[{string.Join('|', largeSortSelectedAfter)}]; listview-focus={largeSortListViewFocusBefore}=>{largeSortListViewFocusAfter}; shell-focus={largeSortShellFocusBefore}=>{largeSortShellFocusAfter}; foreground-unchanged=True");
+                    Console.WriteLine($"shell-provider-product-recursive-compare-timing: comparisons={compareCount}; sampled-every=64; samples={timingSamples}; sampled-size-lookup-ms={sampledLookupMilliseconds:F3}; estimated-size-lookup-ms={estimatedLookupMilliseconds:F3}; maximum-sampled-size-lookup-us={maximumLookupMicroseconds:F2}; direct-path-cache-hits={fastPathHits}; direct-path-cache-misses={fastPathMisses}");
                 }
                 else ReportSortExperiment("automatic-after-fill", orderAfterAsyncFill, autoResorted, 0, observation, classId);
                 Console.WriteLine($"shell-provider-product-async-scheduled-sort-state: sort-columns=[{string.Join('|', CaptureSortColumns(hostType, host))}]; compare-trace=[{string.Join(" || ", compareDiagnosticsAfterScheduledSort)}]");

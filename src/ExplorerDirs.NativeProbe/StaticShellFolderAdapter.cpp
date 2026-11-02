@@ -173,6 +173,11 @@ namespace
     volatile LONG64 g_productSyntheticEnumTotalMilliseconds = 0;
     volatile LONG64 g_productSyntheticEnumMaximumMilliseconds = 0;
     volatile LONG64 g_productRecursiveCompareCount = 0;
+    volatile LONG64 g_productRecursiveCompareTimingSamples = 0;
+    volatile LONG64 g_productRecursiveCompareSampledTicks = 0;
+    volatile LONG64 g_productRecursiveCompareMaximumSampleTicks = 0;
+    volatile LONG64 g_productRecursiveCompareFastPathHits = 0;
+    volatile LONG64 g_productRecursiveCompareFastPathMisses = 0;
 
     void RecordProductSyntheticEnum(ULONGLONG startMilliseconds, size_t itemCount)
     {
@@ -3483,11 +3488,14 @@ namespace
             {
             case 0: comparison = static_cast<short>(_wcsicmp(leftChild->name, rightChild->name)); break;
             case 1:
+            {
 #if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
-                InterlockedIncrement64(&g_productRecursiveCompareCount);
+                const auto compareSequence = InterlockedIncrement64(&g_productRecursiveCompareCount);
+                LARGE_INTEGER compareStart{};
+                const bool sampleCompareDuration = (compareSequence & 63) == 0;
+                if (sampleCompareDuration) QueryPerformanceCounter(&compareStart);
 #endif
                 if (!g_syntheticSizeMetricsObservation) ED_PROBE_METRIC_INCREMENT(g_syntheticSizeCompareCount);
-            {
                 const bool ignoreFolderSize =
                     InterlockedCompareExchange(&g_syntheticIgnoreRecursiveFolderSizeSortForProbe, 0, 0) != 0;
                 // Q-Dir exposes an option to ignore recursive folder sizes for sorting while keeping them displayable.
@@ -3495,6 +3503,24 @@ namespace
                     ? 0 : SizeForItem(reinterpret_cast<PCUITEMID_CHILD>(left));
                 const auto rightSize = ignoreFolderSize && (rightChild->attributes & FILE_ATTRIBUTE_DIRECTORY)
                     ? 0 : SizeForItem(reinterpret_cast<PCUITEMID_CHILD>(right));
+#if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
+                if (sampleCompareDuration)
+                {
+                    LARGE_INTEGER compareEnd{};
+                    QueryPerformanceCounter(&compareEnd);
+                    const auto elapsedTicks = compareEnd.QuadPart - compareStart.QuadPart;
+                    InterlockedIncrement64(&g_productRecursiveCompareTimingSamples);
+                    InterlockedAdd64(&g_productRecursiveCompareSampledTicks, elapsedTicks);
+                    auto maximumTicks = InterlockedCompareExchange64(&g_productRecursiveCompareMaximumSampleTicks, 0, 0);
+                    while (maximumTicks < elapsedTicks)
+                    {
+                        const auto previous = InterlockedCompareExchange64(&g_productRecursiveCompareMaximumSampleTicks,
+                            elapsedTicks, maximumTicks);
+                        if (previous == maximumTicks) break;
+                        maximumTicks = previous;
+                    }
+                }
+#endif
                 comparison = leftSize < rightSize ? -1 : leftSize > rightSize ? 1 : 0;
 #if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
                 RecordProductCompareDiagnostic(column, leftChild->name, leftSize, rightChild->name, rightSize, comparison);
@@ -4665,6 +4691,32 @@ namespace
         {
             const auto* child = SyntheticData(item);
             if (!child) return 0;
+            if (_recursiveSizeStore && (child->attributes & FILE_ATTRIBUTE_DIRECTORY) &&
+                child->identity.available && !_backingPath.empty())
+            {
+                // CompareIDs runs repeatedly during Shell sorting; reuse the current folder path
+                // instead of reparsing the same child PIDL through the Shell on every comparison.
+                thread_local std::wstring comparisonParsingName;
+                try
+                {
+                    comparisonParsingName.assign(_backingPath);
+                    if (comparisonParsingName.back() != L'\\' && comparisonParsingName.back() != L'/')
+                        comparisonParsingName.push_back(L'\\');
+                    comparisonParsingName.append(child->name);
+                    ULONGLONG bytes = 0;
+                    if (_recursiveSizeStore->TryGet(comparisonParsingName, child->identity, &bytes))
+                    {
+#if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
+                        InterlockedIncrement64(&g_productRecursiveCompareFastPathHits);
+#endif
+                        return bytes;
+                    }
+                }
+                catch (const std::bad_alloc&) { }
+#if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
+                InterlockedIncrement64(&g_productRecursiveCompareFastPathMisses);
+#endif
+            }
             std::wstring parsingName;
             if (_recursiveSizeStore && SUCCEEDED(GetAbsoluteParsingName(child, &parsingName)))
             {
@@ -5242,6 +5294,11 @@ extern "C" void WINAPI ResetProductCompareDiagnostics()
     InterlockedExchange64(&g_productSyntheticEnumTotalMilliseconds, 0);
     InterlockedExchange64(&g_productSyntheticEnumMaximumMilliseconds, 0);
     InterlockedExchange64(&g_productRecursiveCompareCount, 0);
+    InterlockedExchange64(&g_productRecursiveCompareTimingSamples, 0);
+    InterlockedExchange64(&g_productRecursiveCompareSampledTicks, 0);
+    InterlockedExchange64(&g_productRecursiveCompareMaximumSampleTicks, 0);
+    InterlockedExchange64(&g_productRecursiveCompareFastPathHits, 0);
+    InterlockedExchange64(&g_productRecursiveCompareFastPathMisses, 0);
 }
 
 extern "C" void WINAPI SetProductCompareTraceEnabled(BOOL enabled)
@@ -5264,6 +5321,21 @@ extern "C" LONGLONG WINAPI GetProductSyntheticEnumMaximumMilliseconds()
 
 extern "C" LONGLONG WINAPI GetProductRecursiveCompareCount()
 { return InterlockedCompareExchange64(&g_productRecursiveCompareCount, 0, 0); }
+
+extern "C" LONGLONG WINAPI GetProductRecursiveCompareTimingSamples()
+{ return InterlockedCompareExchange64(&g_productRecursiveCompareTimingSamples, 0, 0); }
+
+extern "C" LONGLONG WINAPI GetProductRecursiveCompareSampledTicks()
+{ return InterlockedCompareExchange64(&g_productRecursiveCompareSampledTicks, 0, 0); }
+
+extern "C" LONGLONG WINAPI GetProductRecursiveCompareMaximumSampleTicks()
+{ return InterlockedCompareExchange64(&g_productRecursiveCompareMaximumSampleTicks, 0, 0); }
+
+extern "C" LONGLONG WINAPI GetProductRecursiveCompareFastPathHits()
+{ return InterlockedCompareExchange64(&g_productRecursiveCompareFastPathHits, 0, 0); }
+
+extern "C" LONGLONG WINAPI GetProductRecursiveCompareFastPathMisses()
+{ return InterlockedCompareExchange64(&g_productRecursiveCompareFastPathMisses, 0, 0); }
 
 extern "C" LONG WINAPI GetProductCompareDiagnosticCount()
 {

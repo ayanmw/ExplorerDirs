@@ -2720,6 +2720,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var oppositeApplied = false;
         var savedApplied = false;
         ShellViewSelectionSnapshot? initialSortSelection = null;
+        string? initialSortSelectionReadiness = null;
         var readinessWait = Stopwatch.StartNew();
         var expectedInputVersion = Interlocked.Read(ref _nativeUserInputVersion);
         var readinessRow = 0;
@@ -2774,7 +2775,34 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 }
 
                 if (initialSortSelection is not null)
-                    _ = RestoreInitialVirtualSortSelection(initialSortSelection, IsCurrent);
+                {
+                    var selectionView = GetFolderView2Pointer();
+                    if (selectionView == IntPtr.Zero)
+                    {
+                        timer.Start();
+                        return;
+                    }
+                    try
+                    {
+                        var readiness = initialSortSelection.ReadTargetReadiness(selectionView,
+                            initialSortSelectionReadiness, out _);
+                        if (readiness is null || readiness.Contains('0'))
+                        {
+                            initialSortSelectionReadiness = readiness;
+                            timer.Start();
+                            return;
+                        }
+                        initialSortSelectionReadiness = readiness;
+                    }
+                    finally { Marshal.Release(selectionView); }
+
+                    var restored = RestoreInitialVirtualSortSelection(initialSortSelection, IsCurrent);
+                    if (!restored.SelectionRestored || !restored.FocusRestored)
+                    {
+                        timer.Start();
+                        return;
+                    }
+                }
                 FinishSortRecovery();
                 return;
             }

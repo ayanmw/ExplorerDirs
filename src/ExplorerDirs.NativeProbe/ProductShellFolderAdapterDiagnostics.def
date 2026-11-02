@@ -21,6 +21,11 @@ EXPORTS
     GetProductSyntheticEnumTotalMilliseconds
     GetProductSyntheticEnumMaximumMilliseconds
     GetProductRecursiveCompareCount
+    GetProductRecursiveCompareTimingSamples
+    GetProductRecursiveCompareSampledTicks
+    GetProductRecursiveCompareMaximumSampleTicks
+    GetProductRecursiveCompareFastPathHits
+    GetProductRecursiveCompareFastPathMisses
     GetProductViewGetNotifyCallCount
     GetProductViewGetNotifyEventMask
     GetProductViewGetNotifyRootIdentity
