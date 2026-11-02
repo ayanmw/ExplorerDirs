@@ -63,6 +63,8 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             if (large && diagnosticAdapter)
             {
                 adapterModule = NativeLibrary.Load(adapterPath);
+                Marshal.GetDelegateForFunctionPointer<SetProductCompareTraceEnabled>(
+                    NativeLibrary.GetExport(adapterModule, "SetProductCompareTraceEnabled"))(0);
                 var configureCache = Marshal.GetDelegateForFunctionPointer<ConfigureCacheCapacity>(
                     NativeLibrary.GetExport(adapterModule, "SetSyntheticRecursiveSizeCacheCapacityForProbe"));
                 var configureResult = configureCache(cacheCapacity);
@@ -145,7 +147,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                     return paneValues[index].Select(value => ulong.TryParse(value, out var bytes) ? bytes : ulong.MaxValue)
                         .Order().SequenceEqual(expectedSizes[index]);
                 }, TimeSpan.FromSeconds(45), $"Product pane {index + 1} received another pane's recursive values.",
-                    pollMilliseconds: 100);
+                    pollMilliseconds: 250);
                 paneValueReadyMilliseconds[index] = valueReadyClock.ElapsedMilliseconds;
 
                 var captured = hostType.GetMethod("CaptureViewState", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!
@@ -162,18 +164,22 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                     ? (index % 2 == 0 ? Enumerable.Range(0, expectedItemCount).Reverse() : Enumerable.Range(0, expectedItemCount))
                         .Select(itemIndex => $"folder-extra-{itemIndex:D4}").ToArray()
                     : index % 2 == 0 ? ["folder-small", "folder-large"] : ["folder-large", "folder-small"];
+                var viewWindow = (nint)hostViewWindow.GetValue(host)!;
                 try
                 {
                     var sortReadyClock = Stopwatch.StartNew();
                     WaitUntil(() =>
                     {
+                        // Poll the native row order cheaply while DefView sorts; read COM column values only after candidate order appears.
+                        var nativeRows = readNativeRows.Invoke(null, [viewWindow])!;
+                        var actualNames = (string[])nativeRows.GetType().GetField("Item2")!.GetValue(nativeRows)!;
+                        if (!actualNames.SequenceEqual(expectedNames, StringComparer.OrdinalIgnoreCase)) return false;
                         paneValues[index] = (string[])readValues.Invoke(null, [hostType, host, expectedItemCount])!;
                         return paneValues[index].Select(value => ulong.TryParse(value, out var bytes) ? bytes : ulong.MaxValue)
                             .SequenceEqual(expectedOrder);
                     }, TimeSpan.FromSeconds(75), $"Product pane {index + 1} did not restore its independent saved recursive-size sort.",
                         pollMilliseconds: 100);
                     paneSortReadyMilliseconds[index] = sortReadyClock.ElapsedMilliseconds;
-                    var viewWindow = (nint)hostViewWindow.GetValue(host)!;
                     var nativeRows = readNativeRows.Invoke(null, [viewWindow])!;
                     var namesAfterSort = (string[])nativeRows.GetType().GetField("Item2")!.GetValue(nativeRows)!;
                     if (!namesAfterSort.SequenceEqual(expectedNames, StringComparer.OrdinalIgnoreCase))
@@ -182,7 +188,6 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 catch (TimeoutException exception)
                 {
                     paneValues[index] = (string[])readValues.Invoke(null, [hostType, host, expectedItemCount])!;
-                    var viewWindow = (nint)hostViewWindow.GetValue(host)!;
                     var nativeRows = readNativeRows.Invoke(null, [viewWindow])!;
                     var actualNames = (string[])nativeRows.GetType().GetField("Item2")!.GetValue(nativeRows)!;
                     var counts = readCounts.Invoke(host, [false, false]);
@@ -380,6 +385,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
     [DllImport("user32.dll", EntryPoint = "GetForegroundWindow")] private static extern nint GetForegroundWindow();
     [DllImport("user32.dll", EntryPoint = "IsWindowVisible")] private static extern bool IsWindowVisible(nint window);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ConfigureCacheCapacity(int capacity);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void SetProductCompareTraceEnabled(int enabled);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCounter32();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate long GetCounter64();
 
