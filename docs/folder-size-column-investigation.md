@@ -2786,3 +2786,9 @@ HostProbe 在同一 STA 调度流程内先发相反方向 Shell 排序，再发�
 产品初始排序现在在发出相反方向命令前捕获当前选择；若当前选择为空，则只在上述导航、路径、输入版本均匹配且缓存含选中集时回退到该快照。待目标方向的行数稳定后，使用 `ShellViewSelectionSnapshot.Restore` 恢复项目选择和项目焦点，且不抢应用/系统 HWND 焦点。缓存身份不匹配时不会复用。`FinishSortRecovery` 统一释放快照和 redraw lease；用户输入或导航导致原调度失效时不恢复过期状态。
 
 红/绿验证：改动前探针报 `folder-extra-500 => []`，ListView/Shell focus 均由该项变空；修正后 1,002 行最终升序正确，三个选中项均保持，且两层焦点都保持为 `folder-extra-500`。该轮仍观测到 Shell/ListView 行数短暂 `1002→0→1002`；隐藏探针的 `paint-messages=[]` 不能证明用户可见空帧已消除。普通 2 行产品 HostProbe 也通过。Release App/HostProbe 构建 0 警告/错误，完整 Release SettingsSmoke 通过。该结果来自隐藏 ExplorerBrowser，不验证屏幕上的闪帧、真实桌面输入竞争或真实盘/慢 provider；递归大小列仍为隔离原型，暂不扩展到普通文件夹。
+
+### 2026-11-02：native 递归列保留 ACL 可访问部分
+
+native `GetSyntheticDirectoryMetrics` 现在把 `ERROR_ACCESS_DENIED` 作为可完成的部分扫描结果处理：不可遍历的根目录返回 0 B/0 项并记 1 个 unreadable；递归子目录被拒绝时保留可读兄弟的字节数/文件数，累计跳过位置并继续扫描。reparse 目录也按共享 C# 扫描器契约计为跳过而不深入。不可读数量随大小、文件数和目录数一并进入递归快照缓存；异步 worker 因扫描返回成功而发布快照和视图更新，避免大小列行持续空白。人类可读大小文本对部分值显示 `>= N B (partial; skipped N)`，内容摘要附上 unreadable/skipped 数；数值 Shell 属性仍为可读字节小计，供排序确定性完成。
+
+红/绿验证：先将 native ACL 探针改为要求 `S_OK`，重建 DLL 后在旧实现上按预期失败；实现后隔离 ACL 树得到 5 B、1 file、2 folders、1 skipped，且快照读回四个值一致。同步 on-demand smoke、异步 per-row 与 view-batch smoke 都通过；异步夹具中的 ACL 拒绝行不再保持 pending，兄弟值与跳过数均回读正确。生产递归扫描器的 ACL smoke 仍通过。NativeProbe 与 App Release build 均通过（0 warning/0 error），产品 adapter `/W4 /WX` 编译通过；隐藏产品 adapter + ExplorerBrowserHost 普通异步排序 smoke 也通过，行数全程 2 且前台未变。该普通目录 smoke 没有 ACL 拒绝项，不能替代真实产品可见 ACL 验收。无 GUI、无发布，逐行递归列仍是隔离原型。错误类型仍按失败处理，当前只把 `ERROR_ACCESS_DENIED` 归为可跳过结果。

@@ -293,7 +293,7 @@ public static class SyntheticShellSortProbe
                 Check(check(fixture));
             }
             finally { NativeLibrary.Free(module); }
-            Console.WriteLine($"synthetic-on-demand-recursive-size-column-smoke: enumeration-does-not-scan=True; first-value-read-scans=True; deep-tree-depth=16; deep-path-chars={deepPath.Length}; recursive-total=26-bytes-18-files-17-folders; repeated-value-read-uses-cache=True; compareids-does-not-scan=True; native-acl-denial-propagates=True; shell-view-created=False");
+            Console.WriteLine($"synthetic-on-demand-recursive-size-column-smoke: enumeration-does-not-scan=True; first-value-read-scans=True; deep-tree-depth=16; deep-path-chars={deepPath.Length}; recursive-total=26-bytes-18-files-17-folders; repeated-value-read-uses-cache=True; compareids-does-not-scan=True; acl-denied-child-keeps-5-byte-accessible-subtotal=True; unreadable-count-cached=1; shell-view-created=False");
             return 0;
         }
         finally
@@ -316,6 +316,8 @@ public static class SyntheticShellSortProbe
             int.TryParse(delayText, out var parsedDelayMilliseconds) ? parsedDelayMilliseconds : -1;
         var batchByView = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_BATCH_BY_VIEW") == "1";
         var requestedScanCount = batchByView && Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_BATCH_COUNT") == "500" ? 500 : 8;
+        DirectoryInfo? deniedInfo = null;
+        FileSystemAccessRule? denyRule = null;
         if (delayMilliseconds is < 0 or > 1000)
             throw new ArgumentOutOfRangeException(nameof(delayText), "Async scan latency injection must be between 0 and 1000 milliseconds.");
         try
@@ -327,6 +329,18 @@ public static class SyntheticShellSortProbe
                 File.WriteAllBytes(Path.Combine(child, "direct.bin"), [1, 2, 3, 4, 5, 6]);
                 File.WriteAllBytes(Path.Combine(child, "nested-folder", "nested.bin"), [1, 2, 3, 4]);
             }
+            var deniedDirectory = Path.Combine(fixture, "child-00", "denied");
+            Directory.CreateDirectory(deniedDirectory);
+            File.WriteAllBytes(Path.Combine(deniedDirectory, "denied.bin"), new byte[7]);
+            deniedInfo = new DirectoryInfo(deniedDirectory);
+            var deniedSecurity = deniedInfo.GetAccessControl(AccessControlSections.Access);
+            var currentUser = WindowsIdentity.GetCurrent().User ??
+                throw new InvalidOperationException("The current Windows user has no security identifier.");
+            denyRule = new FileSystemAccessRule(currentUser,
+                FileSystemRights.ListDirectory | FileSystemRights.ReadAttributes | FileSystemRights.Traverse,
+                AccessControlType.Deny);
+            deniedSecurity.AddAccessRule(denyRule);
+            deniedInfo.SetAccessControl(deniedSecurity);
             var module = NativeLibrary.Load(FindAdapterLibrary());
             try
             {
@@ -357,10 +371,19 @@ public static class SyntheticShellSortProbe
                     "SetSyntheticAsyncRecursiveSizeScanDelayForProbe"))(0);
                 NativeLibrary.Free(module);
             }
-            Console.WriteLine($"synthetic-async-on-demand-recursive-size-column-smoke: queue-mode={(batchByView ? "view-batch" : "per-row")}; requested-scan-count={requestedScanCount}; first-value-read-returns-before-scan=True; worker-publishes-10-bytes-and-2-files-1-folder=True; repeated-value-read-uses-cache=True; scan-delay-ms={delayMilliseconds}; shell-view-created=False");
+            Console.WriteLine($"synthetic-async-on-demand-recursive-size-column-smoke: queue-mode={(batchByView ? "view-batch" : "per-row")}; requested-scan-count={requestedScanCount}; first-value-read-returns-before-scan=True; accessible-sibling-total-published=True; ACL-partial-result-resolves-pending-row=True; unreadable-count-published=True; repeated-value-read-uses-cache=True; scan-delay-ms={delayMilliseconds}; shell-view-created=False");
             return 0;
         }
-        finally { Directory.Delete(fixture, recursive: true); }
+        finally
+        {
+            if (deniedInfo is not null && denyRule is not null)
+            {
+                var security = deniedInfo.GetAccessControl(AccessControlSections.Access);
+                security.RemoveAccessRuleSpecific(denyRule);
+                deniedInfo.SetAccessControl(security);
+            }
+            Directory.Delete(fixture, recursive: true);
+        }
     }
 
     internal static int RunFolderEnumerationScanCostProbe()
