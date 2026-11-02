@@ -55,3 +55,5 @@ VerifyBackingColumnMetadataForProbe 在真实文件夹中确认修改/创建/访
 2026-11-02 开关转换选区保护：对普通视图启用 provider 前采集真实选区，以 browser/read generation/selection version 检查 COM 重入后的快照；失败不强行转换。隐藏标签延迟至激活后转换，避免现有选择恢复定时器因不可见直接取消；关闭开关清除待转换状态。来源刷新遍历也改为快照并检查归属，避免刷新重入导致集合变化。App Release build 与既有 view-state-restore 后台检查通过；本次快照/隐藏标签恢复尚缺真实宿主验收。
 
 官方 BrowseToIDList 文档仅列出部分支持的 SBSP 标志，不包含 WRITENOHISTORY；未据此添加未经验证的无历史标志。原生 Travel Log 的同路径身份转换仍可能产生额外条目，待解决，不能用应用层历史去重替代。资料：https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-iexplorerbrowser-browsetoidlist
+
+2026-11-02 原生关闭行为修复：新增 no-view 测试先复现关闭后目录 PKEY_Size 仍返回数字（HRESULT E_FAIL），而停止查询测试此前未覆盖该属性层。GetDetailsEx 现在对关闭后的目录返回 VT_EMPTY，GetDetailsOf 大小列返回空文本，不调用扫描；普通文件仍保持可读取的 1 B 大小。新增测试修复后通过。native probe 与 product C++ /W4 /WX 构建通过，native bridge 与目录树原生测试通过（嵌套解析/绑定/存储、菜单/数据对象、多选真实复制移动删除、冲突重命名和缓存失效），均未创建 Shell view。可见视图排序/选择/刷新仍需集中验证。

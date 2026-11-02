@@ -4029,6 +4029,10 @@ namespace
             else if (*key == kSizeKey || *key == kSyntheticRecursiveSizeKey)
             {
                 const auto* sizeChild = SyntheticData(item);
+                // Disabling totals must hide directory values even when a PIDL or snapshot contains an older size.
+                // Files retain their ordinary size property; no directory scan is needed for this result.
+                if ((sizeChild->attributes & FILE_ATTRIBUTE_DIRECTORY) &&
+                    !InterlockedCompareExchange(&g_folderSizeEnabled, 0, 0)) return S_OK;
                 if (*key == kSyntheticRecursiveSizeKey &&
                     InterlockedCompareExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, 0, 0) &&
                     sizeChild && (sizeChild->attributes & FILE_ATTRIBUTE_DIRECTORY) &&
@@ -4111,6 +4115,17 @@ namespace
             else
             {
                 if (!child) return E_INVALIDARG;
+                if (column == 1 && (child->attributes & FILE_ATTRIBUTE_DIRECTORY) &&
+                    !InterlockedCompareExchange(&g_folderSizeEnabled, 0, 0))
+                {
+                    details->fmt = LVCFMT_RIGHT;
+                    details->cxChar = 12;
+                    details->str.uType = STRRET_WSTR;
+                    details->str.pOleStr = static_cast<LPWSTR>(CoTaskMemAlloc(sizeof(WCHAR)));
+                    if (!details->str.pOleStr) return E_OUTOFMEMORY;
+                    *details->str.pOleStr = L'\0';
+                    return S_OK;
+                }
                 const bool recursiveContentsColumn = column == 2 && extended &&
                     (child->attributes & FILE_ATTRIBUTE_DIRECTORY) &&
                     !(child->attributes & FILE_ATTRIBUTE_REPARSE_POINT);
@@ -5665,6 +5680,34 @@ extern "C" ED_PROBE_EXPORT HRESULT WINAPI VerifyBackingColumnMetadataForProbe(PC
             if (SUCCEEDED(result) && (value.vt == VT_EMPTY || value.vt == VT_NULL)) result = E_FAIL;
             VariantClear(&value);
         }
+    }
+    if (SUCCEEDED(result))
+    {
+        PITEMID_CHILD directory = nullptr;
+        result = folder->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"small"), nullptr, &directory, nullptr);
+        const auto previousEnabled = InterlockedExchange(&g_folderSizeEnabled, 0);
+        if (SUCCEEDED(result))
+        {
+            // Disabled totals are absent, while ordinary file sizes remain readable.
+            VARIANT value{}; VariantInit(&value);
+            result = folder->GetDetailsEx(directory, &kSizeKey, &value);
+            if (SUCCEEDED(result) && value.vt != VT_EMPTY) result = E_FAIL;
+            VariantClear(&value);
+            if (SUCCEEDED(result)) result = folder->GetDetailsEx(earlier, &kSizeKey, &value);
+            if (SUCCEEDED(result) && (value.vt != VT_UI8 || value.ullVal != 1)) result = E_FAIL;
+            VariantClear(&value);
+            SHELLDETAILS cell{};
+            if (SUCCEEDED(result)) result = folder->GetDetailsOf(directory, 1, &cell);
+            if (SUCCEEDED(result))
+            {
+                LPWSTR text = nullptr;
+                result = StrRetToStrW(&cell.str, directory, &text);
+                if (SUCCEEDED(result) && (!text || *text)) result = E_FAIL;
+                if (text) CoTaskMemFree(text);
+            }
+        }
+        InterlockedExchange(&g_folderSizeEnabled, previousEnabled);
+        if (directory) CoTaskMemFree(directory);
     }
     if (earlier) CoTaskMemFree(earlier);
     if (later) CoTaskMemFree(later);
