@@ -208,6 +208,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     }
 
     internal bool HasNativeView => _browser is not null && _viewWindow != IntPtr.Zero;
+    internal bool HasNativeBrowser => _browser is not null;
     internal string? CurrentSearchUri => _location.SearchUri;
     internal long NavigationVersion => _viewReadiness.NavigationVersion;
     internal long ViewGeneration => _viewReadiness.Generation;

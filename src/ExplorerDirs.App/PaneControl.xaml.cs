@@ -728,7 +728,9 @@ public partial class PaneControl : UserControl
                 Status.Text = "视图配置暂时不可读取，未复制标签。";
                 return;
             }
-            var selectedPaths = state.Browser.CaptureSelectedShellParsingNames();
+            // A never-opened tab has no Shell selection yet; preserve its queued startup selection instead.
+            var selectedPaths = state.Browser.HasNativeBrowser ? state.Browser.CaptureSelectedShellParsingNames()
+                : state.StartupSelectItems?.ToArray() ?? [];
             AddTab(state.Browser.CurrentPath, view, pinned: state.IsPinned, quickFilter: state.Browser.QuickFilter,
                 previewPaneVisible: state.Browser.PreviewPaneVisible,
                 detailsPaneVisible: state.Browser.DetailsPaneVisible,
@@ -1133,7 +1135,8 @@ public partial class PaneControl : UserControl
         addressPathButtonVisible: true,
         addressComputerButtonVisible: true,
         tabHeaderVisible: Tabs.Visibility == Visibility.Visible,
-        statusBarVisible: StatusBarRow.Visibility == Visibility.Visible, goButtonVisible: false);
+        statusBarVisible: StatusBarRow.Visibility == Visibility.Visible, goButtonVisible: false,
+        tabActionsVisible: Tabs.Visibility == Visibility.Visible);
     internal int FocusStopCount => FocusMap.Count;
     internal IReadOnlyList<int> MajorFocusStops => FocusMap.MajorStops;
     private TreeFocusTarget CurrentTreeFocusTarget =>
@@ -2740,7 +2743,9 @@ public partial class PaneControl : UserControl
             var view = source.Browser.CaptureViewState();
             if (source.Browser.ViewCaptureFailed)
                 throw new InvalidOperationException("Shell 视图状态暂时不可读取；未复制标签。");
-            var selectedPaths = source.Browser.CaptureSelectedShellParsingNames();
+            // Do not require a live view for an uncreated tab, or force creation just to copy its settings.
+            var selectedPaths = source.Browser.HasNativeBrowser ? source.Browser.CaptureSelectedShellParsingNames()
+                : source.StartupSelectItems?.ToArray() ?? [];
             var copy = AddTab(source.Browser.CurrentPath, view, select: false, pinned: source.IsPinned,
                 quickFilter: source.Browser.QuickFilter,
                 previewPaneVisible: source.Browser.PreviewPaneVisible,
@@ -2795,9 +2800,12 @@ public partial class PaneControl : UserControl
         UpdateTabStripVisibility();
     }
 
-    private void UpdateTabStripVisibility() =>
-        Tabs.Visibility = TabStripVisibilityPolicy.ShouldShow(_tabStripVisibilityMode, Tabs.Items.Count)
+    private void UpdateTabStripVisibility()
+    {
+        // Tab actions moved into this row; hide the complete row, including its focus stops.
+        TabStripRow.Visibility = Tabs.Visibility = TabStripVisibilityPolicy.ShouldShow(_tabStripVisibilityMode, Tabs.Items.Count)
             ? Visibility.Visible : Visibility.Collapsed;
+    }
 
     private void UpdateShellStatusHint(string? text)
     {

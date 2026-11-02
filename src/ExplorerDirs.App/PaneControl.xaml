@@ -137,7 +137,7 @@
                            TextTrimming="CharacterEllipsis" AutomationProperties.AutomationId="PaneStatus"/>
             </DockPanel>
             <DockPanel>
-                <DockPanel DockPanel.Dock="Top" LastChildFill="True">
+                <DockPanel x:Name="TabStripRow" DockPanel.Dock="Top" LastChildFill="True">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                     <Button x:Name="NewTabButton" ToolTip="新建标签页" AutomationProperties.Name="新建标签页"
                             Click="NewTab_Click" Margin="8,0,0,0" Width="28"/>

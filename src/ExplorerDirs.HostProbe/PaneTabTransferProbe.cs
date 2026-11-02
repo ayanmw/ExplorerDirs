@@ -55,13 +55,14 @@ internal static class PaneTabTransferProbe
             var targetTabs = Array.CreateInstance(tabSettingsType, 1);
             targetTabs.SetValue(Activator.CreateInstance(tabSettingsType, [targetPath, view, emptyFilter, false, false]), 0);
             sourcePane = (UIElement)Activator.CreateInstance(paneType, InstanceMembers, null,
-                [sourceTabs, viewFactory, null, 0, favoriteStore, historyStore, followWindows, false, null, false, false], null)!;
+                [sourceTabs, viewFactory, null, 0, favoriteStore, historyStore, followWindows, false, null, false, false, null], null)!;
             targetPane = (UIElement)Activator.CreateInstance(paneType, InstanceMembers, null,
-                [targetTabs, viewFactory, null, 0, favoriteStore, historyStore, followWindows, false, null, false, false], null)!;
+                [targetTabs, viewFactory, null, 0, favoriteStore, historyStore, followWindows, false, null, false, false, null], null)!;
 
             if (unhostedCopyOrder)
             {
                 CheckUnhostedActivePaneGeometry(sourcePane);
+                CheckUnhostedTabChrome(sourcePane);
                 CheckUnhostedCopyOrder(sourcePane, targetPane);
                 CheckUnhostedSettledPath(sourcePane, targetPane);
                 CheckUnhostedReopenHistory(sourcePane);
@@ -464,6 +465,9 @@ internal static class PaneTabTransferProbe
         var order = (List<TabItem>)paneType.GetField("_tabOrder", InstanceMembers)!.GetValue(destination)!;
         var original = (TabItem)sourceTabs.Items[0];
         var ordinary = (TabItem)targetTabs.Items[0];
+        var startupProperty = original.Tag.GetType().GetProperty("StartupSelectItems", InstanceMembers)!;
+        var startupSelection = new[] { Path.Combine(ReadBrowserPath(original), "probe.txt") };
+        startupProperty.SetValue(original.Tag, startupSelection);
         paneType.GetMethod("TogglePinned", InstanceMembers)!.Invoke(source, [original.Tag]);
         var copyMethod = paneType.GetMethod("CopyTabFrom", InstanceMembers)!;
 
@@ -474,6 +478,10 @@ internal static class PaneTabTransferProbe
         }
 
         var first = Copy(null, true);
+        var copiedSelection = (IReadOnlyList<string>)startupProperty.GetValue(first.Tag)!;
+        Ensure(copiedSelection.SequenceEqual(startupSelection) && !ReferenceEquals(copiedSelection, startupSelection),
+            "an uncreated tab copies its queued selection without sharing mutable storage or creating Shell");
+        startupProperty.SetValue(original.Tag, null);
         Ensure(order.SequenceEqual(new[] { first, ordinary }),
             "a copied pinned tab stays before ordinary tabs when dropped on blank tab-strip space");
         var before = Copy(first, false);
@@ -508,6 +516,33 @@ internal static class PaneTabTransferProbe
         }
     }
 
+    private static void CheckUnhostedTabChrome(UIElement pane)
+    {
+        var type = pane.GetType();
+        var tabs = (TabControl)type.GetField("Tabs", InstanceMembers)!.GetValue(pane)!;
+        var edit = (Button)type.GetField("GoButton", InstanceMembers)!.GetValue(pane)!;
+        var add = (Button)type.GetField("NewTabButton", InstanceMembers)!.GetValue(pane)!;
+        var close = (Button)type.GetField("CloseTabButton", InstanceMembers)!.GetValue(pane)!;
+        var row = (FrameworkElement)System.Windows.Media.VisualTreeHelper.GetParent(
+            System.Windows.Media.VisualTreeHelper.GetParent(add));
+        Ensure(edit.Visibility == Visibility.Collapsed && !edit.IsTabStop,
+            "removed address editor has no visible button or keyboard stop");
+        Ensure(row.IsAncestorOf(tabs) && row.IsAncestorOf(close), "tab actions share the tab-header row");
+        var setMode = type.GetMethod("SetTabStripVisibilityMode", InstanceMembers)!;
+        var modeType = setMode.GetParameters()[0].ParameterType;
+        try
+        {
+            setMode.Invoke(pane, [Enum.Parse(modeType, "Hidden")]);
+            Ensure(tabs.Visibility == Visibility.Collapsed && row.Visibility == Visibility.Collapsed,
+                "hiding the tab strip hides its action row rather than leaving an empty toolbar");
+            var map = type.GetProperty("FocusMap", InstanceMembers)!.GetValue(pane)!;
+            Ensure((int)map.GetType().GetProperty("NewTab", InstanceMembers)!.GetValue(map)! == -1 &&
+                (int)map.GetType().GetProperty("CloseTab", InstanceMembers)!.GetValue(map)! == -1,
+                "hidden tab actions do not retain keyboard focus stops");
+        }
+        finally { setMode.Invoke(pane, [Enum.Parse(modeType, "Always")]); }
+    }
+
     private static void CheckUnhostedSettledPath(UIElement source, UIElement destination)
     {
         var paneType = source.GetType();
@@ -525,8 +560,9 @@ internal static class PaneTabTransferProbe
         // Navigated delivery; it does not model native navigation timing.
         browser.GetType().GetMethod("Navigate", InstanceMembers)!.Invoke(browser, [nextPath]);
         var address = (TextBox)paneType.GetField("Address", InstanceMembers)!.GetValue(source)!;
-        Ensure(address.Text == oldPath,
-            "pane presentation still has the earlier directory before notification");
+        // The address editor keeps a directory separator; compare directory identity, not editor formatting.
+        Ensure(Path.TrimEndingDirectorySeparator(address.Text) == Path.TrimEndingDirectorySeparator(oldPath),
+            $"pane presentation still has the earlier directory before notification: address={address.Text}; old={oldPath}; next={nextPath}");
         Ensure((string)paneType.GetProperty("CurrentPath", InstanceMembers)!.GetValue(source)! == nextPath,
             "current-directory commands use the settled path before pane notification");
         stateType.GetProperty("SearchRequestPending", InstanceMembers)!.SetValue(state, true);
@@ -549,7 +585,8 @@ internal static class PaneTabTransferProbe
             "new-tab current-folder mode follows the settled directory");
         tabs.SelectedItem = original;
         paneType.GetMethod("FocusAddress", InstanceMembers)!.Invoke(source, null);
-        Ensure(address.Text == nextPath, "address editing starts from the settled directory");
+        Ensure(Path.TrimEndingDirectorySeparator(address.Text) == Path.TrimEndingDirectorySeparator(nextPath),
+            "address editing starts from the settled directory");
         paneType.GetMethod("DuplicateCurrentTab", InstanceMembers)!.Invoke(source, null);
         Ensure(ReadBrowserPath(tabs.SelectedItem!) == nextPath,
             "duplicating before notice delivery opens the settled directory");
@@ -668,7 +705,7 @@ internal static class PaneTabTransferProbe
         var filterProperty = hostType.GetProperty("QuickFilter", InstanceMembers)!;
         var filterType = filterProperty.PropertyType;
         var pattern = filterType.GetProperty("Pattern", InstanceMembers)!;
-        var initial = Activator.CreateInstance(filterType, ["*.txt", false, false])!;
+        var initial = Activator.CreateInstance(filterType, ["*.txt", false, false, null])!;
         Ensure((bool)hostType.GetMethod("SetQuickFilter", InstanceMembers)!.Invoke(browser, [initial])!,
             "an unattached tab accepts a filter for its future view");
         paneType.GetMethod("FocusQuickFilter", InstanceMembers)!.Invoke(pane, null);
