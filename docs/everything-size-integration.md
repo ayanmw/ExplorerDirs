@@ -24,4 +24,8 @@ EverythingSizeClient 使用官方 SDK 文档公开的 IPC QUERY2W 协议，批�
 
 ## 待完成
 
-大小来源 INI 与视图开关、数据源选择与自动回退、有限缓存/失效、分页、普通列表列接入和空间分析尚未完成。尚未覆盖真实 Everything 未运行/关闭目录索引、查询中服务退出、挂起服务和多页目录；当前测试不能替代这些运行期边界。
+已实现 FolderSizeDataSource 的来源选择与分页消费：Everything 专用模式缺值保留未知，Auto 只扫描索引缺值目录，BuiltIn 不联系 Everything；内置扫描全局最多两个 worker，按批次调度而非每目录创建线程。不额外复制 Everything 索引和消费者已有的缓存。FolderSizeOptionsStore 默认 Enabled=True、Source=Auto，保存于独立 INI，支持冲突、未来格式及损坏文件保护。
+
+--folder-size-data-source-smoke 验证来源路由、真实零与缺值区分、自动模式限制扫描范围、Everything 不可用后备、取消、选项重载/冲突/未来格式保护；通过，无 IPC/UI。App Release build 0 warning/error。
+
+设置菜单与视图开关、普通列表列接入、缓存失效接线和空间分析尚未完成。尚未覆盖真实 Everything 未运行/关闭目录索引、查询中服务退出、挂起服务和多页目录；当前测试不能替代这些运行期边界。

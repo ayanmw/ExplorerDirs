@@ -9,6 +9,12 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 
+if (args is ["--folder-size-data-source-smoke"])
+{
+    FolderSizeDataSourceSmoke.Run().GetAwaiter().GetResult();
+    return;
+}
+
 if (args is ["--everything-size-protocol-smoke"])
 {
     EverythingSizeSmoke.Run();
