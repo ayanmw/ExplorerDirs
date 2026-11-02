@@ -2891,4 +2891,4 @@ HostProbe Release build 0 警告/错误，`--profile-owner-session-recovery` exi
 
 这支持“诊断身份解析/字符串分配会扰动并行 Shell 排序”的解释，但两轮通过不足以证明它是此前间歇性部分排序的唯一根因；之前身份采集开启时也曾有一次通过。正式产品行为未改变，后续仍需在低观测负担下重复压力运行，并将这些诊断捕获限制为明确需要 PIDL 身份证据的专用探针。
 
-为验证该解释，HostProbe 增加显式 `--profile-owner-multi-root-shell-host-cache-overflow-8192-diagnostic-observer-on` 对照入口，构建通过。一次开启身份采集的尝试未得到排序结果：探针起始前台句柄为 `0`，运行期间变为 `0xC0CB6`，前台守卫按设计中止；这不是排序失败证据。该 HostProbe 尚未隔离到 Private Desktop，因此不再由后台命令直接重复运行。测试留下的唯一临时夹具位于 `%TEMP%\ExplorerDirs-ProfileOwnerMultiRoot-2dfad7d664c543b484f6e120cb11eb84`，本轮清理操作被自动审查拦截，需后续安全清理。
+为验证该解释，HostProbe 增加显式 `--profile-owner-multi-root-shell-host-cache-overflow-8192-diagnostic-observer-on` 对照入口，构建通过。前台稳定终端运行后，开启身份采集的有效对照在第 4 pane 排序超时：1,025 行和值已全部就绪，缓存有 4,100 条且 0 淘汰、0 扫描，但读取到的行序未匹配保存的递归大小降序；当时 Shell SortColumns 仍报告递归列方向 `-1`，值边界为 `41025..40001`。该结果与身份采集关闭时连续 2/2 通过形成明显相关性，但目前只有一次 observer-on 失败，尚不能认定为唯一根因。错误消息只给出行名和值的首尾样本，不能精确判断其余行的乱序形态。下一步应增加失败时的逆序/错位摘要，并在同条件下再重复 observer-on 与 observer-off 对照。诊断身份解析、互斥锁与字符串追加仅存在于诊断 DLL，不影响正式产品 adapter。此次夹具清理状态未确认；不要仅凭异常假定临时目录已删除。
