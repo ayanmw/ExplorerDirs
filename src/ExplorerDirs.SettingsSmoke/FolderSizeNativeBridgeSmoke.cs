@@ -37,11 +37,12 @@ internal static class FolderSizeNativeBridgeSmoke
             var calls = 0; var unknown = false; var overflow = false; var exactCalls = 0;
             var status = EverythingSizeStatus.Available;
             TaskCompletionSource<IndexedSizePage>? gate = null;
+            CancellationToken batchToken = default;
             using var entered = new ManualResetEventSlim();
             Task<IndexedSizePage> FakeQuery(string parent, uint offset, CancellationToken token)
             {
                 Interlocked.Increment(ref calls);
-                if (gate is { } pending) { entered.Set(); return pending.Task; }
+                if (gate is { } pending) { batchToken = token; entered.Set(); return pending.Task; }
                 if (status != EverythingSizeStatus.Available) return Task.FromResult(new IndexedSizePage(status, []));
                 if (overflow) return Task.FromResult(new IndexedSizePage(EverythingSizeStatus.Available,
                     [new(Path.Combine(root, "large"), true, 29)], 2049));
@@ -129,9 +130,26 @@ internal static class FolderSizeNativeBridgeSmoke
             try
             {
                 if (!entered.Wait(TimeSpan.FromSeconds(2))) throw new Exception("Callback did not enter wait.");
+                // Retiring one row must not cancel the shared batch needed by another row.
+                var sharedCalls = calls;
+                Marshal.WriteInt32(cancellationFlag, 1);
+                if (!waiting.Wait(TimeSpan.FromSeconds(2)) || waiting.Result.Hr != unchecked((int)0x800704C7) ||
+                    !batchToken.CanBeCanceled || batchToken.IsCancellationRequested)
+                    throw new Exception("Individual row cancellation retired the shared Everything batch.");
+                Marshal.WriteInt32(cancellationFlag, 0);
+                gate.TrySetResult(new(EverythingSizeStatus.Available,
+                    [new(Path.Combine(root, "large"), true, 29)], 1));
+                if (Read("large") != (0, 29UL, 1U) || calls != sharedCalls)
+                    throw new Exception("Sibling lookup did not reuse its shared batch.");
+                gate = new(TaskCreationOptions.RunContinuationsAsynchronously); entered.Reset();
+                bridge.SetSource(FolderSizeSource.Everything);
+                waiting = Task.Run(() => Read("small"));
+                if (!entered.Wait(TimeSpan.FromSeconds(2))) throw new Exception("Replacement callback did not enter wait.");
                 bridge.SetSource(FolderSizeSource.BuiltIn);
                 if (!waiting.Wait(TimeSpan.FromSeconds(2)) || waiting.Result.Hr != unchecked((int)0x800704C7))
                     throw new Exception("Source switch did not retire the pending callback.");
+                if (!batchToken.CanBeCanceled || !batchToken.IsCancellationRequested)
+                    throw new Exception("Source switch left the shared Everything IPC batch running.");
             }
             finally { gate.TrySetResult(new(EverythingSizeStatus.IndexUnavailable, [])); waiting.GetAwaiter().GetResult(); }
             bridge.Dispose();

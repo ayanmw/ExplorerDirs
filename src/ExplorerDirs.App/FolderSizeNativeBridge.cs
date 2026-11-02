@@ -61,16 +61,19 @@ internal sealed class FolderSizeNativeBridge : IDisposable
         }
     }
 
-    private Task<IndexedSizePage> ParentPage(string parent)
+    private Task<IndexedSizePage> ParentPage(string parent, CancellationToken requestToken)
     {
         lock (_cacheGate)
         {
+            requestToken.ThrowIfCancellationRequested();
             if (_pages.TryGetValue(parent, out var cached) && Environment.TickCount64 - cached.Started < 2000) return cached.Task;
             _pages.Remove(parent);
             // Four first pages retain at most 8,192 rows. Later-page targets use a precise query,
             // rather than retaining an unbounded second copy of Everything's index.
             if (_pages.Count >= 4) _pages.Remove(_pages.MinBy(item => item.Value.Started).Key);
-            var task = _queryChildren(parent, 0, CancellationToken.None);
+            // Source changes must retire the actual IPC batch, not only its native waiter.
+            // Use the shared generation so one cancelled row cannot cancel sibling queries.
+            var task = _queryChildren(parent, 0, _generation.Token);
             _pages[parent] = (task, Environment.TickCount64);
             return task;
         }
@@ -105,7 +108,7 @@ internal sealed class FolderSizeNativeBridge : IDisposable
             IndexedSizeItem? match = null;
             if (parent is not null)
             {
-                var page = ParentPage(parent).WaitAsync(token).GetAwaiter().GetResult();
+                var page = ParentPage(parent, token).WaitAsync(token).GetAwaiter().GetResult();
                 if (page.Status == EverythingSizeStatus.Available)
                 {
                     match = page.Items.FirstOrDefault(item => item.IsDirectory && FavoritesStore.SamePath(item.Path, path));
