@@ -196,11 +196,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private Guid? _folderSizeProfileClassId;
     private bool _folderSizesEnabled;
     private string? _nativeDirectoryIdentity;
+    private long _folderSizeRedirectVersion;
     internal bool IsFolderSizeProvider => _nativeDirectoryIdentity is { } identity &&
         QdrShellPathCodec.TryGetProviderPath(identity, _folderSizeProfileClassId, out _);
 
     internal void ConfigureFolderSizeLocations(Guid? profileClassId, bool enabled)
     {
+        _folderSizeRedirectVersion++;
         _folderSizeProfileClassId = profileClassId;
         _folderSizesEnabled = enabled;
     }
@@ -2360,6 +2362,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             // the same confirmed identity used by navigation callbacks.
             var issuedPath = ShellLocationIdentity.TryGetPersistedIdentity(pidl, out var canonicalPath, out _)
                 ? canonicalPath : path;
+            if (ShellLocationIdentity.TryGetProviderParsingIdentity(pidl, _folderSizeProfileClassId, out var providerIdentity))
+                issuedPath = providerIdentity;
             if (ShellLocationIdentity.TryGetAttributes(pidl, out var attributes))
             {
                 var nativeIdentity = FolderSizeLocationPolicy.NativeIdentity(issuedPath, attributes,
@@ -5317,6 +5321,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     int IExplorerBrowserEvents.OnNavigationPending(IntPtr pidl)
     {
+        _folderSizeRedirectVersion++;
+        if (TryRedirectFolderSizeNavigation(pidl)) return unchecked((int)0x80004004); // E_ABORT
         _quickFilterRequestVersion++;
         CancelPendingQuickFilterGroupRestore();
         ClearLastNativeSelection();
@@ -5350,7 +5356,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             _navigationGate.Cancel();
         }
         _nativeNavigationRequestVersion = issuedVersion ?? _navigationRequestVersion;
-        _viewReadiness.Begin(identity);
+        _viewReadiness.Begin(NativeNavigationIdentity(pidl));
         QueueNavigationAvailability();
         NavigationStarting?.Invoke(this, EventArgs.Empty);
         var focused = GetFocus();
@@ -5362,6 +5368,28 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             catch (Exception ex) { MenuError?.Invoke(this, $"读取视图配置失败：{ex.Message}"); }
         }
         return 0;
+    }
+
+    private bool TryRedirectFolderSizeNavigation(IntPtr pidl)
+    {
+        var browser = _browser;
+        var request = _navigationRequestVersion;
+        var redirectVersion = _folderSizeRedirectVersion;
+        if (!_folderSizesEnabled || _folderSizeProfileClassId is null || browser is null ||
+            _searchHistory.TryResolve(pidl, out _) ||
+            ShellLocationIdentity.TryGetProviderParsingIdentity(pidl, _folderSizeProfileClassId, out _) ||
+            !ShellLocationIdentity.TryGetPersistedIdentity(pidl, out var path, out _) ||
+            !ShellLocationIdentity.TryGetAttributes(pidl, out var attributes)) return false;
+        var routed = FolderSizeLocationPolicy.NativeIdentity(path, attributes, _folderSizeProfileClassId, true);
+        if (string.Equals(routed, path, StringComparison.OrdinalIgnoreCase)) return false;
+        // Cancel before accepting the physical visit. Re-enter Browse only after this Shell callback exits.
+        Dispatcher.BeginInvoke(DispatcherPriority.Normal, new Action(() =>
+        {
+            if (ReferenceEquals(browser, _browser) && request == _navigationRequestVersion &&
+                redirectVersion == _folderSizeRedirectVersion && _folderSizesEnabled)
+                Navigate(path);
+        }));
+        return true;
     }
     int IExplorerBrowserEvents.OnViewCreated(IntPtr view)
     {
@@ -5410,10 +5438,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     int IExplorerBrowserEvents.OnNavigationComplete(IntPtr pidl)
     {
+        var nativeIdentity = NativeNavigationIdentity(pidl);
+        if (!_viewReadiness.HasOutstanding(nativeIdentity)) return 0;
         QueueNativeThemeRefresh();
         var identity = NavigationIdentity(pidl);
         var requestVersion = RetireNavigationRequest(identity);
-        var publish = _viewReadiness.Complete(identity);
+        var publish = _viewReadiness.Complete(nativeIdentity);
         QueueNavigationAvailability();
         var navigationVersion = _viewReadiness.NavigationVersion;
         // Retire bookkeeping for every callback, but publish only the current
@@ -5434,6 +5464,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         if (!_viewReadiness.IsCurrent(navigationVersion)) return 0;
         if (ShellLocationIdentity.TryGetPersistedIdentity(pidl, out var path, out var isFileSystemLocation))
         {
+            if (ShellLocationIdentity.TryGetProviderParsingIdentity(pidl, _folderSizeProfileClassId, out var providerIdentity))
+                path = providerIdentity;
             _nativeDirectoryIdentity = path;
             if (QdrShellPathCodec.TryGetProviderPath(path, _folderSizeProfileClassId, out var physicalPath))
             {
@@ -5534,10 +5566,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     }
 
     private static string NormalizePathKey(string path) => Path.TrimEndingDirectorySeparator(path);
-    private string? NavigationIdentity(IntPtr pidl) =>
+    private string? NativeNavigationIdentity(IntPtr pidl) =>
         _searchHistory.TryResolve(pidl, out var searchUri) ? searchUri :
-        ShellLocationIdentity.TryGetPersistedIdentity(pidl, out var identity, out _)
-            ? FolderSizeLocationPolicy.LogicalPath(identity, _folderSizeProfileClassId) : null;
+        ShellLocationIdentity.TryGetProviderParsingIdentity(pidl, _folderSizeProfileClassId, out var providerIdentity) ? providerIdentity :
+        ShellLocationIdentity.TryGetPersistedIdentity(pidl, out var identity, out _) ? identity : null;
+
+    private string? NavigationIdentity(IntPtr pidl) => NativeNavigationIdentity(pidl) is { } identity
+        ? FolderSizeLocationPolicy.LogicalPath(identity, _folderSizeProfileClassId) : null;
 
     private void TrackIssuedPath(string path)
     {
@@ -6143,10 +6178,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         : null;
     int IExplorerBrowserEvents.OnNavigationFailed(IntPtr pidl)
     {
+        var nativeIdentity = NativeNavigationIdentity(pidl);
+        // A redirected physical visit was never accepted. Its cancellation must not retire the replacement's request.
+        if (!_viewReadiness.HasOutstanding(nativeIdentity)) return 0;
         QueueNativeThemeRefresh();
         var identity = NavigationIdentity(pidl);
         var requestVersion = RetireNavigationRequest(identity);
-        var publish = _viewReadiness.Fail(identity);
+        var publish = _viewReadiness.Fail(nativeIdentity);
         QueueNavigationAvailability();
         var navigationVersion = _viewReadiness.NavigationVersion;
         if (!publish || !_viewReadiness.IsCurrent(navigationVersion)) return 0;

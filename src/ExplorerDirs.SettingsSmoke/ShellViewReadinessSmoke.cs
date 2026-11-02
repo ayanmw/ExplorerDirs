@@ -5,6 +5,16 @@ internal static class ShellViewReadinessSmoke
     internal static void Run()
     {
         var state = new ShellViewReadiness();
+        var physical = @"C:\folder";
+        var provider = QdrShellPathCodec.ToProviderIdentity(physical, Guid.NewGuid());
+        state.Begin(physical);
+        state.Begin(provider);
+        Check(state.HasOutstanding(physical) && state.HasOutstanding(provider), "native visits are tracked separately");
+        Check(!state.Fail(physical) && state.Pending,
+            "physical-location failure cannot settle its provider replacement with the same logical path");
+        Check(state.Complete(provider) && !state.Pending,
+            "provider completion settles only its native identity");
+        Check(!state.HasOutstanding(physical) && !state.HasOutstanding(provider), "settled visits reject duplicate callbacks");
         state.Begin("home");
         state.Complete("home");
         state.Begin("offline");

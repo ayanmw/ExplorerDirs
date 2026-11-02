@@ -108,6 +108,22 @@ internal static class ShellLocationIdentity
         return true;
     }
 
+    // A provider may expose FILESYSPATH too; retain its native identity for PIDL binding and callback matching.
+    internal static bool TryGetProviderParsingIdentity(nint pidl, Guid? profileClassId, out string identity)
+    {
+        identity = string.Empty;
+        if (pidl == 0 || profileClassId is null ||
+            SHGetNameFromIDList(pidl, DesktopAbsoluteParsing, out var name) < 0 || name == 0) return false;
+        try
+        {
+            var value = Marshal.PtrToStringUni(name);
+            if (value is null || !QdrShellPathCodec.TryGetProviderPath(value, profileClassId, out _)) return false;
+            identity = value;
+            return true;
+        }
+        finally { Marshal.FreeCoTaskMem(name); }
+    }
+
     // Returns a confirmed filesystem directory or a supported namespace identity.
     internal static bool TryGetPersistedIdentity(nint pidl, out string identity, out bool isFileSystemPath)
     {

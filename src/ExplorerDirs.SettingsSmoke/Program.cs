@@ -12,6 +12,7 @@ using System.Windows.Media;
 if (args is ["--folder-size-location-policy-smoke"])
 {
     FolderSizeLocationPolicySmoke.Run();
+    ShellViewReadinessSmoke.Run();
     return;
 }
 

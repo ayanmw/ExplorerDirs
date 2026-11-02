@@ -59,3 +59,7 @@ VerifyBackingColumnMetadataForProbe 在真实文件夹中确认修改/创建/访
 2026-11-02 原生关闭行为修复：新增 no-view 测试先复现关闭后目录 PKEY_Size 仍返回数字（HRESULT E_FAIL），而停止查询测试此前未覆盖该属性层。GetDetailsEx 现在对关闭后的目录返回 VT_EMPTY，GetDetailsOf 大小列返回空文本，不调用扫描；普通文件仍保持可读取的 1 B 大小。新增测试修复后通过。native probe 与 product C++ /W4 /WX 构建通过，native bridge 与目录树原生测试通过（嵌套解析/绑定/存储、菜单/数据对象、多选真实复制移动删除、冲突重命名和缓存失效），均未创建 Shell view。可见视图排序/选择/刷新仍需集中验证。
 
 2026-11-02 标准大小属性补全：新增测试复现首个异步快照前 GetDetailsEx(PKEY_Size) 返回 PIDL 数字占位值，现 async 缓存未命中与已知不可用均返回 VT_EMPTY，真实缓存零仍返回 VT_UI8=0。另一新增测试复现仅读取标准 PKEY_Size 不触发按需查询（此前只有自定义 key 触发），现两个属性入口均走既有按需调度，产品仍为异步；无视图同步夹具确认读回 5 B 并产生快照。两项测试均先失败再修复通过；native bridge、folder-tree、product/probe /W4 /WX build 通过。未运行可见宿主，标准属性读回正确不替代 Shell 实际补值通知与排序验收。
+
+2026-11-02 Shell 自发导航接线：优先读取本 profile 的 DesktopAbsoluteParsing，不能让 FILESYSPATH 将 provider 原生身份抹掉；就绪状态按原生身份计数，显示/会话仍用物理路径。OnNavigationPending 对普通物理目录取消未接受的访问，再在退出回调后排队 Navigate；已是 provider、ZIP stream 和虚拟位置不转换。排队工作检查 browser、请求版本、导航/配置代次，快速切换或开关不能复活旧转换。未接受的原生完成/失败回调先检查 outstanding，不退休替代请求。路径策略定向测试现同时执行完整 ShellViewReadiness 状态测试，新增同物理路径不同 native identity 的失败隔离与重复回调检查，通过；App/SettingsSmoke 构建和 view-state-restore 检查通过。此为源代码接线和状态机证据，未运行真实窗口；取消后的 Travel Log、Shell 实际解析名及回调顺序、快速连点、磁盘入口仍待集中验收，未解决/未宣称原生历史额外条目问题。
+
+取消依据：https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-iexplorerbrowserevents-onnavigationpending ，官方明确返回失败 HRESULT 会取消导航。

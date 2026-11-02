@@ -11,6 +11,7 @@ internal sealed class ShellViewReadiness
     // Unlike the read generation, this does not change when an older request
     // settles. It identifies queued UI work belonging to the current visit.
     internal long NavigationVersion { get; private set; }
+    internal bool HasOutstanding(string? identity) => _outstanding.ContainsKey(identity ?? "");
     internal bool RequiresLocationRead { get; private set; }
     internal bool IsCurrent(long version) => !Pending && version == NavigationVersion;
 
