@@ -31,6 +31,14 @@ internal static class FolderSizeLocationPolicySmoke
             FolderSizeLocationPolicy.NativeIdentity(provider, ordinary, profile, false) != provider)
             throw new Exception("ZIP/virtual/off routing or existing provider history changed.");
         var nested = provider + @"\子目录\file.txt";
+        if (FolderSizeLocationPolicy.ProviderParent(provider, profile) != @"C:\测试" ||
+            FolderSizeLocationPolicy.ProviderParent(provider + @"\子目录", profile) != path ||
+            FolderSizeLocationPolicy.ProviderParent(QdrShellPathCodec.ToProviderIdentity(@"C:\", profile), profile) != "shell:MyComputerFolder" ||
+            FolderSizeLocationPolicy.ProviderParent(QdrShellPathCodec.ToProviderIdentity(@"\\server\share\folder", profile), profile) != @"\\server\share" ||
+            FolderSizeLocationPolicy.ProviderParent(QdrShellPathCodec.ToProviderIdentity(@"\\server\share\", profile), profile) != "shell:MyComputerFolder" ||
+            FolderSizeLocationPolicy.ProviderParent(provider, Guid.NewGuid()) is not null ||
+            FolderSizeLocationPolicy.ProviderParent(path, profile) is not null)
+            throw new Exception("Provider Up navigation escaped the physical hierarchy or changed native routing.");
         if (FolderSizeLocationPolicy.LogicalPath(nested, profile) != path + @"\子目录\file.txt")
             throw new Exception("Nested provider identity did not preserve the physical path.");
         if (!FolderSizeLocationPolicy.TryGetProviderChildIdentity(provider, path, path + @"\a.txt", profile, out var child) ||

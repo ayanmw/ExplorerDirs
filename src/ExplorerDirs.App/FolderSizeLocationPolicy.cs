@@ -31,6 +31,14 @@ internal static class FolderSizeLocationPolicy
     internal static string LogicalPath(string identity, Guid? profileClassId) =>
         QdrShellPathCodec.TryGetProviderPath(identity, profileClassId, out var path) ? path : identity;
 
+    internal static string? ProviderParent(string? nativeIdentity, Guid? profileClassId)
+    {
+        if (nativeIdentity is null || !QdrShellPathCodec.TryGetProviderPath(nativeIdentity, profileClassId, out var path))
+            return null;
+        // An encoded provider root is not the filesystem root: Shell's parent would leave the physical hierarchy.
+        return Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(path)) ?? "shell:MyComputerFolder";
+    }
+
     // Call with a Shell-confirmed canonical identity and attributes, not a guessed filename extension.
     // ZIP streams remain native; a real directory named *.zip is still an ordinary directory.
     internal static string NativeIdentity(string canonicalIdentity, uint attributes, Guid? profileClassId, bool enabled)

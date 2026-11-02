@@ -351,7 +351,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     try
                     {
                         var path = GetShellItemPath(item, 0x80058000) ?? GetShellItemPath(item, 0x80028000);
-                        paths.Add(path ?? string.Empty);
+                        paths.Add(path is null ? string.Empty :
+                            FolderSizeLocationPolicy.LogicalPath(path, _folderSizeProfileClassId));
                     }
                     finally
                     {
@@ -1402,6 +1403,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     public bool GoParent()
     {
+        if (!_location.IsSearchActive && FolderSizeLocationPolicy.ProviderParent(
+            _nativeDirectoryIdentity, _folderSizeProfileClassId) is { } parent)
+        {
+            if (_browser is null) return false;
+            Navigate(parent);
+            return true;
+        }
         if (!_location.IsSearchActive) return BrowseRelative(BrowseParent);
         Navigate(CurrentPath); // The directory is the parent of its virtual search results.
         return true;
