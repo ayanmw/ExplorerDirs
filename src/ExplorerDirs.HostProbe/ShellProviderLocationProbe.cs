@@ -168,6 +168,22 @@ internal static class ShellProviderLocationProbe
             if (largeSortReadiness)
                 initialVirtualSortPaintProbe = new NativePaintMessageProbe(FindNativeListView((nint)viewWindowField.GetValue(host)!));
 
+            string[] largeSortSelectedBefore = [];
+            string? largeSortListViewFocusBefore = null;
+            string? largeSortShellFocusBefore = null;
+            if (largeSortReadiness)
+            {
+                SelectShellViewItemByPath(hostType, host, Path.Combine(viewRoot, "folder-extra-500"));
+                var selection = ReadNativeListViewSelectionState((nint)viewWindowField.GetValue(host)!);
+                largeSortSelectedBefore = selection.Selected;
+                largeSortListViewFocusBefore = selection.Focused;
+                largeSortShellFocusBefore = ReadShellFocusedRow(hostType, host);
+                if (!largeSortSelectedBefore.SequenceEqual(["folder-extra-500"], StringComparer.OrdinalIgnoreCase) ||
+                    !string.Equals(largeSortListViewFocusBefore, "folder-extra-500", StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(largeSortShellFocusBefore, "folder-extra-500", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"Could not establish the initial-sort selection/focus: selected=[{string.Join('|', largeSortSelectedBefore)}]; listview-focus={largeSortListViewFocusBefore}; shell-focus={largeSortShellFocusBefore}.");
+            }
+
             string[] selectedBeforeNotification = [];
             string? focusedRowBeforeNotification = null;
             string? shellFocusedRowBeforeNotification = null;
@@ -548,12 +564,27 @@ internal static class ShellProviderLocationProbe
                         nameColumn, expectedSizeSortedNames, adapter, largeReadinessCountTrace!)
                     : ObserveProductSort(hostType, host, capture, readRows, readItemCounts,
                         nameColumn, TimeSpan.FromSeconds(20), expectedSizeSortedNames);
+                string[] largeSortSelectedAfter = [];
+                string? largeSortListViewFocusAfter = null;
+                string? largeSortShellFocusAfter = null;
+                if (largeSortReadiness)
+                {
+                    var largeSortOrderValid = observation.Names.SequenceEqual(expectedSizeSortedNames, StringComparer.OrdinalIgnoreCase);
+                    var selection = ReadNativeListViewSelectionState((nint)viewWindowField.GetValue(host)!);
+                    largeSortSelectedAfter = selection.Selected;
+                    largeSortListViewFocusAfter = selection.Focused;
+                    largeSortShellFocusAfter = ReadShellFocusedRow(hostType, host);
+                    if (!largeSortSelectedBefore.SequenceEqual(largeSortSelectedAfter, StringComparer.OrdinalIgnoreCase) ||
+                        !string.Equals(largeSortListViewFocusBefore, largeSortListViewFocusAfter, StringComparison.OrdinalIgnoreCase) ||
+                        !string.Equals(largeSortShellFocusBefore, largeSortShellFocusAfter, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException($"Automatic initial sort changed selection/focus: auto-resorted-before-observation={autoResorted}; sort-columns=[{string.Join('|', CaptureSortColumns(hostType, host))}]; final-order-valid={largeSortOrderValid}; first=[{string.Join('|', observation.Names.Take(4))}]; last=[{string.Join('|', observation.Names.TakeLast(4))}]; selected=[{string.Join('|', largeSortSelectedBefore)}]=>[{string.Join('|', largeSortSelectedAfter)}]; listview-focus={largeSortListViewFocusBefore}=>{largeSortListViewFocusAfter}; shell-focus={largeSortShellFocusBefore}=>{largeSortShellFocusAfter}; count-transitions=[{string.Join('|', largeReadinessCountTrace ?? [])}].");
+                }
                 var compareDiagnosticsAfterScheduledSort = largeSortReadiness ? [] : ReadProductCompareDiagnostics(adapter);
                 if (!observation.Names.SequenceEqual(expectedSizeSortedNames, StringComparer.OrdinalIgnoreCase))
                     throw new TimeoutException("The production navigation restore did not sort by recursive size after asynchronous values completed.");
                 if (largeSortReadiness)
                 {
-                    Console.WriteLine($"shell-provider-product-async-large-readiness: rows={expectedFolderCount}; complete-readiness-scan-ms={readinessClock.Elapsed.TotalMilliseconds:F2}; batched-scan-ms={batchReadinessClock.Elapsed.TotalMilliseconds:F2}; batches={readinessBatchCount}; max-batch-ms={maximumBatchMilliseconds:F2}; auto-resorted-before-observation={autoResorted}; final-order-valid=True; first={observation.Names[0]}; last={observation.Names[^1]}; shell-counts=[{string.Join('|', observation.ShellItemCounts)}]; listview-counts=[{string.Join('|', observation.NativeListViewCounts)}]; export-counts=[{string.Join('|', observation.ExportRowCounts)}]; count-transitions=[{string.Join('|', largeReadinessCountTrace ?? [])}]; paint-messages=[{string.Join('|', initialVirtualSortPaintProbe?.Messages ?? [])}]; foreground-unchanged=True");
+                    Console.WriteLine($"shell-provider-product-async-large-readiness: rows={expectedFolderCount}; complete-readiness-scan-ms={readinessClock.Elapsed.TotalMilliseconds:F2}; batched-scan-ms={batchReadinessClock.Elapsed.TotalMilliseconds:F2}; batches={readinessBatchCount}; max-batch-ms={maximumBatchMilliseconds:F2}; auto-resorted-before-observation={autoResorted}; final-order-valid=True; first={observation.Names[0]}; last={observation.Names[^1]}; shell-counts=[{string.Join('|', observation.ShellItemCounts)}]; listview-counts=[{string.Join('|', observation.NativeListViewCounts)}]; export-counts=[{string.Join('|', observation.ExportRowCounts)}]; count-transitions=[{string.Join('|', largeReadinessCountTrace ?? [])}]; paint-messages=[{string.Join('|', initialVirtualSortPaintProbe?.Messages ?? [])}]; selected=[{string.Join('|', largeSortSelectedBefore)}]=>[{string.Join('|', largeSortSelectedAfter)}]; listview-focus={largeSortListViewFocusBefore}=>{largeSortListViewFocusAfter}; shell-focus={largeSortShellFocusBefore}=>{largeSortShellFocusAfter}; foreground-unchanged=True");
                 }
                 else ReportSortExperiment("automatic-after-fill", orderAfterAsyncFill, autoResorted, 0, observation, classId);
                 Console.WriteLine($"shell-provider-product-async-scheduled-sort-state: sort-columns=[{string.Join('|', CaptureSortColumns(hostType, host))}]; compare-trace=[{string.Join(" || ", compareDiagnosticsAfterScheduledSort)}]");

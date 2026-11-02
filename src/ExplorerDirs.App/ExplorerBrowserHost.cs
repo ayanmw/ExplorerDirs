@@ -2719,6 +2719,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         ReleaseInitialVirtualSortRedrawLease();
         var oppositeApplied = false;
         var savedApplied = false;
+        ShellViewSelectionSnapshot? initialSortSelection = null;
         var readinessWait = Stopwatch.StartNew();
         var expectedInputVersion = Interlocked.Read(ref _nativeUserInputVersion);
         var readinessRow = 0;
@@ -2726,6 +2727,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var readinessFoundPendingValue = false;
         bool IsCurrent() => isCurrent() &&
             expectedInputVersion == Interlocked.Read(ref _nativeUserInputVersion);
+        void FinishSortRecovery()
+        {
+            initialSortSelection?.Dispose();
+            initialSortSelection = null;
+            ReleaseInitialVirtualSortRedrawLease();
+        }
         var timer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromMilliseconds(100)
@@ -2735,11 +2742,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             timer.Stop();
             if (!IsCurrent() || readinessWait.Elapsed >= TimeSpan.FromSeconds(12))
             {
-                ReleaseInitialVirtualSortRedrawLease();
+                FinishSortRecovery();
                 return;
             }
 
-            if (_initialVirtualSortRedrawLease is not null && oppositeApplied)
+            if (oppositeApplied)
             {
                 if (ReadDirectoryMonitorItemCount() != readinessItemCount)
                 {
@@ -2753,19 +2760,22 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     try { savedApplied = InvokeVirtualSortVerb(savedSortVerb, IsCurrent); }
                     catch
                     {
-                        ReleaseInitialVirtualSortRedrawLease();
+                        FinishSortRecovery();
                         throw;
                     }
                     if (!savedApplied)
                     {
-                        ReleaseInitialVirtualSortRedrawLease();
+                        FinishSortRecovery();
                         return;
                     }
+                    expectedInputVersion = Interlocked.Read(ref _nativeUserInputVersion);
                     timer.Start();
                     return;
                 }
 
-                ReleaseInitialVirtualSortRedrawLease();
+                if (initialSortSelection is not null)
+                    _ = RestoreInitialVirtualSortSelection(initialSortSelection, IsCurrent);
+                FinishSortRecovery();
                 return;
             }
 
@@ -2862,6 +2872,19 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 {
                     try
                     {
+                        initialSortSelection = ShellViewSelectionSnapshot.Capture(sortView);
+                        if ((initialSortSelection is null || initialSortSelection.SelectedCount == 0) &&
+                            _lastNativeSelection is { SelectedCount: > 0 } cachedSelection &&
+                            _lastNativeSelectionNavigationVersion == _viewReadiness.NavigationVersion &&
+                            _lastNativeSelectionInputVersion == Interlocked.Read(ref _nativeUserInputVersion) &&
+                            string.Equals(_lastNativeSelectionPath, CurrentPath, StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Provider value notifications can trigger a native resort before this delayed sort runs;
+                            // in that case the live selection is empty but the confirmed user snapshot still applies.
+                            initialSortSelection?.Dispose();
+                            initialSortSelection = null;
+                            initialSortSelection = cachedSelection.Clone();
+                        }
                         _initialVirtualSortRedrawLease = ShellViewRedrawLease.TrySuppress(sortView);
                         if (_initialVirtualSortRedrawLease is not null)
                             _initialVirtualSortRedrawWindow = _viewWindow;
@@ -2876,22 +2899,62 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 try { oppositeApplied = InvokeVirtualSortVerb(oppositeVerb, IsCurrent); }
                 catch
                 {
-                    ReleaseInitialVirtualSortRedrawLease();
+                    FinishSortRecovery();
                     throw;
                 }
                 if (!oppositeApplied)
                 {
                     timer.Stop();
-                    ReleaseInitialVirtualSortRedrawLease();
+                    FinishSortRecovery();
                 }
                 else expectedInputVersion = Interlocked.Read(ref _nativeUserInputVersion);
                 if (oppositeApplied) timer.Start();
                 return;
             }
 
-            _ = InvokeVirtualSortVerb(savedVerb, IsCurrent);
+            try
+            {
+                savedApplied = InvokeVirtualSortVerb(savedVerb, IsCurrent);
+                if (savedApplied)
+                {
+                    expectedInputVersion = Interlocked.Read(ref _nativeUserInputVersion);
+                    timer.Start();
+                }
+                else FinishSortRecovery();
+            }
+            catch
+            {
+                FinishSortRecovery();
+                throw;
+            }
         };
         timer.Start();
+    }
+
+    private (bool SelectionRestored, bool FocusRestored) RestoreInitialVirtualSortSelection(
+        ShellViewSelectionSnapshot selection, Func<bool> isCurrent)
+    {
+        if (_browser is null || !isCurrent()) return (false, false);
+        var iid = ShellViewId;
+        if (_browser.GetCurrentView(ref iid, out var viewObject) < 0) return (false, false);
+        try
+        {
+            if (!isCurrent()) return (false, false);
+            var unknown = Marshal.GetIUnknownForObject(viewObject);
+            try
+            {
+                if (Marshal.QueryInterface(unknown, in ShellViewId, out var shellView) < 0 || shellView == IntPtr.Zero)
+                    return (false, false);
+                try
+                {
+                    return selection.Restore(shellView, allowSelectedFocusFallback: false);
+                }
+                finally { Marshal.Release(shellView); }
+            }
+            finally { Marshal.Release(unknown); }
+        }
+        catch (COMException) { return (false, false); }
+        finally { Marshal.ReleaseComObject(viewObject); }
     }
 
     private void ReleaseInitialVirtualSortRedrawLease(bool requestRedraw = true)
