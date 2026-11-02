@@ -153,9 +153,19 @@ internal static class FolderNavigationCallbacksProbe
         Marshal.ThrowExceptionForHR(SHParseDisplayName(nativeFile, 0, out var pidl, 0, out _));
         try
         {
+            Ensure((string?)HostType.GetMethod("FileSystemPath", Members)!
+                .Invoke(host, [pidl]) == file,
+                "provider item path helper returns a real physical path for file operations");
             Marshal.ThrowExceptionForHR(SHParseDisplayName(file, 0, out var physicalPidl, 0, out _));
             try
             {
+                using (var ordinaryHost = NewHost())
+                {
+                    Ensure((string?)HostType.GetMethod("FileSystemPath", Members)!
+                        .Invoke(ordinaryHost, [physicalPidl]) == file,
+                        "ordinary filesystem item paths retain their original identity");
+                    EnsureUnhosted(ordinaryHost);
+                }
                 var modified = new NativePropertyKey(new Guid("b725f130-47ef-101a-a5f1-02608c9eebac"), 14);
                 var size = new NativePropertyKey(new Guid("b725f130-47ef-101a-a5f1-02608c9eebac"), 12);
                 var expectedModified = ReadParentProperty(physicalPidl, modified);

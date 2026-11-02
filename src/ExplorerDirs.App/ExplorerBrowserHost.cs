@@ -5649,8 +5649,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         return _nativeNavigationRequestVersion;
     }
 
-    private static string? FileSystemPath(IntPtr pidl)
+    private string? FileSystemPath(IntPtr pidl)
     {
+        // Provider FILESYSPATH may be a namespace identity; never expose it to physical file operations.
+        if (ShellLocationIdentity.TryGetProviderParsingIdentity(pidl, _folderSizeProfileClassId, out var identity))
+            return FolderSizeLocationPolicy.LogicalPath(identity, _folderSizeProfileClassId);
         if (pidl == IntPtr.Zero || SHGetNameFromIDList(pidl, 0x80058000, out var pointer) < 0)
             return null;
         try { return Marshal.PtrToStringUni(pointer); }
@@ -6129,7 +6132,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                         var path = Marshal.PtrToStringUni(pathPtr);
                         if (string.IsNullOrWhiteSpace(path)) return null;
                         var result = item.GetAttributes(ShellItemKind.RequestedAttributes, out var attributes);
-                        return new SelectedItem(path, result >= 0 && ShellItemKind.IsFileSystemFolder(attributes));
+                        return new SelectedItem(FolderSizeLocationPolicy.LogicalPath(path, _folderSizeProfileClassId),
+                            result >= 0 && ShellItemKind.IsFileSystemFolder(attributes));
                     }
                     finally { Marshal.FreeCoTaskMem(pathPtr); }
                 }
@@ -6168,7 +6172,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                         item.GetDisplayName(0x80028000, out var name) < 0 || name == IntPtr.Zero) return null;
                     try
                     {
-                        return ShellSelectionFolderResolver.TryResolve(Marshal.PtrToStringUni(name), attributes, out var identity)
+                        var parsingName = Marshal.PtrToStringUni(name);
+                        return ShellSelectionFolderResolver.TryResolve(parsingName is null ? null :
+                            FolderSizeLocationPolicy.LogicalPath(parsingName, _folderSizeProfileClassId), attributes, out var identity)
                             ? identity
                             : null;
                     }
