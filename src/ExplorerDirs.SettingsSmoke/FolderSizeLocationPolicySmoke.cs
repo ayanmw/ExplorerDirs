@@ -6,6 +6,20 @@ internal static class FolderSizeLocationPolicySmoke
     internal static void Run()
     {
         var profile = Guid.NewGuid();
+        var initial = ViewState.Default();
+        var defaults = FolderSizeLocationPolicy.WithSizeColumn(initial, true);
+        if (defaults.DisplayColumns?.Count != 4 || defaults.DisplayColumns[^1].Key != FolderSizeLocationPolicy.SizeColumn ||
+            initial.DisplayColumns is not null || defaults.Mode != initial.Mode)
+            throw new Exception("Default size columns mutated the saved view or changed its mode.");
+        var custom = initial with { DisplayColumns = [new(new PropertyKeyState(Guid.NewGuid(), 7), 333)],
+            SortColumns = [new(FolderSizeLocationPolicy.SizeColumn, -1)] };
+        var enabled = FolderSizeLocationPolicy.WithSizeColumn(custom, true);
+        var repeated = FolderSizeLocationPolicy.WithSizeColumn(enabled, true);
+        var disabled = FolderSizeLocationPolicy.WithSizeColumn(enabled, false);
+        if (enabled.DisplayColumns?.Count != 2 || enabled.DisplayColumns[0] != custom.DisplayColumns![0] ||
+            repeated.DisplayColumns?.Count != 2 || disabled.DisplayColumns?.Count != 2 ||
+            disabled.SortColumns.Single().Direction != -1 || custom.DisplayColumns.Count != 1)
+            throw new Exception("Size visibility lost custom columns, duplicated size or removed file-size sorting on disable.");
         const uint ordinary = 0x60000000;
         var path = @"C:\测试\目录.zip";
         var provider = FolderSizeLocationPolicy.NativeIdentity(path, ordinary, profile, enabled: true);

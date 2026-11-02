@@ -4,6 +4,30 @@ namespace ExplorerDirs.App;
 
 internal static class FolderSizeLocationPolicy
 {
+    internal static readonly PropertyKeyState SizeColumn = new(new Guid("9e5e05ac-1936-4a75-94f7-4704b8b01923"), 1);
+
+    internal static ViewState WithSizeColumn(ViewState view, bool enabled)
+    {
+        // Disabling folder totals must not remove the ordinary file-size column or change saved sorting.
+        if (!enabled || view.DisplayColumns?.Any(column => column.Key == SizeColumn) == true) return view.Copy();
+        if (view.DisplayColumns is { Count: > 0 } saved)
+        {
+            // Respect the persisted layout limit instead of replacing the user's last column.
+            return saved.Count >= ColumnLayout.MaximumColumns ? view.Copy() : view with
+            {
+                DisplayColumns = saved.Append(new DisplayColumnState(SizeColumn, 110)).ToArray()
+            };
+        }
+        var basic = new Guid("b725f130-47ef-101a-a5f1-02608c9eebac");
+        return view with { DisplayColumns = new DisplayColumnState[]
+        {
+            new(new PropertyKeyState(basic, 10), 260),
+            new(new PropertyKeyState(basic, 14), 160),
+            new(new PropertyKeyState(basic, 4), 140),
+            new(SizeColumn, 110)
+        } };
+    }
+
     internal static string LogicalPath(string identity, Guid? profileClassId) =>
         QdrShellPathCodec.TryGetProviderPath(identity, profileClassId, out var path) ? path : identity;
 
