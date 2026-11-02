@@ -1,10 +1,12 @@
 # 可使用版本
 
-最新预览包为 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.79\app\ExplorerDirs.App.exe`，使用从 temp.78 复制的独立 profile。新增隐藏标签栏而保留标签状态、支持虚拟 Shell 文件夹的新标签打开，以及“工具 → 文件夹入口…”管理界面；Explorer 重启身份保护加固。完整 Release SettingsSmoke 和发布隔离 smoke 通过，包内 EXE/DLL 哈希已核对；未启动 GUI，也未启用系统入口。详情见[temp.79](../docs/releases/preview-0.6.0-temp.79.md)。
+最新预览包为 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.86\app\ExplorerDirs.App.exe`，使用 temp.85 的独立 profile 副本。该版包含递归大小列的隔离原型与多根会话验证；原型尚未接入普通文件夹视图。App Release 构建、完整 Release SettingsSmoke 和发布隔离 smoke 通过；未启动 GUI。详情见[temp.86](../docs/releases/preview-0.6.0-temp.86.md)。
+
+上一个预览包为 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.85\app\ExplorerDirs.App.exe`，详情见[temp.85](../docs/releases/preview-0.6.0-temp.85.md)。
 
 此前主题修正版为 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.76\app\ExplorerDirs.App.exe`，独立 profile 来自 temp.75。修正 Windows Foreground 深浅检测取反，选项明确三态，详见[temp.76](../docs/releases/preview-0.6.0-temp.76.md)。下列旧版本说明保留其历史功能与验收记录。
 
-## 最新临时预览包（2026-10-30）
+## 历史临时预览包（2026-10-30）
 
 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.79\app\ExplorerDirs.App.exe`，独立 profile 从 temp.78 复制。程序集版本 `0.6.0-preview.temp.79+e77f12a8579fcb2d72854c9b045bc12c5b4ed560`，EXE/DLL SHA-256 与包内 `app/SHA256.txt` 一致。Release SettingsSmoke、发布隔离 smoke 和实际 publish 通过；未启动应用，入口未启用。详情见[temp.79 说明](../docs/releases/preview-0.6.0-temp.79.md)及包内 `RELEASE-NOTES.md`。
 
