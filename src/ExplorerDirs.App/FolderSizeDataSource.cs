@@ -22,7 +22,8 @@ internal sealed class FolderSizeDataSource
     }
 
     internal async Task<IReadOnlyDictionary<string, FolderSizeValue>> ResolveAsync(
-        string parent, IEnumerable<string> directories, FolderSizeSource source, CancellationToken cancellationToken)
+        string parent, IEnumerable<string> directories, FolderSizeSource source, CancellationToken cancellationToken,
+        IProgress<KeyValuePair<string, FolderSizeValue>>? progress = null)
     {
         var requested = directories.Select(Path.GetFullPath).Select(Path.TrimEndingDirectorySeparator)
             .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
@@ -44,7 +45,10 @@ internal sealed class FolderSizeDataSource
                 {
                     var path = Path.TrimEndingDirectorySeparator(item.Path);
                     if (item.IsDirectory && item.Bytes is { } bytes && requestedSet.Contains(path))
+                    {
                         result[path] = new(bytes, FolderSizeSource.Everything);
+                        progress?.Report(new(path, result[path]));
+                    }
                 }
                 if (result.Count == requested.Length || page.Items.Count == 0) break;
                 offset = checked(offset + (uint)page.Items.Count);
@@ -55,7 +59,10 @@ internal sealed class FolderSizeDataSource
         if (source == FolderSizeSource.Everything)
         {
             foreach (var path in pending)
+            {
                 result[path] = new(null, source, Detail: unavailable ?? "Everything 没有该目录的大小索引。");
+                progress?.Report(new(path, result[path]));
+            }
         }
         else
         {
@@ -82,6 +89,7 @@ internal sealed class FolderSizeDataSource
                     finally { ScanGate.Release(); }
                     cancellationToken.ThrowIfCancellationRequested();
                     lock (result) result[path] = value;
+                    progress?.Report(new(path, value));
                 }
             }
             await Task.WhenAll(ScanWorker(), ScanWorker()).ConfigureAwait(false);

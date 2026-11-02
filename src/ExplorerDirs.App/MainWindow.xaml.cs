@@ -41,6 +41,9 @@ public partial class MainWindow : Window
     private readonly FavoritesStore _commonLocationsStore;
     private readonly List<FavoriteEntry> _commonLocations;
     private readonly RecentAddressStore _recentAddresses;
+    private readonly FolderSizeOptionsStore _folderSizeOptionsStore;
+    private FolderSizeOptions _folderSizeOptions;
+    private SpaceAnalysisWindow? _spaceAnalysisWindow;
     private readonly QuickLinkStore _quickLinkStore;
     private readonly ProgramStarterStore _programStarterStore;
     private IReadOnlyList<ProgramStarterEntry> _programStarterEntries = [];
@@ -219,6 +222,11 @@ public partial class MainWindow : Window
         _favoritesStore = new FavoritesStore(Path.Combine(_profileDirectory, "Favorites.ini"));
         _favorites = _favoritesStore.Load().ToList();
         _recentAddresses = new RecentAddressStore(Path.Combine(_profileDirectory, "RecentAddresses.ini"));
+        _folderSizeOptionsStore = new FolderSizeOptionsStore(Path.Combine(_profileDirectory, "FolderSize.ini"));
+        _folderSizeOptions = _folderSizeOptionsStore.Load();
+        if (_folderSizeOptionsStore.Warning is { } folderSizeWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text) ? folderSizeWarning : $"{EnvironmentStatus.Text} {folderSizeWarning}";
+        UpdateFolderSizeSourceMenus();
         var commonLocationsPath = Path.Combine(_profileDirectory, "CommonLocations.ini");
         _commonLocationsStore = new FavoritesStore(commonLocationsPath);
         var savedCommonLocations = _commonLocationsStore.Load();
@@ -2773,6 +2781,51 @@ public partial class MainWindow : Window
             _commonLocations.Clear(); _commonLocations.AddRange(result);
         }
         catch (Exception ex) { EnvironmentStatus.Text = $"常用位置保存失败：{ex.Message}"; }
+    }
+
+    private void UpdateFolderSizeSourceMenus()
+    {
+        FolderSizeAutoMenu.IsChecked = _folderSizeOptions.Source == FolderSizeSource.Auto;
+        FolderSizeEverythingMenu.IsChecked = _folderSizeOptions.Source == FolderSizeSource.Everything;
+        FolderSizeBuiltInMenu.IsChecked = _folderSizeOptions.Source == FolderSizeSource.BuiltIn;
+    }
+
+    private void FolderSizeSource_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: string text } || !Enum.TryParse<FolderSizeSource>(text, out var source)) return;
+        try
+        {
+            var options = _folderSizeOptions with { Source = source };
+            _folderSizeOptionsStore.Save(options); _folderSizeOptions = options;
+        }
+        catch (Exception error) { EnvironmentStatus.Text = $"大小来源设置失败：{error.Message}"; }
+        UpdateFolderSizeSourceMenus();
+    }
+
+    private void AnalyzeDirectorySpace_Click(object sender, RoutedEventArgs e)
+    {
+        var path = ActivePane.CurrentPath;
+        if (QdrShellPathCodec.TryGetProviderPath(path, _shellNamespaceProfileClassId, out var physical)) path = physical;
+        if (!Path.IsPathFullyQualified(path) && ShellLocationIdentity.TryGetFolderPidl(path, out var pidl))
+        {
+            try
+            {
+                if (ShellLocationIdentity.TryGetPersistedIdentity(pidl, out var resolved, out var isFileSystem) && isFileSystem)
+                    path = resolved;
+            }
+            finally { Marshal.FreeCoTaskMem(pidl); }
+        }
+        if (!Path.IsPathFullyQualified(path)) { EnvironmentStatus.Text = "空间分析需要普通文件系统目录。"; return; }
+        if (_spaceAnalysisWindow is { } existing) { existing.Activate(); return; }
+        var window = new SpaceAnalysisWindow(this, path, _folderSizeOptions.Source, selected =>
+        {
+            if (_closed) return;
+            var parent = Path.GetDirectoryName(selected);
+            if (parent is not null) ActivePane.OpenPathAndSelectInNewTab(parent, selected);
+        });
+        _spaceAnalysisWindow = window;
+        window.Closed += (_, _) => { if (ReferenceEquals(_spaceAnalysisWindow, window)) _spaceAnalysisWindow = null; };
+        window.Show();
     }
 
     private async Task BuildWorkspaceMenuAsync(MenuItem menu)
