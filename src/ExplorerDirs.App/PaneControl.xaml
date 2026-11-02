@@ -44,13 +44,13 @@
                              LostKeyboardFocus="Address_LostKeyboardFocus"
                              Visibility="Collapsed" VerticalContentAlignment="Center"/>
                     <Button x:Name="AddressMenuButton" Grid.Column="1" Width="24" Padding="0"
-                            ToolTip="打开目录树，定位上级目录和常用系统位置" AutomationProperties.Name="目录树"
+                            ToolTip="上级目录、系统位置和最近访问；F4 打开目录树" AutomationProperties.Name="路径与最近位置"
                             Click="AddressMenu_Click"/>
                     <Button x:Name="AddressComputerButton" Grid.Column="2" Width="24" Padding="0"
-                            ToolTip="此电脑和本机驱动器 (F8)" AutomationProperties.Name="此电脑"
+                            ToolTip="常用位置、磁盘和收藏夹 (F8)" AutomationProperties.Name="此电脑"
                             Click="AddressComputer_Click"/>
                     <Button x:Name="AddressHistoryButton" Grid.Column="3" Width="24" Padding="0"
-                            ToolTip="地址历史" AutomationProperties.Name="地址历史"
+                            ToolTip="当前标签的访问历史" AutomationProperties.Name="地址历史"
                             Click="AddressHistory_Click"/>
                 </Grid>
             </DockPanel>

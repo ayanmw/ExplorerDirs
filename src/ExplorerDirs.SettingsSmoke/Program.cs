@@ -9,6 +9,28 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 
+if (args is ["--everything-size-protocol-smoke"])
+{
+    EverythingSizeSmoke.Run();
+    return;
+}
+if (args is ["--everything-size-live-fixture"])
+{
+    EverythingSizeSmoke.LiveFixture();
+    return;
+}
+if (args is ["--navigation-chrome-smoke"])
+{
+    ExplorerDirs.SettingsSmoke.ExplorerChromeIconSmoke.Run();
+    FocusTraversalSmoke.Run();
+    return;
+}
+if (args is ["--everything-size-live", var everythingDirectory])
+{
+    EverythingSizeSmoke.Live(everythingDirectory);
+    return;
+}
+
 if (args is ["--favorites-catalog-smoke"])
 {
     var fixturePath = Path.Combine(AppContext.BaseDirectory, "favorites-catalog-" + Guid.NewGuid().ToString("N") + ".ini");

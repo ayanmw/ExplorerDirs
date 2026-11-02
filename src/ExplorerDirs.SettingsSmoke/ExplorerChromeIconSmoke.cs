@@ -62,7 +62,9 @@ internal static class ExplorerChromeIconSmoke
               paneMarkup.Contains("Click=\"AddressHistory_Click\"", StringComparison.Ordinal) &&
               paneCode.Contains("addressComputerButtonVisible: true", StringComparison.Ordinal) &&
               paneCode.Contains("AddressComputerButton, AddressHistoryButton", StringComparison.Ordinal) &&
-              paneCode.Contains("AddressPathMenu.BuildComputerMenu(), AddressComputerButton", StringComparison.Ordinal) &&
+              // The common-location catalog now shares this icon's menu with drives and favorites.
+              paneCode.Contains("AddressPathMenu.BuildComputerMenu()", StringComparison.Ordinal) &&
+              paneCode.Contains("PlacementTarget = AddressComputerButton", StringComparison.Ordinal) &&
               paneMarkup.Contains("AutomationProperties.Name=\"后退\"", StringComparison.Ordinal) &&
               paneMarkup.Contains("AutomationProperties.Name=\"前进\"", StringComparison.Ordinal) &&
               paneMarkup.Contains("AutomationProperties.Name=\"上级目录\"", StringComparison.Ordinal),

@@ -35,6 +35,7 @@
     <Compile Include="../ExplorerDirs.App/WindowBackgroundOperation.cs" Link="WindowBackgroundOperation.cs" />
     <Compile Include="../ExplorerDirs.App/AddressPathHistory.cs" Link="AddressPathHistory.cs" />
     <Compile Include="../ExplorerDirs.App/RecentAddressStore.cs" Link="RecentAddressStore.cs" />
+    <Compile Include="../ExplorerDirs.App/EverythingSizeClient.cs" Link="EverythingSizeClient.cs" />
     <Compile Include="../ExplorerDirs.App/ClassicAddressBarPath.cs" Link="ClassicAddressBarPath.cs" />
     <Compile Include="../ExplorerDirs.App/AddressPathMenu.cs" Link="AddressPathMenu.cs" />
     <Compile Include="../ExplorerDirs.App/RecursiveDirectoryScanner.cs" Link="RecursiveDirectoryScanner.cs" />
