@@ -54,7 +54,10 @@
                 </MenuItem>
             </MenuItem>
             <MenuItem x:Name="QuickLinksMenu" Header="快速链接(_Q)" InputGestureText="Ctrl+Q" SubmenuOpened="QuickLinksMenu_SubmenuOpened"/>
-            <MenuItem x:Name="FavoritesMenu" Header="收藏夹(_B)" SubmenuOpened="FavoritesMenu_SubmenuOpened"/>
+            <MenuItem x:Name="FavoritesMenu" Header="收藏夹(_B)" SubmenuOpened="FavoritesMenu_SubmenuOpened">
+                <!-- WPF needs a child before it can open the dynamically populated submenu. -->
+                <MenuItem Header="正在读取…" IsEnabled="False"/>
+            </MenuItem>
             <MenuItem Header="视图(_V)" SubmenuOpened="ViewMenu_SubmenuOpened">
                 <MenuItem x:Name="CurrentViewMenu" Header="当前标签查看方式"/>
                 <MenuItem x:Name="MouseWheelFocusMenu" Header="鼠标悬停滚轮" IsCheckable="True"

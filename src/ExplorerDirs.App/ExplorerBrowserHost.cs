@@ -3527,17 +3527,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     refreshResult = shellView.Refresh();
                     LastShellRefreshStatus = "soft-refresh";
                 }
-                else if (_location.IsFileSystemLocation && ShellChangedItemNotification.TryNotifyDirectoryRefresh(path))
-                {
-                    // A directory notification lets DefView reconcile filesystem rows without calling
-                    // IShellView.Refresh. It is broadcast to Shell listeners and does not guarantee that
-                    // every view retains its current pixels; visible behavior still needs acceptance.
-                    refreshResult = 0;
-                    LastShellRefreshStatus = "SHCNE_UPDATEDIR";
-                }
                 else
                 {
                     refreshResult = shellView.Refresh();
+                    // Manual refresh targets this view directly; broadcast delivery added visible latency in temp.86.
+                    LastShellRefreshStatus = "IShellView.Refresh";
                 }
             }
             catch when (!IsCurrentRefreshRequest())

@@ -1632,7 +1632,7 @@ public partial class PaneControl : UserControl
         e.Handled = true;
     }
 
-    private void AddressMenu_Click(object sender, RoutedEventArgs e) => ShowAddressTree();
+    private void AddressMenu_Click(object sender, RoutedEventArgs e) => ShowAddressMenu();
     private void AddressComputer_Click(object sender, RoutedEventArgs e) => ShowComputerMenu();
 
     internal void ShowAddressMenu()
