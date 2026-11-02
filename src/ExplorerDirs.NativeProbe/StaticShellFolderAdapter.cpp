@@ -42,6 +42,15 @@ using FolderSizeInvalidationCallback = void(WINAPI*)(PCWSTR);
 static PVOID volatile g_folderSizeProviderCallback = nullptr;
 static PVOID volatile g_folderSizeInvalidationCallback = nullptr;
 static SRWLOCK g_folderSizeProviderLock = SRWLOCK_INIT;
+static volatile LONG g_folderSizeEnabled = 1;
+static volatile LONG g_folderSizeGeneration = 0;
+
+static bool FolderSizeScanCancelled(volatile LONG* flag, LONG expectedGeneration = -1)
+{
+    return !InterlockedCompareExchange(&g_folderSizeEnabled, 0, 0) ||
+        (expectedGeneration != -1 && InterlockedCompareExchange(&g_folderSizeGeneration, 0, 0) != expectedGeneration) ||
+        (flag && InterlockedCompareExchange(flag, 0, 0));
+}
 
 static void InvalidateManagedFolderSize(PCWSTR path)
 {
@@ -2434,14 +2443,15 @@ namespace
     };
 
     HRESULT GetSyntheticDirectoryMetrics(const std::wstring& directory, SyntheticDirectoryMetrics* metrics,
-        volatile LONG* cancellationFlag = nullptr)
+        volatile LONG* cancellationFlag = nullptr, LONG providerGeneration = -1)
     {
         ED_PROBE_METRIC_INCREMENT(g_syntheticDirectoryMetricsCallCount);
         if (g_syntheticCompareCallbackActive)
             ED_PROBE_METRIC_INCREMENT(g_syntheticDirectoryMetricsDuringCompareCount);
         if (!metrics) return E_POINTER;
         *metrics = {};
-        if (cancellationFlag && InterlockedCompareExchange(cancellationFlag, 0, 0))
+        if (providerGeneration == -1) providerGeneration = InterlockedCompareExchange(&g_folderSizeGeneration, 0, 0);
+        if (FolderSizeScanCancelled(cancellationFlag, providerGeneration))
             return HRESULT_FROM_WIN32(ERROR_CANCELLED);
         std::wstring extendedDirectory, pattern;
         auto pathResult = GetExtendedFilesystemPath(directory, &extendedDirectory);
@@ -2465,7 +2475,7 @@ namespace
         bool hasEntry = true;
         while (hasEntry)
         {
-            if (cancellationFlag && InterlockedCompareExchange(cancellationFlag, 0, 0))
+            if (FolderSizeScanCancelled(cancellationFlag, providerGeneration))
             {
                 result = HRESULT_FROM_WIN32(ERROR_CANCELLED);
                 break;
@@ -2475,7 +2485,7 @@ namespace
                 ED_PROBE_METRIC_INCREMENT(g_syntheticDirectoryMetricsEntryCount);
                 const auto entryDelayMs = InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeEntryDelayMsForProbe, 0, 0);
                 if (entryDelayMs > 0) Sleep(static_cast<DWORD>(entryDelayMs));
-                if (cancellationFlag && InterlockedCompareExchange(cancellationFlag, 0, 0))
+                if (FolderSizeScanCancelled(cancellationFlag, providerGeneration))
                 {
                     result = HRESULT_FROM_WIN32(ERROR_CANCELLED);
                     break;
@@ -2499,7 +2509,7 @@ namespace
                         try { childPath = directory + L"\\" + entry.cFileName; }
                         catch (const std::bad_alloc&) { result = E_OUTOFMEMORY; break; }
                         SyntheticDirectoryMetrics nested{};
-                        result = GetSyntheticDirectoryMetrics(childPath, &nested, cancellationFlag);
+                        result = GetSyntheticDirectoryMetrics(childPath, &nested, cancellationFlag, providerGeneration);
                         if (result == HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED))
                         {
                             if (metrics->unreadable == ~static_cast<ULONGLONG>(0))
@@ -2565,7 +2575,7 @@ namespace
     {
         if (!metrics) return E_POINTER;
         *metrics = {};
-        if (cancellationFlag && InterlockedCompareExchange(cancellationFlag, 0, 0))
+        if (FolderSizeScanCancelled(cancellationFlag))
             return HRESULT_FROM_WIN32(ERROR_CANCELLED);
         AcquireSRWLockShared(&g_folderSizeProviderLock);
         const auto callback = reinterpret_cast<FolderSizeProviderCallback>(
@@ -4256,6 +4266,7 @@ namespace
         }
         HRESULT ScheduleRecursiveSizeSnapshot(const SyntheticChild* child) const
         {
+            if (!InterlockedCompareExchange(&g_folderSizeEnabled, 0, 0)) return S_OK;
             if (!child || !(child->attributes & FILE_ATTRIBUTE_DIRECTORY) ||
                 (child->attributes & FILE_ATTRIBUTE_REPARSE_POINT)) return E_INVALIDARG;
             if (!_recursiveSizeStore) return E_OUTOFMEMORY;
@@ -5414,9 +5425,11 @@ STDAPI DllGetClassObject(REFCLSID classId, REFIID iid, void** value)
 }
 
 extern "C" ED_PROBE_EXPORT HRESULT WINAPI ConfigureFolderSizeProvider(FolderSizeProviderCallback callback,
-    FolderSizeInvalidationCallback invalidationCallback)
+    FolderSizeInvalidationCallback invalidationCallback, BOOL enabled)
 {
     AcquireSRWLockExclusive(&g_folderSizeProviderLock);
+    InterlockedIncrement(&g_folderSizeGeneration);
+    InterlockedExchange(&g_folderSizeEnabled, enabled ? 1 : 0);
     InterlockedExchangePointer(&g_folderSizeProviderCallback, reinterpret_cast<PVOID>(callback));
     InterlockedExchangePointer(&g_folderSizeInvalidationCallback, reinterpret_cast<PVOID>(invalidationCallback));
     ReleaseSRWLockExclusive(&g_folderSizeProviderLock);
@@ -5425,6 +5438,18 @@ extern "C" ED_PROBE_EXPORT HRESULT WINAPI ConfigureFolderSizeProvider(FolderSize
     if (store) store->AddRef();
     ReleaseSRWLockShared(&g_sharedRecursiveSizeStoreLock);
     if (store) { store->ClearForProviderChange(); store->Release(); }
+    return S_OK;
+}
+
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI InvalidateFolderSizePath(PCWSTR path)
+{
+    if (!path || !*path) return E_INVALIDARG;
+    AcquireSRWLockShared(&g_sharedRecursiveSizeStoreLock);
+    auto* store = g_sharedRecursiveSizeStore;
+    if (store) store->AddRef();
+    ReleaseSRWLockShared(&g_sharedRecursiveSizeStoreLock);
+    if (store) { store->InvalidatePath(path, true); store->Release(); }
+    else InvalidateManagedFolderSize(path);
     return S_OK;
 }
 

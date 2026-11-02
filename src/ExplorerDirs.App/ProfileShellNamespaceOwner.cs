@@ -63,12 +63,23 @@ internal sealed class ProfileShellNamespaceOwner : IDisposable
         if (module != 0) NativeLibrary.Free(module);
     }
 
-    internal void SetFolderSizeSource(FolderSizeSource source)
+    internal void SetFolderSizeSource(FolderSizeSource source, bool? enabled = null)
     {
         var module = Volatile.Read(ref _adapterModule);
         ObjectDisposedException.ThrowIf(module == 0, this);
-        if (_folderSizeBridge is null) _folderSizeBridge = new FolderSizeNativeBridge(module, source);
-        else _folderSizeBridge.SetSource(source);
+        if (_folderSizeBridge is null) _folderSizeBridge = new FolderSizeNativeBridge(module, source, enabled: enabled ?? true);
+        else _folderSizeBridge.SetSource(source, enabled);
+    }
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int InvalidateSizePath([MarshalAs(UnmanagedType.LPWStr)] string path);
+
+    internal void InvalidateFolderSizes(string path)
+    {
+        var module = Volatile.Read(ref _adapterModule);
+        if (module == 0) return;
+        var invalidate = Marshal.GetDelegateForFunctionPointer<InvalidateSizePath>(NativeLibrary.GetExport(module, "InvalidateFolderSizePath"));
+        Marshal.ThrowExceptionForHR(invalidate(path));
     }
 
     private static void RegisterVolatileNamespace(Guid classId, string adapterPath)

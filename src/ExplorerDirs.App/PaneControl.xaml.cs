@@ -201,6 +201,7 @@ public partial class PaneControl : UserControl
     internal Action? ManageFavoriteLocations { get; set; }
     internal Action? ManageCommonLocations { get; set; }
     internal Func<IReadOnlyList<string>>? RecentLocations { get; set; }
+    internal Action<string>? InvalidateSizeCache { get; set; }
 
     internal PaneControl(IEnumerable<TabSettings> tabs, Func<ViewState> newTabView,
         IReadOnlySet<int>? pinnedIndices, int selectedTabIndex,
@@ -736,7 +737,19 @@ public partial class PaneControl : UserControl
             Status.Text = $"复制标签失败：{ex.Message}";
         }
     }
-    public void RefreshCurrent() => Current?.Browser.RefreshFromUser();
+    public void RefreshCurrent()
+    {
+        if (Current is not { } state) return;
+        InvalidateSizeCache?.Invoke(state.Path);
+        state.Browser.RefreshFromUser();
+    }
+
+    internal void RefreshFolderSizeData()
+    {
+        foreach (var state in _tabOrder.Select(tab => (TabState)tab.Tag))
+            if (state.Browser.HasNativeView && QdrShellPathCodec.TryGetProviderPath(state.Path, _shellNamespaceProfileClassId, out _))
+                state.Browser.Refresh();
+    }
 
     internal IReadOnlyList<string> SetHiddenItemsPreference(HiddenItemsPreference preference)
     {

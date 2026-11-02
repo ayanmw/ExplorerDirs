@@ -423,6 +423,12 @@ public partial class MainWindow : Window
             pane.RecentLocations = () => _recentAddresses.Paths;
             pane.ManageFavoriteLocations = ManageFavorites;
             pane.ManageCommonLocations = ManageCommonLocations;
+            pane.InvalidateSizeCache = path =>
+            {
+                var physical = QdrShellPathCodec.TryGetProviderPath(path, _shellNamespaceProfileClassId, out var providerPath) ? providerPath : path;
+                if (Path.IsPathFullyQualified(physical) && Application.Current is App application)
+                    application.InvalidateFolderSizes(physical);
+            };
             pane.SetClassicAddressBar(_classicAddressBar);
             pane.SetStatusBarVisible(_showStatusBar);
             pane.SetStatusBarSelectionSizeVisible(_showSelectionSizeInStatusBar);
@@ -2798,6 +2804,7 @@ public partial class MainWindow : Window
             var options = _folderSizeOptions with { Source = source };
             _folderSizeOptionsStore.Save(options); _folderSizeOptions = options;
             if (Application.Current is App application) application.SetFolderSizeSource(source);
+            foreach (var pane in _panes) pane.RefreshFolderSizeData();
         }
         catch (Exception error) { EnvironmentStatus.Text = $"大小来源设置失败：{error.Message}"; }
         UpdateFolderSizeSourceMenus();

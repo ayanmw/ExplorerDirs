@@ -4,6 +4,7 @@ EXPORTS
     DllCanUnloadNow PRIVATE
     ConfigureShellNamespaceRoot
     ConfigureFolderSizeProvider
+    InvalidateFolderSizePath
     GetProductAsyncItemNotificationAttempts
     GetProductAsyncItemNotificationUnderSyntheticRootCount
     ConfigureProductNotificationDeliveryForProbe

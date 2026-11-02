@@ -6,7 +6,7 @@ namespace ExplorerDirs.App;
 internal sealed class FolderSizeNativeBridge : IDisposable
 {
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
-    private delegate int ConfigureProvider(nint query, nint invalidate);
+    private delegate int ConfigureProvider(nint query, nint invalidate, [MarshalAs(UnmanagedType.Bool)] bool enabled);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int QueryProvider([MarshalAs(UnmanagedType.LPWStr)] string path, nint cancelled,
         out ulong bytes, out ulong files, out ulong folders, out ulong unreadable, out uint flags);
@@ -23,21 +23,22 @@ internal sealed class FolderSizeNativeBridge : IDisposable
     private readonly Dictionary<string, (Task<IndexedSizePage> Task, long Started)> _pages = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource _generation = new();
     private FolderSizeSource _source;
+    private bool _enabled = true;
     private bool _disposed;
 
     internal FolderSizeNativeBridge(nint module, FolderSizeSource source,
         Func<string, uint, CancellationToken, Task<IndexedSizePage>>? queryChildren = null,
-        Func<string, CancellationToken, Task<IndexedSizePage>>? queryExact = null)
+        Func<string, CancellationToken, Task<IndexedSizePage>>? queryExact = null, bool enabled = true)
     {
         _configure = Marshal.GetDelegateForFunctionPointer<ConfigureProvider>(NativeLibrary.GetExport(module, "ConfigureFolderSizeProvider"));
         _queryChildren = queryChildren ?? EverythingSizeClient.QueryChildrenAsync;
         _queryExact = queryExact ?? EverythingSizeClient.QueryDirectoryAsync;
         _queryCallback = Query;
         _invalidateCallback = Invalidate;
-        SetSource(source);
+        SetSource(source, enabled);
     }
 
-    internal void SetSource(FolderSizeSource source)
+    internal void SetSource(FolderSizeSource source, bool? enabled = null)
     {
         lock (_configurationGate)
         {
@@ -46,6 +47,7 @@ internal sealed class FolderSizeNativeBridge : IDisposable
             lock (_cacheGate)
             {
                 previous = _generation; _generation = new(); _source = source; _pages.Clear();
+                _enabled = enabled ?? _enabled;
             }
             previous.Cancel();
             try
@@ -53,7 +55,7 @@ internal sealed class FolderSizeNativeBridge : IDisposable
                 // Native registration waits for callbacks already in progress. Keep both delegates
                 // strongly referenced until unregister/reconfigure has returned.
                 Marshal.ThrowExceptionForHR(_configure(Marshal.GetFunctionPointerForDelegate(_queryCallback),
-                    Marshal.GetFunctionPointerForDelegate(_invalidateCallback)));
+                    Marshal.GetFunctionPointerForDelegate(_invalidateCallback), _enabled));
             }
             finally { previous.Dispose(); }
         }
@@ -85,6 +87,7 @@ internal sealed class FolderSizeNativeBridge : IDisposable
             lock (_cacheGate)
             {
                 if (_disposed) return unchecked((int)0x800704C7);
+                if (!_enabled) return unchecked((int)0x800704C7);
                 source = _source;
                 if (source == FolderSizeSource.BuiltIn) return unchecked((int)0x80004001); // E_NOTIMPL: native scanner
                 cancellation = CancellationTokenSource.CreateLinkedTokenSource(_generation.Token);
@@ -154,7 +157,7 @@ internal sealed class FolderSizeNativeBridge : IDisposable
                 if (_disposed) return;
                 _disposed = true; _generation.Cancel(); _pages.Clear();
             }
-            Marshal.ThrowExceptionForHR(_configure(0, 0));
+            Marshal.ThrowExceptionForHR(_configure(0, 0, true));
             _generation.Dispose();
             GC.KeepAlive(_queryCallback); GC.KeepAlive(_invalidateCallback);
         }

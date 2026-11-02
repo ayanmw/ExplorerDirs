@@ -33,3 +33,7 @@ EverythingSizeClient 使用官方 SDK 文档公开的 IPC QUERY2W 协议，批�
 --folder-size-data-source-smoke 验证来源路由、真实零与缺值区分、自动模式限制扫描范围、Everything 不可用后备、取消、选项重载/冲突/未来格式保护；通过，无 IPC/UI。App Release build 0 warning/error。
 
 来源设置菜单和空间分析已接入，见 space-analysis-temp86.md；普通列表默认大小列/视图开关、关闭后停止请求、F5 主动失效、来源切换后的既有行更新仍未完成。尚未覆盖真实 Everything 未运行/关闭目录索引、查询中服务退出、挂起服务和多页目录；当前测试不能替代这些运行期边界。
+
+2026-11-02 后续后台接线：ConfigureFolderSizeProvider 增加 enabled 状态，关闭时 ScheduleRecursiveSizeSnapshot 不入队，scanner 在条目边界检查开关及来源 generation；快速关闭再开启也会取消旧 generation 的扫描。App 启动读取 Enabled/Source，bridge 和 owner 保持开关，注销恢复默认 native 行为。InvalidateFolderSizePath 导出连接 F5，清理当前路径的子树与祖先快照，并同步失效 managed 批次。来源切换刷新已创建的 provider 视图；不创建隐藏标签宿主。
+
+新版 --folder-size-native-bridge-smoke 通过关闭/重开无额外查询、显式刷新失效、在延迟扫描开始后快速关开仍返回取消等合同。App/native C++ 构建通过。视图菜单 checkbox、普通目录的透明 provider 接入仍未完成；provider 身份会影响现有选区 PIDL、历史与监视逻辑，不能只替换 AddTab 的路径就宣布接入完成。后续需统一身份展示及操作路由，并验证 ZIP/虚拟位置、选择和历史不回归。

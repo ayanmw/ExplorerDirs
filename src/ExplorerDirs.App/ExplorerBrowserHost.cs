@@ -193,6 +193,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private ExplorerShellPane _visibleShellPane;
 
     public string CurrentPath => _location.DirectoryPath;
+    internal bool HasNativeView => _browser is not null && _viewWindow != IntPtr.Zero;
     internal string? CurrentSearchUri => _location.SearchUri;
     internal long NavigationVersion => _viewReadiness.NavigationVersion;
     internal long ViewGeneration => _viewReadiness.Generation;
