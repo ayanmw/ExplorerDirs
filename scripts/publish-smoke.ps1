@@ -36,7 +36,7 @@ function git {
 }
 
 $settings = @(
-    'ExplorerDirs.ini', 'ExplorerDirs.WindowPlacement.ini', 'Favorites.ini', 'PinnedTabs.ini',
+    'ExplorerDirs.ini', 'ExplorerDirs.WindowPlacement.ini', 'Favorites.ini', 'CommonLocations.ini', 'RecentAddresses.ini', 'PinnedTabs.ini',
     'UiPreferences.ini', 'AddressBar.ini', 'NavigationTree.ini', 'NavigationTreeSelection.ini',
     'NavigationTreeDragHoverDelay.ini',
     'NavigationTreeWidths.ini', 'LayoutProportions.ini', 'QuickFilterFavorites.ini', 'QuickFilterHistory.ini',

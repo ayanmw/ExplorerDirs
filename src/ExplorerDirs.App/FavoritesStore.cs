@@ -5,12 +5,16 @@ using System.Text;
 
 namespace ExplorerDirs.App;
 
+internal sealed record FavoriteEntry(string Path, string Name = "", string Group = "");
+
 internal sealed class FavoritesStore
 {
     private const int MaxFavorites = 200;
     private readonly string _path;
     private bool _canOverwrite = true;
     private string? _lastSeenContent;
+    private Dictionary<string, FavoriteEntry> _details = new(StringComparer.OrdinalIgnoreCase);
+    internal FavoriteEntry Describe(string path) => _details.GetValueOrDefault(path) ?? new(path);
 
     public string? LoadWarning { get; private set; }
 
@@ -21,6 +25,7 @@ internal sealed class FavoritesStore
         LoadWarning = null;
         _canOverwrite = true;
         _lastSeenContent = null;
+        _details.Clear();
         if (!File.Exists(_path)) return [];
 
         List<string> recovered = [];
@@ -28,6 +33,8 @@ internal sealed class FavoritesStore
         try
         {
             var values = new Dictionary<int, string>();
+            var names = new Dictionary<int, string>();
+            var groups = new Dictionary<int, string>();
             var count = -1;
             BigInteger version = -1;
             var inSection = false;
@@ -63,6 +70,16 @@ internal sealed class FavoritesStore
                     if (count >= 0 || !int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out count))
                         complete = false;
                 }
+                else if ((key.StartsWith("Name", StringComparison.OrdinalIgnoreCase) ||
+                          key.StartsWith("Group", StringComparison.OrdinalIgnoreCase)))
+                {
+                    var isName = key.StartsWith("Name", StringComparison.OrdinalIgnoreCase);
+                    var metadata = isName ? names : groups;
+                    if (!int.TryParse(key[(isName ? 4 : 5)..], out var metadataIndex) ||
+                        metadataIndex is < 0 or >= MaxFavorites || metadata.ContainsKey(metadataIndex))
+                        complete = false;
+                    else metadata[metadataIndex] = value;
+                }
                 else if (key.StartsWith("Item", StringComparison.OrdinalIgnoreCase) &&
                     int.TryParse(key[4..], NumberStyles.None, CultureInfo.InvariantCulture, out var index) &&
                     index is >= 0 and < MaxFavorites && !values.ContainsKey(index) && value.Length > 0)
@@ -70,17 +87,30 @@ internal sealed class FavoritesStore
                 else complete = false;
             }
 
-            if (version > 1)
+            if (version > 2)
             {
                 _canOverwrite = false;
                 LoadWarning = "收藏夹格式高于当前版本；已停止写入原文件。";
                 return [];
             }
-            if (version != 1 || count is < 0 or > MaxFavorites) complete = false;
+            if (version < 1 || version > 2 || count is < 0 or > MaxFavorites) complete = false;
+            if (version == 1 && (names.Count != 0 || groups.Count != 0)) complete = false;
+            if (version == 2 && (names.Count != values.Count || groups.Count != values.Count ||
+                names.Keys.Any(index => !values.ContainsKey(index)) || groups.Keys.Any(index => !values.ContainsKey(index))))
+                complete = false;
             if (count != values.Count || values.Keys.Any(index => index >= count)) complete = false;
             for (var index = 0; index < count; index++)
                 if (!values.ContainsKey(index)) complete = false;
             recovered = Normalize(values.OrderBy(entry => entry.Key).Select(entry => entry.Value));
+            string DecodeMetadata(Dictionary<int, string> metadata, int index)
+            {
+                if (!metadata.TryGetValue(index, out var encoded)) return "";
+                try { return new UTF8Encoding(false, true).GetString(Convert.FromBase64String(encoded)); }
+                catch (Exception error) when (error is FormatException or DecoderFallbackException)
+                { complete = false; return ""; }
+            }
+            foreach (var pair in values)
+                _details[pair.Value] = new(pair.Value, DecodeMetadata(names, pair.Key), DecodeMetadata(groups, pair.Key));
             if (recovered.Count != values.Count) complete = false;
         }
         catch (Exception)
@@ -103,21 +133,42 @@ internal sealed class FavoritesStore
     }
 
     public void Save(IEnumerable<string> paths)
+        => SaveCore(paths.Select(Describe).ToArray(), useMetadata: _details.Values.Any(item => item.Name.Length > 0 || item.Group.Length > 0));
+
+    internal void SaveEntries(IEnumerable<FavoriteEntry> entries) => SaveCore(entries.ToArray(), useMetadata: true);
+
+    private void SaveCore(IReadOnlyList<FavoriteEntry> entries, bool useMetadata)
     {
         if (!_canOverwrite) throw new IOException($"收藏夹原文件受到保护，已停止覆盖：{_path}");
-        var favorites = Normalize(paths);
+        if (entries.Any(item => item.Path.Contains('\n') || item.Path.Contains('\r')))
+            throw new IOException("收藏路径不能包含换行符。");
+        var favorites = Normalize(entries.Select(item => item.Path));
+        var details = favorites.ToDictionary(path => path, path => entries.First(item => SamePath(item.Path.Trim(), path)) with { Path = path },
+            StringComparer.OrdinalIgnoreCase);
         if (favorites.Count > MaxFavorites) throw new IOException($"收藏夹最多保存 {MaxFavorites} 项。");
         var builder = new StringBuilder();
         builder.AppendLine("; Explorer Dirs portable favorites. Close the app before editing.");
         builder.AppendLine("[Favorites]");
-        builder.AppendLine("FormatVersion=1");
+        builder.AppendLine(useMetadata ? "FormatVersion=2" : "FormatVersion=1");
         builder.AppendLine($"Count={favorites.Count}");
         for (var index = 0; index < favorites.Count; index++)
+        {
             builder.AppendLine($"Item{index}={favorites[index]}");
+            if (useMetadata)
+            {
+                var entry = details[favorites[index]];
+                builder.AppendLine($"Name{index}={Convert.ToBase64String(Encoding.UTF8.GetBytes(entry.Name.Trim()))}");
+                builder.AppendLine($"Group{index}={Convert.ToBase64String(Encoding.UTF8.GetBytes(entry.Group.Trim()))}");
+            }
+        }
         var content = builder.ToString();
+        // Preserve the loaded v1 snapshot before the first metadata upgrade.
+        if (useMetadata && _lastSeenContent is not null && _lastSeenContent.Contains("FormatVersion=1", StringComparison.Ordinal))
+            File.WriteAllText(_path + $".v1-{Guid.NewGuid():N}.bak", _lastSeenContent, new UTF8Encoding(false));
         PortableIniWriter.WriteIfUnchanged(_path, _lastSeenContent, content,
             $"收藏夹已被其他实例修改，请重新启动后再保存：{_path}");
         _lastSeenContent = content;
+        _details = details;
     }
 
     internal static bool SamePath(string left, string right) =>

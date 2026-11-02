@@ -38,6 +38,9 @@ public partial class MainWindow : Window
     private readonly FavoritesStore _favoritesStore;
     private readonly ViewPresetStore _viewPresetStore;
     private readonly List<string> _favorites;
+    private readonly FavoritesStore _commonLocationsStore;
+    private readonly List<FavoriteEntry> _commonLocations;
+    private readonly RecentAddressStore _recentAddresses;
     private readonly QuickLinkStore _quickLinkStore;
     private readonly ProgramStarterStore _programStarterStore;
     private IReadOnlyList<ProgramStarterEntry> _programStarterEntries = [];
@@ -215,6 +218,13 @@ public partial class MainWindow : Window
             EnvironmentStatus.Text = warning;
         _favoritesStore = new FavoritesStore(Path.Combine(_profileDirectory, "Favorites.ini"));
         _favorites = _favoritesStore.Load().ToList();
+        _recentAddresses = new RecentAddressStore(Path.Combine(_profileDirectory, "RecentAddresses.ini"));
+        var commonLocationsPath = Path.Combine(_profileDirectory, "CommonLocations.ini");
+        _commonLocationsStore = new FavoritesStore(commonLocationsPath);
+        var savedCommonLocations = _commonLocationsStore.Load();
+        _commonLocations = File.Exists(commonLocationsPath)
+            ? savedCommonLocations.Select(_commonLocationsStore.Describe).ToList()
+            : AddressPathMenu.DefaultUserLocations().Select(item => new FavoriteEntry(item.Identity, item.Header)).ToList();
         _quickLinkStore = new QuickLinkStore(Path.Combine(_profileDirectory, "QuickLinks"), _shellNamespaceProfileClassId);
         _programStarterStore = new ProgramStarterStore(Path.Combine(_profileDirectory, "ProgramStarter.ini"));
         _programStarterEntries = _programStarterStore.Load();
@@ -400,6 +410,11 @@ public partial class MainWindow : Window
                 _selectionCheckBoxes, _fullRowSelection, _disableGrouping, _softRefresh,
                 _shellNamespaceProfileClassId);
             _panes[index] = pane;
+            pane.FavoriteLocations = () => _favorites.Select(_favoritesStore.Describe).ToArray();
+            pane.CommonLocations = () => _commonLocations.ToArray();
+            pane.RecentLocations = () => _recentAddresses.Paths;
+            pane.ManageFavoriteLocations = ManageFavorites;
+            pane.ManageCommonLocations = ManageCommonLocations;
             pane.SetClassicAddressBar(_classicAddressBar);
             pane.SetStatusBarVisible(_showStatusBar);
             pane.SetStatusBarSelectionSizeVisible(_showSelectionSizeInStatusBar);
@@ -420,6 +435,7 @@ public partial class MainWindow : Window
             };
             pane.StateChanged += (_, _) =>
             {
+                _recentAddresses.Record(pane.CurrentPath);
                 if (_treeDisplayMode == TreeDisplayMode.PerPane)
                 {
                     if (!_importingQdr && _paneTreeVisibility[paneIndex] != pane.TreeIsVisible)
@@ -2711,6 +2727,9 @@ public partial class MainWindow : Window
         remove.Click += (_, _) => ChangeFavorites(_favorites.Where(path =>
             !FavoritesStore.SamePath(path, currentPath)).ToList());
         FavoritesMenu.Items.Add(remove);
+        var manage = new MenuItem { Header = "管理收藏夹…" };
+        manage.Click += (_, _) => ManageFavorites();
+        FavoritesMenu.Items.Add(manage);
         FavoritesMenu.Items.Add(new Separator());
         var saveWorkspace = new MenuItem
         {
@@ -2728,18 +2747,32 @@ public partial class MainWindow : Window
         FavoritesMenu.Items.Add(new Separator());
         if (_favorites.Count == 0)
             FavoritesMenu.Items.Add(new MenuItem { Header = "（暂无收藏）", IsEnabled = false });
-        foreach (var path in _favorites)
+        FavoriteMenuBuilder.Populate(FavoritesMenu.Items, _favorites.Select(_favoritesStore.Describe), OpenFavorite);
+    }
+
+    private void ManageFavorites()
+    {
+        var dialog = new FavoritesManagerWindow(this, _favorites.Select(_favoritesStore.Describe), ActivePane.CurrentPath);
+        if (dialog.ShowDialog() != true || dialog.Result is not { } result) return;
+        try
         {
-            var item = new MenuItem
-            {
-                Header = new TextBlock { Text = path, MaxWidth = 340, TextTrimming = TextTrimming.CharacterEllipsis },
-                ToolTip = path,
-                IsCheckable = true,
-                IsChecked = FavoritesStore.SamePath(path, currentPath)
-            };
-            item.Click += (_, _) => OpenFavorite(path);
-            FavoritesMenu.Items.Add(item);
+            _favoritesStore.SaveEntries(result);
+            _favorites.Clear(); _favorites.AddRange(result.Select(item => item.Path));
+            EnvironmentStatus.Text = $"已保存 {_favorites.Count} 个收藏目录。";
         }
+        catch (Exception ex) { EnvironmentStatus.Text = $"收藏夹保存失败：{ex.Message}"; }
+    }
+
+    private void ManageCommonLocations()
+    {
+        var dialog = new FavoritesManagerWindow(this, _commonLocations, ActivePane.CurrentPath) { Title = "管理常用位置" };
+        if (dialog.ShowDialog() != true || dialog.Result is not { } result) return;
+        try
+        {
+            _commonLocationsStore.SaveEntries(result);
+            _commonLocations.Clear(); _commonLocations.AddRange(result);
+        }
+        catch (Exception ex) { EnvironmentStatus.Text = $"常用位置保存失败：{ex.Message}"; }
     }
 
     private async Task BuildWorkspaceMenuAsync(MenuItem menu)

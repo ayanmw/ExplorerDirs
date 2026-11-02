@@ -196,6 +196,11 @@ public partial class PaneControl : UserControl
     internal event Func<PaneControl, ExplorerShortcut, bool>? ShortcutRequested;
     internal Func<bool>? MayRestoreFileFocus { get; set; }
     internal Func<bool>? MayKeepFileFocusRestorePending { get; set; }
+    internal Func<IReadOnlyList<FavoriteEntry>>? FavoriteLocations { get; set; }
+    internal Func<IReadOnlyList<FavoriteEntry>>? CommonLocations { get; set; }
+    internal Action? ManageFavoriteLocations { get; set; }
+    internal Action? ManageCommonLocations { get; set; }
+    internal Func<IReadOnlyList<string>>? RecentLocations { get; set; }
 
     internal PaneControl(IEnumerable<TabSettings> tabs, Func<ViewState> newTabView,
         IReadOnlySet<int>? pinnedIndices, int selectedTabIndex,
@@ -1644,7 +1649,23 @@ public partial class PaneControl : UserControl
     internal void ShowComputerMenu()
     {
         if (Current is not { } state) return;
-        ShowAddressMenu(state, AddressPathMenu.BuildComputerMenu(), AddressComputerButton);
+        var menu = new ContextMenu { PlacementTarget = AddressComputerButton, Placement = PlacementMode.Bottom };
+        void NavigateCurrent(string path) { if (ReferenceEquals(Current, state)) Navigate(path); }
+        FavoriteMenuBuilder.Populate(menu.Items, CommonLocations?.Invoke() ??
+            AddressPathMenu.DefaultUserLocations().Select(item => new FavoriteEntry(item.Identity, item.Header)), NavigateCurrent);
+        menu.Items.Add(new Separator());
+        FavoriteMenuBuilder.Populate(menu.Items, AddressPathMenu.BuildComputerMenu()
+            .Select(item => new FavoriteEntry(item.Identity, item.Header)), NavigateCurrent);
+        var favorites = new MenuItem { Header = "收藏夹" };
+        FavoriteMenuBuilder.Populate(favorites.Items, FavoriteLocations?.Invoke() ?? [], NavigateCurrent);
+        var manageFavorites = new MenuItem { Header = "管理收藏夹…" };
+        manageFavorites.Click += (_, _) => ManageFavoriteLocations?.Invoke();
+        favorites.Items.Add(new Separator()); favorites.Items.Add(manageFavorites);
+        menu.Items.Add(new Separator()); menu.Items.Add(favorites);
+        var manageCommon = new MenuItem { Header = "管理常用位置…" };
+        manageCommon.Click += (_, _) => ManageCommonLocations?.Invoke();
+        menu.Items.Add(manageCommon);
+        menu.IsOpen = true;
     }
 
     private void ShowAddressMenu(TabState state, IReadOnlyList<AddressPathMenuEntry> entries,
@@ -1687,6 +1708,15 @@ public partial class PaneControl : UserControl
             if (entry.ParentIdentity is null) menu.Items.Add(item);
             else itemsByIdentity[entry.ParentIdentity].Items.Add(item);
             itemsByIdentity[entry.Identity] = item;
+        }
+        if (RecentLocations?.Invoke() is { Count: > 0 } recentPaths)
+        {
+            var recent = new MenuItem { Header = "最近访问（所有标签）" };
+            FavoriteMenuBuilder.Populate(recent.Items, recentPaths.Select(path => new FavoriteEntry(path)), path =>
+            {
+                if (ReferenceEquals(Current, state)) Navigate(path);
+            });
+            menu.Items.Add(new Separator()); menu.Items.Add(recent);
         }
         menu.IsOpen = true;
     }

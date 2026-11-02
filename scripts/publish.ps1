@@ -198,7 +198,7 @@ if ($IsolatedProfile) {
     # list omitted newer tab/status/filter options, resetting them in previews.
     # Do not copy all INIs: unrelated files and unregistered sessions stay out.
     foreach ($name in @(
-        'ExplorerDirs.ini', 'ExplorerDirs.WindowPlacement.ini', 'Favorites.ini', 'PinnedTabs.ini', 'ShellNamespace.ini',
+        'ExplorerDirs.ini', 'ExplorerDirs.WindowPlacement.ini', 'Favorites.ini', 'CommonLocations.ini', 'RecentAddresses.ini', 'PinnedTabs.ini', 'ShellNamespace.ini',
         'UiPreferences.ini', 'AddressBar.ini', 'NavigationTree.ini', 'NavigationTreeSelection.ini',
         'NavigationTreeDragHoverDelay.ini',
         'NavigationTreeWidths.ini', 'LayoutProportions.ini', 'QuickFilterFavorites.ini', 'QuickFilterHistory.ini',

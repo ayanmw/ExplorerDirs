@@ -9,6 +9,49 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 
+if (args is ["--favorites-catalog-smoke"])
+{
+    var fixturePath = Path.Combine(AppContext.BaseDirectory, "favorites-catalog-" + Guid.NewGuid().ToString("N") + ".ini");
+    var catalogStore = new FavoritesStore(fixturePath);
+    catalogStore.Load();
+    catalogStore.Save([@"C:\旧目录", "shell:Downloads"]);
+    var legacyCatalog = File.ReadAllText(fixturePath);
+    catalogStore.SaveEntries([new(@"C:\旧目录", "项目=甲", "工作"), new("shell:Downloads", "下载", "常用")]);
+    var reader = new FavoritesStore(fixturePath);
+    var paths = reader.Load();
+    if (reader.LoadWarning is not null || paths.Count != 2 || reader.Describe(paths[0]).Name != "项目=甲" ||
+        reader.Describe(paths[1]).Group != "常用" || !Directory.GetFiles(AppContext.BaseDirectory,
+            Path.GetFileName(fixturePath) + ".v1-*.bak").Any(path => File.ReadAllText(path) == legacyCatalog))
+        throw new Exception("Favorites metadata upgrade or legacyCatalog backup failed.");
+    reader.Save(paths.Reverse());
+    paths = reader.Load();
+    if (paths[0] != "shell:Downloads" || reader.Describe(paths[1]).Group != "工作")
+        throw new Exception("Favorite ordering lost names or groups.");
+    File.AppendAllText(fixturePath, "; external edit\n");
+    var external = File.ReadAllText(fixturePath);
+    try { reader.SaveEntries([]); throw new Exception("External edit was overwritten."); }
+    catch (IOException) { }
+    if (File.ReadAllText(fixturePath) != external) throw new Exception("External data changed.");
+    File.WriteAllText(fixturePath, "[Favorites]\nFormatVersion=3\nCount=0\n");
+    reader.Load();
+    try { reader.SaveEntries([]); throw new Exception("Future format was overwritten."); }
+    catch (IOException) { }
+    var recentFixturePath = fixturePath + ".recent.ini";
+    var recentA = new RecentAddressStore(recentFixturePath);
+    var recentB = new RecentAddressStore(recentFixturePath);
+    recentA.Record(@"C:\one"); recentB.Record(@"C:\two");
+    if (!new RecentAddressStore(recentFixturePath).Paths.SequenceEqual(new[] { @"C:\two", @"C:\one" }))
+        throw new Exception("Recent addresses from independent windows did not merge.");
+    for (var recentIndex = 0; recentIndex < 25; recentIndex++) recentA.Record($@"C:\folder-{recentIndex}");
+    recentA.Record(@"C:\folder-24");
+    var recentRestarted = new RecentAddressStore(recentFixturePath);
+    if (recentRestarted.Paths.Count != 20 || recentRestarted.Paths[0] != @"C:\folder-24" ||
+        recentRestarted.Paths.Distinct(StringComparer.OrdinalIgnoreCase).Count() != 20)
+        throw new Exception("Recent address bound, deduplication or persistence failed.");
+    Console.WriteLine("Favorites catalog smoke: PASS (v1 backup, Unicode metadata, ordering, conflict and future-format protection; recent history merge/bound/restart; no UI)");
+    return;
+}
+
 if (args is ["--focus-traversal-smoke"])
 {
     FocusTraversalSmoke.Run();
@@ -2447,7 +2490,7 @@ try
     var savedFavorites = favoritesStore.Load();
     Check(savedFavorites.Count == 2 && favoritesStore.LoadWarning is null,
           "recovered favorites can be saved");
-    var futureFavorites = favoriteContent.Replace("FormatVersion=1", "FormatVersion=2", StringComparison.Ordinal);
+    var futureFavorites = favoriteContent.Replace("FormatVersion=1", "FormatVersion=3", StringComparison.Ordinal);
     File.WriteAllText(favoritesIni, futureFavorites);
     Check(favoritesStore.Load().Count == 0 && favoritesStore.LoadWarning is not null,
           "newer favorites format is not interpreted");

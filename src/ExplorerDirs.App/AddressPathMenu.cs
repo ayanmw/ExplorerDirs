@@ -63,6 +63,13 @@ internal static class AddressPathMenu
         return locations;
     }
 
+    internal static IReadOnlyList<AddressPathMenuLocation> DefaultUserLocations() =>
+    [
+        new("主目录", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)),
+        new("桌面", "shell:Desktop"), new("下载", "shell:Downloads"),
+        new("文档", Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments))
+    ];
+
     private static IReadOnlyList<AddressPathMenuLocation> BuildComputerLocations()
     {
         var locations = new List<AddressPathMenuLocation> { new("此电脑", ThisPcIdentity) };
