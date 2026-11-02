@@ -15,6 +15,7 @@
 #include <shlobj.h>
 #include <shobjidl.h>
 #include <shellapi.h>
+#include <shlwapi.h>
 #include <commctrl.h>
 #include <propsys.h>
 #include <propkey.h>
@@ -3633,6 +3634,21 @@ namespace
             if (!leftChild || !rightChild) return E_INVALIDARG;
             ED_PROBE_METRIC_INCREMENT(g_syntheticCompareCount);
             const auto compareColumn = LOWORD(column);
+            const auto customCount = InterlockedCompareExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0, 0) ? 4u : 3u;
+            if (compareColumn >= customCount)
+            {
+                UINT backingColumn = 0;
+                auto result = BackingColumnOrdinal(compareColumn, &backingColumn);
+                if (FAILED(result)) return result;
+                PITEMID_CHILD backingLeft = nullptr, backingRight = nullptr;
+                result = BackingChildPidl(left, &backingLeft);
+                if (SUCCEEDED(result)) result = BackingChildPidl(right, &backingRight);
+                if (SUCCEEDED(result)) result = _inner->CompareIDs(
+                    (column & ~static_cast<LPARAM>(0xFFFF)) | backingColumn, backingLeft, backingRight);
+                if (backingLeft) CoTaskMemFree(backingLeft);
+                if (backingRight) CoTaskMemFree(backingRight);
+                return result;
+            }
             if (compareColumn < ARRAYSIZE(g_syntheticCompareByColumn))
                 ED_PROBE_METRIC_INCREMENT(g_syntheticCompareByColumn[compareColumn]);
             short comparison = 0;
@@ -3956,8 +3972,11 @@ namespace
             const bool extended = InterlockedCompareExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0, 0) != 0;
             if (column > (extended ? 3u : 2u))
             {
-                RecordSyntheticColumnMetadata(2, column, {}, E_INVALIDARG, nullptr);
-                return E_INVALIDARG;
+                UINT backingColumn = 0;
+                auto result = BackingColumnOrdinal(column, &backingColumn);
+                if (SUCCEEDED(result)) result = _inner->GetDefaultColumnState(backingColumn, state);
+                RecordSyntheticColumnMetadata(2, column, SUCCEEDED(result) ? *state : SHCOLSTATEF{}, result, nullptr);
+                return result;
             }
             const auto relativePercentType = static_cast<SHCOLSTATEF>(
                 InterlockedCompareExchange(&g_syntheticRelativePercentColumnTypeForProbe, 0, 0));
@@ -4035,7 +4054,14 @@ namespace
                         !available) VariantClear(value); // Unknown is VT_EMPTY, not a zero-byte directory.
                 }
             }
-            else return E_INVALIDARG;
+            else
+            {
+                PITEMID_CHILD original = nullptr;
+                auto result = BackingChildPidl(item, &original);
+                if (SUCCEEDED(result)) result = _inner->GetDetailsEx(original, key, value);
+                if (original) CoTaskMemFree(original);
+                return result;
+            }
             return S_OK;
         }
         HRESULT STDMETHODCALLTYPE GetDetailsOf(PCUITEMID_CHILD item, UINT column, SHELLDETAILS* details) override
@@ -4047,6 +4073,26 @@ namespace
                     ED_PROBE_METRIC_INCREMENT(g_syntheticSizeDetailsOfItemCount);
             }
             const bool extended = InterlockedCompareExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0, 0) != 0;
+            if (details && column > (extended ? 3u : 2u))
+            {
+                UINT backingColumn = 0;
+                auto result = BackingColumnOrdinal(column, &backingColumn);
+                if (FAILED(result)) return result;
+                if (!item) return _inner->GetDetailsOf(nullptr, backingColumn, details);
+                PITEMID_CHILD original = nullptr;
+                result = BackingChildPidl(item, &original);
+                if (SUCCEEDED(result)) result = _inner->GetDetailsOf(original, backingColumn, details);
+                if (SUCCEEDED(result))
+                {
+                    // STRRET_OFFSET may reference the temporary backing PIDL. Materialize it
+                    // before releasing that PIDL; the Shell caller owns the resulting string.
+                    LPWSTR text = nullptr;
+                    result = StrRetToStrW(&details->str, original, &text);
+                    if (SUCCEEDED(result)) { details->str.uType = STRRET_WSTR; details->str.pOleStr = text; }
+                }
+                if (original) CoTaskMemFree(original);
+                return result;
+            }
             if (!details || column > (extended ? 3u : 2u))
             {
                 if (!item) RecordSyntheticColumnMetadata(1, column, {}, E_INVALIDARG, nullptr);
@@ -4099,6 +4145,19 @@ namespace
                         ? (asyncValuePending ? L"" : ContentsForItem(item))
                         : ((child->attributes & FILE_ATTRIBUTE_DIRECTORY) ? L"File folder" : L"File")) :
                     std::to_wstring(RelativePercentForItem(item)) + L"%";
+                if (column == 2 && !recursiveContentsColumn && _inner)
+                {
+                    PITEMID_CHILD original = nullptr;
+                    if (SUCCEEDED(BackingChildPidl(item, &original)))
+                    {
+                        VARIANT type{}, converted{};
+                        VariantInit(&type); VariantInit(&converted);
+                        if (SUCCEEDED(_inner->GetDetailsEx(original, &PKEY_ItemTypeText, &type)) &&
+                            SUCCEEDED(VariantChangeType(&converted, &type, 0, VT_BSTR)) && converted.bstrVal)
+                            text.assign(converted.bstrVal, SysStringLen(converted.bstrVal));
+                        VariantClear(&converted); VariantClear(&type); CoTaskMemFree(original);
+                    }
+                }
                 details->fmt = column == 1 || column == 3 ? LVCFMT_RIGHT : LVCFMT_LEFT;
                 details->cxChar = 16;
             }
@@ -4129,7 +4188,12 @@ namespace
             else if (column == 2) mapped = PKEY_ItemTypeText;
             else if (column == 3 && InterlockedCompareExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0, 0))
                 mapped = kSyntheticRelativeSizeKey;
-            else result = E_INVALIDARG;
+            else
+            {
+                UINT backingColumn = 0;
+                result = BackingColumnOrdinal(column, &backingColumn);
+                if (SUCCEEDED(result)) result = _inner->MapColumnToSCID(backingColumn, &mapped);
+            }
             if (SUCCEEDED(result)) *key = mapped;
             const auto traceIndex = InterlockedIncrement(&g_syntheticMapColumnTraceCount) - 1;
             if (traceIndex < kSyntheticMapColumnTraceCapacity)
@@ -4193,6 +4257,58 @@ namespace
         }
         HRESULT NotifyRefreshForProbe() { return MessageSFVCB(SFVM_FSNOTIFY, 0, 0); }
     private:
+        HRESULT BackingColumnOrdinal(UINT column, UINT* backingColumn) const
+        {
+            if (!backingColumn) return E_POINTER;
+            if (!_inner) return E_INVALIDARG;
+            const auto customCount = InterlockedCompareExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0, 0) ? 4u : 3u;
+            if (column < customCount) return E_INVALIDARG;
+            const auto requested = column - customCount;
+            {
+                std::lock_guard<std::mutex> lock(_backingColumnMutex);
+                if (_backingColumnMapReady)
+                {
+                    if (requested >= _backingColumnOrdinals.size()) return E_INVALIDARG;
+                    *backingColumn = _backingColumnOrdinals[requested]; return S_OK;
+                }
+            }
+            try
+            {
+                // Do not hold the map mutex across COM calls, which may pump callbacks.
+                std::vector<UINT> columns;
+                for (UINT index = 0; index < 1024; ++index)
+                {
+                    SHCOLUMNID key{};
+                    if (FAILED(_inner->MapColumnToSCID(index, &key))) break;
+                    if (key == PKEY_ItemNameDisplay || key == PKEY_Size || key == PKEY_ItemTypeText) continue;
+                    columns.push_back(index);
+                }
+                std::lock_guard<std::mutex> lock(_backingColumnMutex);
+                if (!_backingColumnMapReady) { _backingColumnOrdinals.swap(columns); _backingColumnMapReady = true; }
+                if (requested >= _backingColumnOrdinals.size()) return E_INVALIDARG;
+                *backingColumn = _backingColumnOrdinals[requested]; return S_OK;
+            }
+            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+        }
+        HRESULT BackingChildPidl(PCUIDLIST_RELATIVE item, PITEMID_CHILD* original) const
+        {
+            if (!original) return E_POINTER;
+            *original = nullptr;
+            if (!_inner || !item || ILIsEmpty(item)) return E_INVALIDARG;
+            try
+            {
+                std::wstring relative;
+                for (auto* segment = item; !ILIsEmpty(segment); segment = ILNext(segment))
+                {
+                    const auto* child = SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(segment));
+                    if (!child) return E_INVALIDARG;
+                    if (!relative.empty()) relative.push_back(L'\\');
+                    relative.append(child->name);
+                }
+                return _inner->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(relative.c_str()), nullptr, original, nullptr);
+            }
+            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+        }
         HRESULT GetAbsoluteParsingName(const SyntheticChild* child, std::wstring* parsingName) const
         {
             if (!child || !parsingName || !_inner || !_backingRoot) return E_INVALIDARG;
@@ -5271,6 +5387,9 @@ namespace
         SyntheticRecursiveSizeSnapshotStore* _recursiveSizeStore = nullptr;
         std::vector<SyntheticChild> _pendingSelected;
         mutable std::mutex _asyncSizeScanMutex;
+        mutable std::mutex _backingColumnMutex;
+        mutable std::vector<UINT> _backingColumnOrdinals;
+        mutable bool _backingColumnMapReady = false;
         mutable std::set<std::wstring, ShellParsingNameLess> _asyncSizeScansPending;
         mutable std::vector<AsyncRecursiveSizeBatchEntry> _asyncSizeScanBatch;
         mutable std::mutex _asyncViewUpdateMutex;
@@ -5489,6 +5608,70 @@ extern "C" ED_PROBE_EXPORT HRESULT WINAPI VerifyFolderSizeAvailabilityStoreForPr
     if (store.Count() != 0 || store.Set(L"C:\\pending-fixture", identity, 99) != S_FALSE) return E_FAIL;
     store.ReleaseScan(L"C:\\pending-fixture");
     return S_OK;
+}
+
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI VerifyBackingColumnMetadataForProbe(PCWSTR path)
+{
+    if (!path) return E_POINTER;
+    const auto initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    if (FAILED(initialized) && initialized != RPC_E_CHANGED_MODE) return initialized;
+    PIDLIST_ABSOLUTE rootPidl = nullptr;
+    PITEMID_CHILD earlier = nullptr, later = nullptr;
+    auto* folder = new (std::nothrow) SyntheticSortFolder(nullptr, g_syntheticFolderClassId, path);
+    auto result = folder ? SHParseDisplayName(path, nullptr, &rootPidl, 0, nullptr) : E_OUTOFMEMORY;
+    if (SUCCEEDED(result)) result = folder->Initialize(rootPidl);
+    if (SUCCEEDED(result)) result = folder->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"earlier.bin"), nullptr, &earlier, nullptr);
+    if (SUCCEEDED(result)) result = folder->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"later.bin"), nullptr, &later, nullptr);
+    UINT modifiedColumn = 0;
+    bool foundModified = false, foundCreated = false, foundAccessed = false;
+    if (SUCCEEDED(result))
+    {
+        for (UINT column = 3; column < 1024; ++column)
+        {
+            SHCOLUMNID key{};
+            if (FAILED(folder->MapColumnToSCID(column, &key))) break;
+            if (key == PKEY_DateModified) { modifiedColumn = column; foundModified = true; }
+            if (key == PKEY_DateCreated) foundCreated = true;
+            if (key == PKEY_DateAccessed) foundAccessed = true;
+        }
+        if (!foundModified || !foundCreated || !foundAccessed) result = E_FAIL;
+    }
+    if (SUCCEEDED(result))
+    {
+        SHELLDETAILS header{}, cell{};
+        result = folder->GetDetailsOf(nullptr, modifiedColumn, &header);
+        if (SUCCEEDED(result))
+        {
+            LPWSTR text = nullptr;
+            result = StrRetToStrW(&header.str, nullptr, &text);
+            if (SUCCEEDED(result) && (!text || !*text)) result = E_FAIL;
+            if (text) CoTaskMemFree(text);
+        }
+        if (SUCCEEDED(result)) result = folder->GetDetailsOf(earlier, modifiedColumn, &cell);
+        if (SUCCEEDED(result))
+        {
+            if (cell.str.uType != STRRET_WSTR || !cell.str.pOleStr || !*cell.str.pOleStr) result = E_FAIL;
+            if (cell.str.uType == STRRET_WSTR && cell.str.pOleStr) CoTaskMemFree(cell.str.pOleStr);
+        }
+        if (SUCCEEDED(result))
+        {
+            const auto comparison = folder->CompareIDs(modifiedColumn, earlier, later);
+            if (FAILED(comparison) || static_cast<short>(HRESULT_CODE(comparison)) >= 0) result = E_FAIL;
+        }
+        if (SUCCEEDED(result))
+        {
+            VARIANT value{}; VariantInit(&value);
+            result = folder->GetDetailsEx(earlier, &PKEY_DateModified, &value);
+            if (SUCCEEDED(result) && (value.vt == VT_EMPTY || value.vt == VT_NULL)) result = E_FAIL;
+            VariantClear(&value);
+        }
+    }
+    if (earlier) CoTaskMemFree(earlier);
+    if (later) CoTaskMemFree(later);
+    if (rootPidl) CoTaskMemFree(rootPidl);
+    if (folder) folder->Release();
+    if (SUCCEEDED(initialized)) CoUninitialize();
+    return result;
 }
 
 extern "C" HRESULT WINAPI ConfigureShellNamespaceRoot(

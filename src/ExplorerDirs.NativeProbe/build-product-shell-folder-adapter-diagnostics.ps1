@@ -17,7 +17,7 @@ if (-not $vcvars) { throw 'Visual Studio 2022 x64 C++ tools were not found.' }
 New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
 $objectFile = Join-Path $outputDirectory 'StaticShellFolderAdapter.obj'
 $importLibrary = Join-Path $outputDirectory 'ExplorerDirs.ShellNamespace.Diagnostics.lib'
-$command = 'call "{0}" >nul && cl.exe /nologo /LD /EHsc /W4 /WX /DEXPLORERDIRS_PRODUCT_DIAGNOSTICS /Fo:"{3}" "{1}" /link /DEF:"{5}" shell32.lib ole32.lib oleaut32.lib propsys.lib user32.lib /IMPLIB:"{4}" /OUT:"{2}"' -f $vcvars, $source, $output, $objectFile, $importLibrary, $definition
+$command = 'call "{0}" >nul && cl.exe /nologo /LD /EHsc /W4 /WX /DEXPLORERDIRS_PRODUCT_DIAGNOSTICS /Fo:"{3}" "{1}" /link /DEF:"{5}" shell32.lib ole32.lib oleaut32.lib propsys.lib user32.lib shlwapi.lib /IMPLIB:"{4}" /OUT:"{2}"' -f $vcvars, $source, $output, $objectFile, $importLibrary, $definition
 & $env:ComSpec /d /s /c $command
 if ($LASTEXITCODE -ne 0) { throw "Product diagnostic Shell-folder adapter build failed with exit code $LASTEXITCODE." }
 Write-Output "Built diagnostic-only adapter: $output"

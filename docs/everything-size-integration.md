@@ -36,4 +36,8 @@ EverythingSizeClient 使用官方 SDK 文档公开的 IPC QUERY2W 协议，批�
 
 2026-11-02 后续后台接线：ConfigureFolderSizeProvider 增加 enabled 状态，关闭时 ScheduleRecursiveSizeSnapshot 不入队，scanner 在条目边界检查开关及来源 generation；快速关闭再开启也会取消旧 generation 的扫描。App 启动读取 Enabled/Source，bridge 和 owner 保持开关，注销恢复默认 native 行为。InvalidateFolderSizePath 导出连接 F5，清理当前路径的子树与祖先快照，并同步失效 managed 批次。来源切换刷新已创建的 provider 视图；不创建隐藏标签宿主。
 
+2026-11-02 普通目录接入前的标准列补全：此前 provider 只暴露三列（扩展模式四列），会丢失现有修改时间等列，因此增加对 backing IShellFolder2 的标准列映射、列状态、显示文本、属性和排序转发。排除已提供的 Name/Size/Type 重复键，按 provider 实例缓存最多 1,024 个 backing ordinal，COM 调用不持有 map mutex；STRRET_OFFSET 在临时 PIDL 释放前转为独立字符串。普通类型文本也读取原生属性，而不统一显示 File。
+
+VerifyBackingColumnMetadataForProbe 在真实文件夹中确认修改/创建/访问时间列存在、标题和值可读；两个已设置不同修改时间的文件通过 provider 日期 CompareIDs 得到正确次序，GetDetailsEx 可读回日期属性。该检查已纳入 native bridge smoke，无 Shell view/注册。既有 folder-tree smoke 通过。标准列排序当前需重新解析 backing 子 PIDL，尚未测量大列表性能；未运行真实 IColumnManager 列恢复或可见 UI，不能宣称透明迁移完成。
+
 新版 --folder-size-native-bridge-smoke 通过关闭/重开无额外查询、显式刷新失效、在延迟扫描开始后快速关开仍返回取消等合同。App/native C++ 构建通过。视图菜单 checkbox、普通目录的透明 provider 接入仍未完成；provider 身份会影响现有选区 PIDL、历史与监视逻辑，不能只替换 AddTab 的路径就宣布接入完成。后续需统一身份展示及操作路由，并验证 ZIP/虚拟位置、选择和历史不回归。

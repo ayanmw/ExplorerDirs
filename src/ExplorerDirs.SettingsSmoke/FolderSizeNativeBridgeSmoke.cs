@@ -11,6 +11,7 @@ internal static class FolderSizeNativeBridgeSmoke
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int InvalidatePath([MarshalAs(UnmanagedType.LPWStr)] string path);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetDelay(int milliseconds);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int Counter();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int VerifyColumns([MarshalAs(UnmanagedType.LPWStr)] string path);
 
     internal static void Run(string library)
     {
@@ -22,6 +23,12 @@ internal static class FolderSizeNativeBridgeSmoke
         {
             File.WriteAllBytes(Path.Combine(root, "small", "data.bin"), new byte[5]);
             File.WriteAllBytes(Path.Combine(root, "large", "data.bin"), new byte[9]);
+            File.WriteAllBytes(Path.Combine(root, "earlier.bin"), new byte[1]);
+            File.WriteAllBytes(Path.Combine(root, "later.bin"), new byte[1]);
+            File.SetLastWriteTimeUtc(Path.Combine(root, "earlier.bin"), new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+            File.SetLastWriteTimeUtc(Path.Combine(root, "later.bin"), new DateTime(2021, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+            var verifyColumns = Marshal.GetDelegateForFunctionPointer<VerifyColumns>(NativeLibrary.GetExport(module, "VerifyBackingColumnMetadataForProbe"));
+            Marshal.ThrowExceptionForHR(verifyColumns(root));
             var verify = Marshal.GetDelegateForFunctionPointer<VerifyStore>(NativeLibrary.GetExport(module, "VerifyFolderSizeAvailabilityStoreForProbe"));
             Marshal.ThrowExceptionForHR(verify());
             var query = Marshal.GetDelegateForFunctionPointer<Query>(NativeLibrary.GetExport(module, "QueryConfiguredFolderSizeForProbe"));
@@ -101,7 +108,7 @@ internal static class FolderSizeNativeBridgeSmoke
             finally { gate.TrySetResult(new(EverythingSizeStatus.IndexUnavailable, [])); waiting.GetAwaiter().GetResult(); }
             bridge.Dispose();
             if (Read("small") != (0, 5UL, 3U)) throw new Exception("Bridge disposal left a registered callback.");
-            Console.WriteLine("Native folder size bridge smoke: PASS (batch sharing, invalidation/F5, unknown/zero, native fallback, disable/re-enable, cancellation, source retirement, unregister and cache flags; no Shell view/IPC/registry)");
+            Console.WriteLine("Native folder size bridge smoke: PASS (backing date columns/values/sort; batch sharing, invalidation/F5, unknown/zero, native fallback, disable/re-enable, cancellation, source retirement, unregister and cache flags; no Shell view/IPC/registry)");
         }
         finally
         {
