@@ -40,4 +40,6 @@ EverythingSizeClient 使用官方 SDK 文档公开的 IPC QUERY2W 协议，批�
 
 VerifyBackingColumnMetadataForProbe 在真实文件夹中确认修改/创建/访问时间列存在、标题和值可读；两个已设置不同修改时间的文件通过 provider 日期 CompareIDs 得到正确次序，GetDetailsEx 可读回日期属性。该检查已纳入 native bridge smoke，无 Shell view/注册。既有 folder-tree smoke 通过。标准列排序当前需重新解析 backing 子 PIDL，尚未测量大列表性能；未运行真实 IColumnManager 列恢复或可见 UI，不能宣称透明迁移完成。
 
+2026-11-02 身份策略准备：FolderSizeLocationPolicy 区分用户物理路径与 Shell 实际 provider identity，只对 Shell 已确认的普通目录进行 provider 路由；ZIP stream、虚拟位置及关闭时的普通目录保持原路由，已有 provider history 不因关列而换身份。选择恢复仅允许物理直接子项，并将其绑定到当前 native parent。QdrShellPathCodec 补齐 encoded-root 后的真实子项段解码；此前把整串当十六进制，遇到 nested provider identity 会失败。新合同覆盖中文/目录名 .zip、真正 ZIP stream、嵌套路径、关闭/历史、直接子项及非法相对段，无 Shell/IO。策略尚未连接 ExplorerBrowserHost 的导航与选择流程，不代表普通目录已经接入。
+
 新版 --folder-size-native-bridge-smoke 通过关闭/重开无额外查询、显式刷新失效、在延迟扫描开始后快速关开仍返回取消等合同。App/native C++ 构建通过。视图菜单 checkbox、普通目录的透明 provider 接入仍未完成；provider 身份会影响现有选区 PIDL、历史与监视逻辑，不能只替换 AddTab 的路径就宣布接入完成。后续需统一身份展示及操作路由，并验证 ZIP/虚拟位置、选择和历史不回归。

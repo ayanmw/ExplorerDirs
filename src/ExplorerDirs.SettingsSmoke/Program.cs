@@ -9,6 +9,12 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 
+if (args is ["--folder-size-location-policy-smoke"])
+{
+    FolderSizeLocationPolicySmoke.Run();
+    return;
+}
+
 if (args is ["--folder-size-native-bridge-smoke", var bridgeLibrary])
 {
     FolderSizeNativeBridgeSmoke.Run(bridgeLibrary);

@@ -21,7 +21,16 @@ internal static class QdrShellPathCodec
         if (profileProviderClassId is not { } classId) return false;
         var providerPrefix = $"::{{{classId:D}}}\\edpath:";
         if (!identity.StartsWith(providerPrefix, StringComparison.OrdinalIgnoreCase)) return false;
-        physicalPath = DecodeProviderPath(identity[providerPrefix.Length..]);
+        var tokenAndChildren = identity[providerPrefix.Length..];
+        var separator = tokenAndChildren.IndexOf('\\');
+        physicalPath = DecodeProviderPath(separator < 0 ? tokenAndChildren : tokenAndChildren[..separator]);
+        if (separator >= 0)
+        {
+            var children = tokenAndChildren[(separator + 1)..].Split('\\');
+            if (children.Any(part => part.Length == 0 || part is "." or ".." || part.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0))
+                throw new InvalidDataException("应用 Shell 目录标识中的子项路径无效。");
+            foreach (var child in children) physicalPath = Path.Combine(physicalPath, child);
+        }
         return true;
     }
 
