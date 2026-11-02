@@ -3,6 +3,7 @@ EXPORTS
     DllGetClassObject PRIVATE
     DllCanUnloadNow PRIVATE
     ConfigureShellNamespaceRoot
+    ConfigureFolderSizeProvider
     GetProductAsyncItemNotificationAttempts
     GetProductAsyncItemNotificationUnderSyntheticRootCount
     ConfigureProductNotificationDeliveryForProbe

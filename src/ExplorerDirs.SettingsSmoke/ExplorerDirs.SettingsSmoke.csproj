@@ -38,6 +38,7 @@
     <Compile Include="../ExplorerDirs.App/EverythingSizeClient.cs" Link="EverythingSizeClient.cs" />
     <Compile Include="../ExplorerDirs.App/FolderSizeDataSource.cs" Link="FolderSizeDataSource.cs" />
     <Compile Include="../ExplorerDirs.App/FolderSizeOptionsStore.cs" Link="FolderSizeOptionsStore.cs" />
+    <Compile Include="../ExplorerDirs.App/FolderSizeNativeBridge.cs" Link="FolderSizeNativeBridge.cs" />
     <Compile Include="../ExplorerDirs.App/SpaceTreemapLayout.cs" Link="SpaceTreemapLayout.cs" />
     <Compile Include="../ExplorerDirs.App/SpaceAnalysisSnapshot.cs" Link="SpaceAnalysisSnapshot.cs" />
     <Compile Include="../ExplorerDirs.App/ClassicAddressBarPath.cs" Link="ClassicAddressBarPath.cs" />

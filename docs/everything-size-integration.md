@@ -24,8 +24,12 @@ EverythingSizeClient 使用官方 SDK 文档公开的 IPC QUERY2W 协议，批�
 
 ## 待完成
 
+2026-11-02 native 回调桥已接入 App 的 profile owner：后台 provider worker 先请求 Everything，Auto 缺值返回 native 扫描后备；Everything 专用缺值缓存为不可用。快照独立记录大小/计数是否可用，未知大小以空属性/破折号表示，未知计数不伪造零。来源切换取消旧回调并清空快照、失效在途 reservation；Shell 路径失效同步移除 managed 父目录批次缓存。managed 缓存最多四个第一页（8,192 行）、2 秒复用，超出第一页的目标使用精确路径查询。native 读写锁保证注销返回前已进入的回调退出，delegate 生命周期由 owner 保持。
+
+--folder-size-native-bridge-smoke 使用真实 C++ adapter 与可控数据源，无 Shell view/IPC/注册表：父目录批次共享、子路径失效、未知与零区别、Auto native 后备、Builtin 不联系索引、native 取消、切换来源退休等待中的回调、注销后恢复原生扫描、快照可用状态和旧 reservation 拒绝发布均通过。既有 --synthetic-shell-folder-tree-smoke 通过，包括真实文件操作和缓存失效合同，明确 shell-view-created=False。C++ product/native-probe `/W4 /WX` 与 App/NativeProbe Release build 通过。真实 Everything 5 B/37 B 夹具增加精确路径查询读回验证通过，整轮约 1.8 秒，前台不变。
+
 已实现 FolderSizeDataSource 的来源选择与分页消费：Everything 专用模式缺值保留未知，Auto 只扫描索引缺值目录，BuiltIn 不联系 Everything；内置扫描全局最多两个 worker，按批次调度而非每目录创建线程。不额外复制 Everything 索引和消费者已有的缓存。FolderSizeOptionsStore 默认 Enabled=True、Source=Auto，保存于独立 INI，支持冲突、未来格式及损坏文件保护。
 
 --folder-size-data-source-smoke 验证来源路由、真实零与缺值区分、自动模式限制扫描范围、Everything 不可用后备、取消、选项重载/冲突/未来格式保护；通过，无 IPC/UI。App Release build 0 warning/error。
 
-设置菜单与视图开关、普通列表列接入、缓存失效接线和空间分析尚未完成。尚未覆盖真实 Everything 未运行/关闭目录索引、查询中服务退出、挂起服务和多页目录；当前测试不能替代这些运行期边界。
+来源设置菜单和空间分析已接入，见 space-analysis-temp86.md；普通列表默认大小列/视图开关、关闭后停止请求、F5 主动失效、来源切换后的既有行更新仍未完成。尚未覆盖真实 Everything 未运行/关闭目录索引、查询中服务退出、挂起服务和多页目录；当前测试不能替代这些运行期边界。

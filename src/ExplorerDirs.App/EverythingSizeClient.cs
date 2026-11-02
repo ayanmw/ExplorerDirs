@@ -24,18 +24,25 @@ internal static class EverythingSizeClient
     internal static async Task<IndexedSizePage> QueryChildrenAsync(string directory, uint offset, CancellationToken cancellationToken)
     {
         await QueryGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try { return await StartQueryAsync(directory, offset, cancellationToken).ConfigureAwait(false); }
+        try { return await StartQueryAsync(directory, offset, cancellationToken, exact: false).ConfigureAwait(false); }
         finally { QueryGate.Release(); }
     }
 
-    private static Task<IndexedSizePage> StartQueryAsync(string directory, uint offset, CancellationToken cancellationToken)
+    internal static async Task<IndexedSizePage> QueryDirectoryAsync(string directory, CancellationToken cancellationToken)
+    {
+        await QueryGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { return await StartQueryAsync(directory, 0, cancellationToken, exact: true).ConfigureAwait(false); }
+        finally { QueryGate.Release(); }
+    }
+
+    private static Task<IndexedSizePage> StartQueryAsync(string directory, uint offset, CancellationToken cancellationToken, bool exact)
     {
         if (!Path.IsPathFullyQualified(directory) || directory.IndexOfAny(['"', '\r', '\n', '\0']) >= 0)
             throw new ArgumentException("Everything 查询需要绝对目录路径。", nameof(directory));
         var completion = new TaskCompletionSource<IndexedSizePage>(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
         {
-            try { completion.TrySetResult(Query(directory, offset, cancellationToken)); }
+            try { completion.TrySetResult(Query(directory, offset, cancellationToken, exact)); }
             catch (OperationCanceledException) { completion.TrySetCanceled(cancellationToken); }
             catch (Exception error) { completion.TrySetResult(new(EverythingSizeStatus.Failed, [], Detail: error.Message)); }
         }) { IsBackground = true, Name = "Explorer Dirs Everything query" };
@@ -44,7 +51,7 @@ internal static class EverythingSizeClient
         return completion.Task;
     }
 
-    private static IndexedSizePage Query(string directory, uint offset, CancellationToken cancellationToken)
+    private static IndexedSizePage Query(string directory, uint offset, CancellationToken cancellationToken, bool exact)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var server = FindWindowW("EVERYTHING_TASKBAR_NOTIFICATION", null);
@@ -79,12 +86,15 @@ internal static class EverythingSizeClient
                 frame.Continue = false;
                 return 1;
             });
-            var search = Encoding.Unicode.GetBytes($"parent:\"{directory}\"\0");
+            var expression = exact ? "^" + System.Text.RegularExpressions.Regex.Escape(Path.TrimEndingDirectorySeparator(directory)) + "$"
+                : $"parent:\"{directory}\"";
+            var search = Encoding.Unicode.GetBytes(expression + "\0");
             var query = new byte[28 + search.Length];
             BinaryPrimitives.WriteUInt32LittleEndian(query.AsSpan(0), unchecked((uint)source.Handle));
             BinaryPrimitives.WriteUInt32LittleEndian(query.AsSpan(4), ReplyId);
+            BinaryPrimitives.WriteUInt32LittleEndian(query.AsSpan(8), exact ? 12u : 0u); // MATCHPATH | REGEX for an exact absolute identity
             BinaryPrimitives.WriteUInt32LittleEndian(query.AsSpan(12), offset);
-            BinaryPrimitives.WriteUInt32LittleEndian(query.AsSpan(16), PageSize);
+            BinaryPrimitives.WriteUInt32LittleEndian(query.AsSpan(16), exact ? 1u : PageSize);
             BinaryPrimitives.WriteUInt32LittleEndian(query.AsSpan(20), RequestedFields);
             BinaryPrimitives.WriteUInt32LittleEndian(query.AsSpan(24), 1); // name ascending
             search.CopyTo(query, 28);
@@ -110,7 +120,8 @@ internal static class EverythingSizeClient
             cancellationToken.ThrowIfCancellationRequested();
             if (reply is not null && reply.Offset != offset) return new(EverythingSizeStatus.InvalidReply, []);
             // Confirm direct-parent identity independently of Everything search syntax.
-            if (reply is not null && reply.Items.Any(item => !FavoritesStore.SamePath(Path.GetDirectoryName(item.Path) ?? "", directory)))
+            if (reply is not null && reply.Items.Any(item => !FavoritesStore.SamePath(
+                exact ? item.Path : Path.GetDirectoryName(item.Path) ?? "", directory)))
                 return new(EverythingSizeStatus.InvalidReply, []);
             return reply ?? new(EverythingSizeStatus.Timeout, []);
         }

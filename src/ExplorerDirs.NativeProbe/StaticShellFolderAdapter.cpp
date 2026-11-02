@@ -37,6 +37,21 @@
 
 extern "C" ED_PROBE_EXPORT void WINAPI ResetSyntheticSortCounters();
 
+using FolderSizeProviderCallback = HRESULT(WINAPI*)(PCWSTR, volatile LONG*, ULONGLONG*, ULONGLONG*, ULONGLONG*, ULONGLONG*, DWORD*);
+using FolderSizeInvalidationCallback = void(WINAPI*)(PCWSTR);
+static PVOID volatile g_folderSizeProviderCallback = nullptr;
+static PVOID volatile g_folderSizeInvalidationCallback = nullptr;
+static SRWLOCK g_folderSizeProviderLock = SRWLOCK_INIT;
+
+static void InvalidateManagedFolderSize(PCWSTR path)
+{
+    AcquireSRWLockShared(&g_folderSizeProviderLock);
+    const auto callback = reinterpret_cast<FolderSizeInvalidationCallback>(
+        InterlockedCompareExchangePointer(&g_folderSizeInvalidationCallback, nullptr, nullptr));
+    if (callback && path) callback(path);
+    ReleaseSRWLockShared(&g_folderSizeProviderLock);
+}
+
 namespace
 {
     void TraceSyntheticSortStage(const char* stage)
@@ -1508,6 +1523,8 @@ namespace
         ULONGLONG folders = 0;
         ULONGLONG unreadable = 0;
         ULONGLONG lastAccess = 0;
+        bool sizeAvailable = true;
+        bool countsAvailable = true;
     };
 
     bool TryGetSyntheticFileIdentity(PCWSTR path, SyntheticFileIdentity* identity)
@@ -1555,7 +1572,8 @@ namespace
             return references;
         }
         HRESULT Set(PCWSTR parsingName, const SyntheticFileIdentity& identity, ULONGLONG bytes,
-            ULONGLONG files = 0, ULONGLONG folders = 0, ULONGLONG unreadable = 0)
+            ULONGLONG files = 0, ULONGLONG folders = 0, ULONGLONG unreadable = 0,
+            bool sizeAvailable = true, bool countsAvailable = true)
         {
             if (!parsingName || !*parsingName || !identity.available) return E_INVALIDARG;
             try
@@ -1565,7 +1583,7 @@ namespace
                 // An item-change notification can arrive after a worker starts scanning;
                 // never let that pre-notification result repopulate the invalidated cache.
                 if (inProgress != _scansInProgress.end() && inProgress->second) return S_FALSE;
-                _sizes[parsingName] = { identity, bytes, files, folders, unreadable, NextAccessSequence() };
+                _sizes[parsingName] = { identity, bytes, files, folders, unreadable, NextAccessSequence(), sizeAvailable, countsAvailable };
                 TrimToCapacity();
             }
             catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
@@ -1573,6 +1591,8 @@ namespace
         }
         HRESULT Rename(PCWSTR oldParsingName, PCWSTR newParsingName, const SyntheticFileIdentity& identity)
         {
+            InvalidateManagedFolderSize(oldParsingName);
+            InvalidateManagedFolderSize(newParsingName);
             if (!oldParsingName || !*oldParsingName || !newParsingName || !*newParsingName || !identity.available)
                 return E_INVALIDARG;
             try
@@ -1599,6 +1619,7 @@ namespace
         }
         size_t RemoveSubtree(PCWSTR parsingName)
         {
+            InvalidateManagedFolderSize(parsingName);
             if (!parsingName || !*parsingName) return 0;
             std::wstring root;
             try { root.assign(parsingName); }
@@ -1638,6 +1659,7 @@ namespace
         }
         size_t InvalidatePath(PCWSTR changedParsingName, bool includeSubtree, size_t* invalidatedReservations = nullptr)
         {
+            InvalidateManagedFolderSize(changedParsingName);
             if (!changedParsingName || !*changedParsingName) return 0;
             std::wstring changed;
             try { changed.assign(changedParsingName); }
@@ -1706,7 +1728,8 @@ namespace
             return _sizes.erase(exact) != 0;
         }
         bool TryGet(const std::wstring& parsingName, const SyntheticFileIdentity& identity, ULONGLONG* bytes,
-            ULONGLONG* files = nullptr, ULONGLONG* folders = nullptr, ULONGLONG* unreadable = nullptr) const
+            ULONGLONG* files = nullptr, ULONGLONG* folders = nullptr, ULONGLONG* unreadable = nullptr,
+            bool* sizeAvailable = nullptr, bool* countsAvailable = nullptr) const
         {
             if (!identity.available || !bytes) return false;
             std::lock_guard<std::mutex> lock(_mutex);
@@ -1730,7 +1753,15 @@ namespace
             if (files) *files = found->second.files;
             if (folders) *folders = found->second.folders;
             if (unreadable) *unreadable = found->second.unreadable;
+            if (sizeAvailable) *sizeAvailable = found->second.sizeAvailable;
+            if (countsAvailable) *countsAvailable = found->second.countsAvailable;
             return true;
+        }
+        void ClearForProviderChange()
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            _sizes.clear();
+            for (auto& reservation : _scansInProgress) reservation.second = true;
         }
         ScanReservation TryReserveScan(const std::wstring& parsingName,
             const SyntheticFileIdentity& identity, ULONGLONG* cachedBytes)
@@ -2398,6 +2429,8 @@ namespace
         ULONGLONG files;
         ULONGLONG folders;
         ULONGLONG unreadable;
+        bool sizeAvailable = true;
+        bool countsAvailable = true;
     };
 
     HRESULT GetSyntheticDirectoryMetrics(const std::wstring& directory, SyntheticDirectoryMetrics* metrics,
@@ -2525,6 +2558,33 @@ namespace
         FindClose(search);
         if (FAILED(result)) *metrics = {};
         return result;
+    }
+
+    HRESULT GetConfiguredDirectoryMetrics(const std::wstring& directory, SyntheticDirectoryMetrics* metrics,
+        volatile LONG* cancellationFlag = nullptr)
+    {
+        if (!metrics) return E_POINTER;
+        *metrics = {};
+        if (cancellationFlag && InterlockedCompareExchange(cancellationFlag, 0, 0))
+            return HRESULT_FROM_WIN32(ERROR_CANCELLED);
+        AcquireSRWLockShared(&g_folderSizeProviderLock);
+        const auto callback = reinterpret_cast<FolderSizeProviderCallback>(
+            InterlockedCompareExchangePointer(&g_folderSizeProviderCallback, nullptr, nullptr));
+        if (callback)
+        {
+            DWORD flags = 0;
+            const auto result = callback(directory.c_str(), cancellationFlag, &metrics->bytes,
+                &metrics->files, &metrics->folders, &metrics->unreadable, &flags);
+            ReleaseSRWLockShared(&g_folderSizeProviderLock);
+            if (result != E_NOTIMPL)
+            {
+                metrics->sizeAvailable = (flags & 1) != 0;
+                metrics->countsAvailable = (flags & 2) != 0;
+                return result;
+            }
+        }
+        else ReleaseSRWLockShared(&g_folderSizeProviderLock);
+        return GetSyntheticDirectoryMetrics(directory, metrics, cancellationFlag);
     }
 
     HRESULT EnumerateBackingChildren(const std::wstring& backingPath, SHCONTF flags,
@@ -3955,6 +4015,15 @@ namespace
                 }
                 value->vt = VT_UI8;
                 value->ullVal = SizeForItem(item);
+                if (sizeChild && (sizeChild->attributes & FILE_ATTRIBUTE_DIRECTORY) && _recursiveSizeStore)
+                {
+                    std::wstring parsingName;
+                    ULONGLONG cachedBytes = 0;
+                    bool available = true;
+                    if (SUCCEEDED(GetAbsoluteParsingName(sizeChild, &parsingName)) &&
+                        _recursiveSizeStore->TryGet(parsingName, sizeChild->identity, &cachedBytes, nullptr, nullptr, nullptr, &available) &&
+                        !available) VariantClear(value); // Unknown is VT_EMPTY, not a zero-byte directory.
+                }
             }
             else return E_INVALIDARG;
             return S_OK;
@@ -4003,6 +4072,7 @@ namespace
                     }
                 }
                 bool asyncValuePending = false;
+                bool sizeAvailable = true;
                 if ((column == 1 || recursiveContentsColumn) &&
                     InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanForProbe, 0, 0) &&
                     (child->attributes & FILE_ATTRIBUTE_DIRECTORY) && !(child->attributes & FILE_ATTRIBUTE_REPARSE_POINT))
@@ -4010,10 +4080,10 @@ namespace
                     std::wstring parsingName;
                     ULONGLONG cachedBytes = 0;
                     asyncValuePending = FAILED(GetAbsoluteParsingName(child, &parsingName)) || !_recursiveSizeStore ||
-                        !_recursiveSizeStore->TryGet(parsingName, child->identity, &cachedBytes);
+                        !_recursiveSizeStore->TryGet(parsingName, child->identity, &cachedBytes, nullptr, nullptr, nullptr, &sizeAvailable);
                 }
                 text = column == 0 ? child->name : column == 1 ?
-                    (asyncValuePending ? L"" : InterlockedCompareExchange(&g_syntheticHumanSizeTextForProbe, 0, 0)
+                    (asyncValuePending ? L"" : !sizeAvailable ? L"\x2014" : InterlockedCompareExchange(&g_syntheticHumanSizeTextForProbe, 0, 0)
                         ? RecursiveSizeTextForItem(item) : std::to_wstring(SizeForItem(item))) :
                     column == 2 ? ((extended && (child->attributes & FILE_ATTRIBUTE_DIRECTORY))
                         ? (asyncValuePending ? L"" : ContentsForItem(item))
@@ -4276,7 +4346,7 @@ namespace
                                 QueryPerformanceCounter(&scanStart);
                                 const auto scanDelayMs = InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanDelayMsForProbe, 0, 0);
                                 if (scanDelayMs > 0) Sleep(static_cast<DWORD>(scanDelayMs));
-                                scanResult = GetSyntheticDirectoryMetrics(childPath, &metrics, &self->_asyncScansCancelled);
+                                scanResult = GetConfiguredDirectoryMetrics(childPath, &metrics, &self->_asyncScansCancelled);
                                 QueryPerformanceCounter(&scanEnd);
                                 ED_PROBE_METRIC_INCREMENT(g_syntheticOnDemandSizeScanCount);
                                 if (frequency.QuadPart > 0 && scanEnd.QuadPart >= scanStart.QuadPart)
@@ -4297,7 +4367,7 @@ namespace
                             if (SUCCEEDED(scanResult))
                                 scanResult = self->_recursiveSizeStore->Set(
                                     parsingName.c_str(), afterScan, metrics.bytes, metrics.files, metrics.folders,
-                                    metrics.unreadable);
+                                    metrics.unreadable, metrics.sizeAvailable, metrics.countsAvailable);
                             if (SUCCEEDED(scanResult))
                                 ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeScanCompletedForProbe);
                             else if (scanResult != HRESULT_FROM_WIN32(ERROR_CANCELLED))
@@ -4406,7 +4476,7 @@ namespace
                     ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeScanStartedForProbe);
                     const auto scanDelayMs = InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanDelayMsForProbe, 0, 0);
                     if (scanDelayMs > 0) Sleep(static_cast<DWORD>(scanDelayMs));
-                    itemResult = GetSyntheticDirectoryMetrics(entry.path, &metrics, &self->_asyncScansCancelled);
+                    itemResult = GetConfiguredDirectoryMetrics(entry.path, &metrics, &self->_asyncScansCancelled);
                     QueryPerformanceCounter(&end);
                     ED_PROBE_METRIC_INCREMENT(g_syntheticOnDemandSizeScanCount);
                     if (frequency.QuadPart > 0 && end.QuadPart >= start.QuadPart)
@@ -4440,7 +4510,8 @@ namespace
                     }
                 }
                 if (SUCCEEDED(itemResult)) itemResult = self->_recursiveSizeStore->Set(
-                    entry.key.c_str(), after, metrics.bytes, metrics.files, metrics.folders, metrics.unreadable);
+                    entry.key.c_str(), after, metrics.bytes, metrics.files, metrics.folders, metrics.unreadable,
+                    metrics.sizeAvailable, metrics.countsAvailable);
                 if (scanReserved) self->_recursiveSizeStore->ReleaseScan(entry.key);
                 // S_FALSE means a notification invalidated this in-flight scan before commit;
                 // do not advertise it as a fresh value or trigger a redundant view update.
@@ -4818,10 +4889,12 @@ namespace
             if (!child || !_recursiveSizeStore) return FormatSyntheticSizeText(bytes);
             std::wstring parsingName;
             ULONGLONG cachedBytes = 0, unreadable = 0;
+            bool available = true;
             if (FAILED(GetAbsoluteParsingName(child, &parsingName)) ||
-                !_recursiveSizeStore->TryGet(parsingName, child->identity, &cachedBytes, nullptr, nullptr, &unreadable) ||
-                unreadable == 0)
+                !_recursiveSizeStore->TryGet(parsingName, child->identity, &cachedBytes, nullptr, nullptr, &unreadable, &available))
                 return FormatSyntheticSizeText(bytes);
+            if (!available) return L"\x2014";
+            if (unreadable == 0) return FormatSyntheticSizeText(bytes);
             return L">= " + FormatSyntheticSizeText(cachedBytes) + L" (partial; skipped " +
                 std::to_wstring(unreadable) + L")";
         }
@@ -4833,8 +4906,11 @@ namespace
             if (_recursiveSizeStore && SUCCEEDED(GetAbsoluteParsingName(child, &parsingName)))
             {
                 ULONGLONG bytes = 0, files = 0, folders = 0, unreadable = 0;
-                if (_recursiveSizeStore->TryGet(parsingName, child->identity, &bytes, &files, &folders, &unreadable))
+                bool sizeAvailable = true, countsAvailable = true;
+                if (_recursiveSizeStore->TryGet(parsingName, child->identity, &bytes, &files, &folders, &unreadable,
+                    &sizeAvailable, &countsAvailable))
                 {
+                    if (!sizeAvailable || !countsAvailable) return L"";
                     auto text = SyntheticContentsText(files, folders);
                     if (unreadable) text += L"; unreadable/skipped: " + std::to_wstring(unreadable);
                     return text;
@@ -5335,6 +5411,59 @@ STDAPI DllGetClassObject(REFCLSID classId, REFIID iid, void** value)
     }
     InterlockedDecrement(&g_syntheticClassObjectCalls);
     return result;
+}
+
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI ConfigureFolderSizeProvider(FolderSizeProviderCallback callback,
+    FolderSizeInvalidationCallback invalidationCallback)
+{
+    AcquireSRWLockExclusive(&g_folderSizeProviderLock);
+    InterlockedExchangePointer(&g_folderSizeProviderCallback, reinterpret_cast<PVOID>(callback));
+    InterlockedExchangePointer(&g_folderSizeInvalidationCallback, reinterpret_cast<PVOID>(invalidationCallback));
+    ReleaseSRWLockExclusive(&g_folderSizeProviderLock);
+    AcquireSRWLockShared(&g_sharedRecursiveSizeStoreLock);
+    auto* store = g_sharedRecursiveSizeStore;
+    if (store) store->AddRef();
+    ReleaseSRWLockShared(&g_sharedRecursiveSizeStoreLock);
+    if (store) { store->ClearForProviderChange(); store->Release(); }
+    return S_OK;
+}
+
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI QueryConfiguredFolderSizeForProbe(PCWSTR path, volatile LONG* cancelled,
+    ULONGLONG* bytes, ULONGLONG* files, ULONGLONG* folders, ULONGLONG* unreadable, DWORD* flags)
+{
+    if (!path || !bytes || !files || !folders || !unreadable || !flags) return E_POINTER;
+    SyntheticDirectoryMetrics metrics{};
+    const auto result = GetConfiguredDirectoryMetrics(path, &metrics, cancelled);
+    *bytes = metrics.bytes; *files = metrics.files; *folders = metrics.folders; *unreadable = metrics.unreadable;
+    *flags = (metrics.sizeAvailable ? 1U : 0U) | (metrics.countsAvailable ? 2U : 0U);
+    return result;
+}
+
+extern "C" ED_PROBE_EXPORT void WINAPI InvalidateConfiguredFolderSizeForProbe(PCWSTR path)
+{
+    InvalidateManagedFolderSize(path);
+}
+
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI VerifyFolderSizeAvailabilityStoreForProbe()
+{
+    SyntheticRecursiveSizeSnapshotStore store;
+    SyntheticFileIdentity identity{};
+    identity.available = true;
+    identity.volumeSerial = 123;
+    ULONGLONG bytes = 42;
+    bool available = true, counts = true;
+    if (FAILED(store.Set(L"C:\\availability-fixture", identity, 0, 0, 0, 0, false, false)) ||
+        !store.TryGet(L"C:\\availability-fixture", identity, &bytes, nullptr, nullptr, nullptr, &available, &counts) ||
+        available || counts) return E_FAIL;
+    if (FAILED(store.Set(L"C:\\availability-fixture", identity, 0)) ||
+        !store.TryGet(L"C:\\availability-fixture", identity, &bytes, nullptr, nullptr, nullptr, &available, &counts) ||
+        bytes != 0 || !available || !counts) return E_FAIL;
+    if (store.TryReserveScan(L"C:\\pending-fixture", identity, &bytes) !=
+        SyntheticRecursiveSizeSnapshotStore::ScanReservation::Acquired) return E_FAIL;
+    store.ClearForProviderChange();
+    if (store.Count() != 0 || store.Set(L"C:\\pending-fixture", identity, 99) != S_FALSE) return E_FAIL;
+    store.ReleaseScan(L"C:\\pending-fixture");
+    return S_OK;
 }
 
 extern "C" HRESULT WINAPI ConfigureShellNamespaceRoot(

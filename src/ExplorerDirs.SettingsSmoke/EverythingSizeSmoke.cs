@@ -64,6 +64,9 @@ internal static class EverythingSizeSmoke
                 if (page.Items.Count == 2 && page.Items.SingleOrDefault(item => Path.GetFileName(item.Path) == "small")?.Bytes == 5 &&
                     page.Items.SingleOrDefault(item => Path.GetFileName(item.Path) == "large")?.Bytes == 37)
                 {
+                    var exact = EverythingSizeClient.QueryDirectoryAsync(Path.Combine(fixture, "small"), CancellationToken.None).GetAwaiter().GetResult();
+                    if (exact.Status != EverythingSizeStatus.Available || exact.Items.Count != 1 || exact.Items[0].Bytes != 5)
+                        throw new Exception("Everything exact-identity query failed.");
                     Console.WriteLine($"Everything live fixture: PASS; directories=2; sizes=5/37; elapsed-ms={clock.ElapsedMilliseconds}; foreground-unchanged=True");
                     return;
                 }

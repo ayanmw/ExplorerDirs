@@ -9,6 +9,12 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 
+if (args is ["--folder-size-native-bridge-smoke", var bridgeLibrary])
+{
+    FolderSizeNativeBridgeSmoke.Run(bridgeLibrary);
+    return;
+}
+
 if (args is ["--space-analysis-smoke"])
 {
     SpaceAnalysisSmoke.Run().GetAwaiter().GetResult();

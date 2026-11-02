@@ -162,6 +162,7 @@ public partial class App : Application
             {
                 _shellNamespaceOwner = ProfileShellNamespaceOwner.Start(classId, profileDirectory,
                     Path.Combine(AppContext.BaseDirectory, "ExplorerDirs.ShellNamespace.dll"));
+                _shellNamespaceOwner.SetFolderSizeSource(new FolderSizeOptionsStore(Path.Combine(profileDirectory, "FolderSize.ini")).Load().Source);
             }
             catch (Exception exception)
             {
@@ -208,6 +209,8 @@ public partial class App : Application
             throw;
         }
     }
+
+    internal void SetFolderSizeSource(FolderSizeSource source) => _shellNamespaceOwner?.SetFolderSizeSource(source);
 
     private MainWindow CreateWindow(string sessionPath, string? startupDirectory, string? warning,
         string? startupSelectPath = null)

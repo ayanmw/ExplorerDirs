@@ -2797,6 +2797,7 @@ public partial class MainWindow : Window
         {
             var options = _folderSizeOptions with { Source = source };
             _folderSizeOptionsStore.Save(options); _folderSizeOptions = options;
+            if (Application.Current is App application) application.SetFolderSizeSource(source);
         }
         catch (Exception error) { EnvironmentStatus.Text = $"大小来源设置失败：{error.Message}"; }
         UpdateFolderSizeSourceMenus();

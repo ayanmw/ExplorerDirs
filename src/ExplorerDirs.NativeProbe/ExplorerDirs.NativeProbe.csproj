@@ -52,6 +52,10 @@
     <Compile Include="../ExplorerDirs.App/SessionStore.cs" Link="SessionStore.cs" />
     <Compile Include="../ExplorerDirs.App/ShellNamespaceProfileStore.cs" Link="ShellNamespaceProfileStore.cs" />
     <Compile Include="../ExplorerDirs.App/ProfileShellNamespaceOwner.cs" Link="ProfileShellNamespaceOwner.cs" />
+    <Compile Include="../ExplorerDirs.App/FolderSizeNativeBridge.cs" Link="FolderSizeNativeBridge.cs" />
+    <Compile Include="../ExplorerDirs.App/FolderSizeDataSource.cs" Link="FolderSizeDataSource.cs" />
+    <Compile Include="../ExplorerDirs.App/EverythingSizeClient.cs" Link="EverythingSizeClient.cs" />
+    <Compile Include="../ExplorerDirs.App/FavoritesStore.cs" Link="FavoritesStore.cs" />
     <Compile Include="../ExplorerDirs.App/FolderOpenRouter.cs" Link="FolderOpenRouter.cs" />
     <Compile Include="../ExplorerDirs.App/ShellLocationIdentity.cs" Link="ShellLocationIdentity.cs" />
     <Compile Include="../ExplorerDirs.App/ShellQuickFilter.cs" Link="ShellQuickFilter.cs" />

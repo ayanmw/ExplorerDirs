@@ -16,6 +16,7 @@ internal sealed class ProfileShellNamespaceOwner : IDisposable
     private readonly Guid _classId;
     private readonly string _adapterPath;
     private nint _adapterModule;
+    private FolderSizeNativeBridge? _folderSizeBridge;
 
     private ProfileShellNamespaceOwner(Guid classId, string adapterPath, nint adapterModule)
     {
@@ -52,10 +53,22 @@ internal sealed class ProfileShellNamespaceOwner : IDisposable
     {
         var module = Volatile.Read(ref _adapterModule);
         if (module == 0) return;
-        // Keep the owner retryable if an external registry edit makes cleanup unsafe.
+        // Retire managed callbacks even if external registration edits prevent cleanup;
+        // otherwise an abandoned owner could leave native pointers to collected delegates.
+        _folderSizeBridge?.Dispose();
+        _folderSizeBridge = null;
+        // Keep the module owner retryable if an external registry edit makes cleanup unsafe.
         DeleteOwnedRegistration(_classId, _adapterPath);
         module = Interlocked.Exchange(ref _adapterModule, 0);
         if (module != 0) NativeLibrary.Free(module);
+    }
+
+    internal void SetFolderSizeSource(FolderSizeSource source)
+    {
+        var module = Volatile.Read(ref _adapterModule);
+        ObjectDisposedException.ThrowIf(module == 0, this);
+        if (_folderSizeBridge is null) _folderSizeBridge = new FolderSizeNativeBridge(module, source);
+        else _folderSizeBridge.SetSource(source);
     }
 
     private static void RegisterVolatileNamespace(Guid classId, string adapterPath)
