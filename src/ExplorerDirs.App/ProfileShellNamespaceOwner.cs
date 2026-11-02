@@ -50,10 +50,12 @@ internal sealed class ProfileShellNamespaceOwner : IDisposable
 
     public void Dispose()
     {
-        var module = Interlocked.Exchange(ref _adapterModule, 0);
+        var module = Volatile.Read(ref _adapterModule);
         if (module == 0) return;
-        try { DeleteOwnedRegistration(_classId, _adapterPath); }
-        finally { NativeLibrary.Free(module); }
+        // Keep the owner retryable if an external registry edit makes cleanup unsafe.
+        DeleteOwnedRegistration(_classId, _adapterPath);
+        module = Interlocked.Exchange(ref _adapterModule, 0);
+        if (module != 0) NativeLibrary.Free(module);
     }
 
     private static void RegisterVolatileNamespace(Guid classId, string adapterPath)
@@ -107,33 +109,53 @@ internal sealed class ProfileShellNamespaceOwner : IDisposable
     {
         using var classKey = Registry.CurrentUser.OpenSubKey(ClassKeyPath(classId));
         using var inproc = classKey?.OpenSubKey("InprocServer32");
+        using var shellFolder = classKey?.OpenSubKey("ShellFolder");
         using var nameSpace = Registry.CurrentUser.OpenSubKey(NamespaceKeyPath(classId));
         if (classKey is null && nameSpace is null) return false;
         var classOwned = classKey is null || classKey.GetValue(null) is string classOwner && classOwner == OwnerName &&
                          classKey.GetValue(AdapterPathValue) is string registeredAdapter && IsSamePath(registeredAdapter, adapterPath) &&
-                         (inproc is null || inproc.GetValue(null) is string registeredPath && IsSamePath(registeredPath, adapterPath));
-        var namespaceOwned = nameSpace is null || nameSpace.GetValue(null) is string namespaceOwner && namespaceOwner == OwnerName;
+                         HasOnlyRegistryContent(classKey, [string.Empty, AdapterPathValue], ["InprocServer32", "ShellFolder"]) &&
+                         (inproc is null || inproc.GetValue(null) is string registeredPath && IsSamePath(registeredPath, adapterPath) &&
+                             inproc.GetValue("ThreadingModel") as string == "Apartment" &&
+                             HasOnlyRegistryContent(inproc, [string.Empty, "ThreadingModel"], [])) &&
+                         (shellFolder is null || shellFolder.GetValue("Attributes") is int attributes &&
+                             attributes == ShellFolderAttributes &&
+                             HasOnlyRegistryContent(shellFolder, ["Attributes"], []));
+        var namespaceOwned = nameSpace is null || nameSpace.GetValue(null) is string namespaceOwner && namespaceOwner == OwnerName &&
+                             HasOnlyRegistryContent(nameSpace, [string.Empty], []);
         return classOwned && namespaceOwned;
     }
 
     private static void DeleteOwnedRegistration(Guid classId, string adapterPath)
     {
-        using var classKey = Registry.CurrentUser.OpenSubKey(ClassKeyPath(classId));
-        using var inproc = classKey?.OpenSubKey("InprocServer32");
-        using var nameSpace = Registry.CurrentUser.OpenSubKey(NamespaceKeyPath(classId));
+        using var classKey = Registry.CurrentUser.OpenSubKey(ClassKeyPath(classId), writable: true);
+        using var nameSpace = Registry.CurrentUser.OpenSubKey(NamespaceKeyPath(classId), writable: true);
         if (classKey is null && nameSpace is null) return;
-
-        var classOwned = classKey?.GetValue(null) is string classOwner && classOwner == OwnerName &&
-                         classKey.GetValue(AdapterPathValue) is string registeredAdapter && IsSamePath(registeredAdapter, adapterPath) &&
-                         (inproc is null || inproc.GetValue(null) is string registeredPath && IsSamePath(registeredPath, adapterPath));
-        var namespaceOwned = nameSpace?.GetValue(null) is string namespaceOwner && namespaceOwner == OwnerName;
-        if ((classKey is not null && !classOwned) || (nameSpace is not null && !namespaceOwned))
+        if (!HasOwnedRegistration(classId, adapterPath))
             throw new InvalidOperationException($"The profile Shell registration for {classId:D} changed ownership; it was left untouched.");
-        if (nameSpace is not null)
-            Registry.CurrentUser.DeleteSubKeyTree(NamespaceKeyPath(classId), throwOnMissingSubKey: false);
+
         if (classKey is not null)
-            Registry.CurrentUser.DeleteSubKeyTree(ClassKeyPath(classId), throwOnMissingSubKey: false);
+        {
+            if (classKey.GetSubKeyNames().Contains("InprocServer32", StringComparer.OrdinalIgnoreCase))
+                classKey.DeleteSubKey("InprocServer32", throwOnMissingSubKey: false);
+            if (classKey.GetSubKeyNames().Contains("ShellFolder", StringComparer.OrdinalIgnoreCase))
+                classKey.DeleteSubKey("ShellFolder", throwOnMissingSubKey: false);
+            classKey.DeleteValue(AdapterPathValue, throwOnMissingValue: false);
+            classKey.DeleteValue(string.Empty, throwOnMissingValue: false);
+            if (classKey.ValueCount == 0 && classKey.SubKeyCount == 0)
+                Registry.CurrentUser.DeleteSubKey(ClassKeyPath(classId), throwOnMissingSubKey: false);
+        }
+        if (nameSpace is not null)
+        {
+            nameSpace.DeleteValue(string.Empty, throwOnMissingValue: false);
+            if (nameSpace.ValueCount == 0 && nameSpace.SubKeyCount == 0)
+                Registry.CurrentUser.DeleteSubKey(NamespaceKeyPath(classId), throwOnMissingSubKey: false);
+        }
     }
+
+    private static bool HasOnlyRegistryContent(RegistryKey key, string[] valueNames, string[] subKeyNames) =>
+        key.GetValueNames().All(name => valueNames.Contains(name, StringComparer.OrdinalIgnoreCase)) &&
+        key.GetSubKeyNames().All(name => subKeyNames.Contains(name, StringComparer.OrdinalIgnoreCase));
 
     private static bool IsSamePath(string first, string second)
     {

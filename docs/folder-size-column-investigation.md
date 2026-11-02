@@ -2806,3 +2806,9 @@ native `GetSyntheticDirectoryMetrics` 现在把 `ERROR_ACCESS_DENIED` 作为可�
 运行既有生产 `RecursiveDirectoryScanner` 探针，先在 64 个同级目录夹具上预热并各重复 5 次，单次遍历与逐目录扫描的行值完全一致；中位数分别为 7 ms 与 12 ms，分配约 152 KB 与 171 KB。随后仅将夹具规模临时扩大为 500 个同级目录，每个目录含 16 个直接文件、一个含 1 个文件的子目录，根目录另含一个 13 B 文件；生产 SettingsSmoke Release build 通过后重复 5 次，最终结果仍完全一致：单次遍历 92–136 ms、中位数 115 ms、分配约 1.19 MB；逐目录扫描 146–214 ms、中位数 174 ms、分配约 1.35 MB。单遍遍历了 9,501 个目录项；逐目录方案分别遍历 9,000 个子树项，并单独读取根目录那 13 B 文件的长度。两组均在本机临时目录热缓存上测量。
 
 这组数据支持：若同一目录需要等待所有子目录递归值以计算准确百分比分母，聚合式单遍扫描比逐行启动独立扫描更省时、分配也更少。它仍是热缓存夹具，不能外推到慢盘、网络/云目录、权限异常，也没有测量逐目录惰性扫描在首屏可见行上的响应延迟。只更新扫描粒度评估，没有改变产品视图或百分比显示策略；具体格式、等待阶段与是否接受整目录预扫仍留待集中可见验收。
+
+### 2026-11-02：profile Shell namespace 清理保护外部注册表编辑
+
+复查 profile Shell namespace owner 生命周期时发现，既有清理先核对根键标记，随后递归删除 CLSID/NameSpace 子树；若其他软件或用户在本程序运行期间向自有 CLSID 添加值或子键，该逻辑可能一并删除。清理现在要求根键、`InprocServer32`、`ShellFolder` 与 Desktop NameSpace 都只含预期值/子键，路径、线程模型和 ShellFolder 属性也吻合；随后仅删除已知拥有的值与键，不递归删除未知内容。若清理因外部编辑被拒绝，owner 保留 native module handle，使调用方恢复注册内容后可以重试。
+
+NativeProbe registration-owner smoke 验证正常创建/清理、陈旧自有注册恢复，以及外部修改 `ThreadingModel`、新增 CLSID 值/子键时拒绝清理并保留外部内容；移除外部编辑后重试成功。App、NativeProbe、SettingsSmoke Release build 与完整 SettingsSmoke 均通过。该 smoke 使用随机 volatile HKCU 注册，不创建 Shell view；未覆盖并发恶意写注册表竞态，也不声称修复逐行大小列本身。

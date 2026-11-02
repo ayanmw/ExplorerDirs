@@ -21,6 +21,56 @@ internal static class ShellNamespaceRegistrationOwnerSmoke
             firstOwner.Dispose();
             VerifyRegistrationAbsent(classId);
 
+            var editedId = Guid.NewGuid();
+            var editedOwner = ProfileShellNamespaceOwner.Start(editedId, profileRoot, adapterPath);
+            var inprocPath = $"{ClassKeyPath(editedId)}\\InprocServer32";
+            using (var inproc = Registry.CurrentUser.OpenSubKey(inprocPath, writable: true)
+                   ?? throw new InvalidOperationException("Could not open the owned InprocServer32 fixture."))
+                inproc.SetValue("ThreadingModel", "ExternalEdit", RegistryValueKind.String);
+            var refusedModifiedValueCleanup = false;
+            try { editedOwner.Dispose(); }
+            catch (InvalidOperationException exception) when (exception.Message.Contains("changed ownership", StringComparison.Ordinal))
+            { refusedModifiedValueCleanup = true; }
+            if (!refusedModifiedValueCleanup)
+                throw new InvalidOperationException("Profile namespace cleanup removed an externally modified owned value.");
+            using (var inproc = Registry.CurrentUser.OpenSubKey(inprocPath))
+            {
+                if (inproc?.GetValue("ThreadingModel") as string != "ExternalEdit")
+                    throw new InvalidOperationException("The modified InprocServer32 value was not preserved.");
+            }
+            using (var inproc = Registry.CurrentUser.OpenSubKey(inprocPath, writable: true))
+                inproc?.SetValue("ThreadingModel", "Apartment", RegistryValueKind.String);
+
+            using (var editedClass = Registry.CurrentUser.OpenSubKey(ClassKeyPath(editedId), writable: true)
+                   ?? throw new InvalidOperationException("Could not open the owned CLSID fixture."))
+            {
+                editedClass.SetValue("ExternalValue", "keep-me", RegistryValueKind.String);
+                using var externalChild = editedClass.CreateSubKey("ExternalChild",
+                    RegistryKeyPermissionCheck.ReadWriteSubTree, RegistryOptions.Volatile)
+                    ?? throw new InvalidOperationException("Could not create the external CLSID child fixture.");
+                externalChild.SetValue(null, "external-child-data", RegistryValueKind.String);
+            }
+            var refusedExternalEditCleanup = false;
+            try { editedOwner.Dispose(); }
+            catch (InvalidOperationException exception) when (exception.Message.Contains("changed ownership", StringComparison.Ordinal))
+            { refusedExternalEditCleanup = true; }
+            if (!refusedExternalEditCleanup)
+                throw new InvalidOperationException("Profile namespace cleanup removed externally added CLSID values or subkeys.");
+            using (var preservedClass = Registry.CurrentUser.OpenSubKey(ClassKeyPath(editedId)))
+            using (var preservedChild = preservedClass?.OpenSubKey("ExternalChild"))
+            {
+                if (preservedClass?.GetValue("ExternalValue") as string != "keep-me" ||
+                    preservedChild?.GetValue(null) as string != "external-child-data")
+                    throw new InvalidOperationException("The external CLSID values or child key were not preserved.");
+            }
+            using (var editedClass = Registry.CurrentUser.OpenSubKey(ClassKeyPath(editedId), writable: true))
+            {
+                editedClass?.DeleteValue("ExternalValue", throwOnMissingValue: false);
+                editedClass?.DeleteSubKeyTree("ExternalChild", throwOnMissingSubKey: false);
+            }
+            editedOwner.Dispose();
+            VerifyRegistrationAbsent(editedId);
+
             var conflictId = Guid.NewGuid();
             var foreignNamespacePath = NamespaceKeyPath(conflictId);
             using (var foreignNamespace = Registry.CurrentUser.CreateSubKey(foreignNamespacePath)
