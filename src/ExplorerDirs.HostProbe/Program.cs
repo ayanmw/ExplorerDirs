@@ -86,6 +86,7 @@ internal static class Program
         if (args is ["--system-theme"]) return SystemThemeProbe.Run();
         if (args is ["--native-theme-colors"]) return NativeThemeColorProbe.Run();
         if (args is ["--folder-navigation-callbacks"]) return FolderNavigationCallbacksProbe.Run();
+        if (args is ["--explorer-browser-history-capability"]) return ExplorerBrowserHistoryCapabilityProbe.Run();
         if (args is ["--folder-navigation-provider-callbacks", var callbackAdapter])
             return FolderNavigationCallbacksProbe.RunProvider(callbackAdapter);
         if (args is ["--pane-tab-transfer"]) return PaneTabTransferProbe.Run();
