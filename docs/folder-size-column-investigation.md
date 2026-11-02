@@ -2844,3 +2844,9 @@ NativeProbe 通过出口将容量限制为 1，App Release 构建同时重建原
 缓存报告载荷由 677,312 B 增至 1,186,328 B，差 509,016 B，即每个缓存摘要约多 254 B，与每条 parsing name 增加约 127 个 UTF-16 字符一致。这个载荷指标含快照对象与字符串字符的估算，但不含 map 节点/分配器的全部成本；进程 Private Bytes 两次为 93,253,632 B 与 97,456,128 B，跨进程差异混有运行时和 Shell 噪声，不用于归因。结果说明长路径会线性增加当前字符串键缓存的载荷；不代表产品真实目录分布或实际 Private Bytes 增量，也没有改变产品缓存策略。
 
 日志：基线路径 `src/.state/native-probe-watchdog/20261102-085946-995517ae.stdout.log`；加长 `TEMP/TMP` 根 `src/.state/native-probe-watchdog/20261102-090025-cb15e597.stdout.log`。两轮 view 值、选区/焦点、前台/输入和隔离清理均通过；没有打开可见产品 UI。
+
+### 2026-11-02：产品 ExplorerBrowserHost 四根目录并行隔离
+
+扩展 profile owner 隐藏 HostProbe，在同一个 profile CLSID 与生产 `ProfileShellNamespaceOwner` 下同时创建四个生产 `ExplorerBrowserHost`，每个 host 导航到独立物理根目录。四根各含相同名称的 `folder-small` / `folder-large`，但递归值分别为 5/29、7/31、11/37、13/41 B；四个 view 均各自枚举两行并读回正确值，未串用其它 pane 的缓存。随后在四个 view 中分别选择 small/large/small/large，原生 ListView 选区保持各自身份；父 HWND 隐藏、foreground 不变，退出后 volatile CLSID 与 NameSpace 注册清除、临时夹具清理。
+
+HostProbe Release 构建 0 警告/错误。探针先把四个 host 放在各自的隐藏顶层窗口中，其中一轮第 4 个 view 等待枚举超时，另两轮通过；将布局改成一个隐藏 2×2 宿主（与产品单窗口多窗格结构一致）后，`--profile-owner-multi-root-shell-host` 连续 3 轮 exit 0。观察结果支持保留单宿主结构，但不能断言初次超时的唯一根因已经查明。该结果只验证当前机器上的四个并行隐藏产品 Shell host、独立路径/递归值/列状态/选区和 profile owner 生命周期；不证明可见 App 四窗格的焦点、列绘制、跨重启 session、排序稳定性、文件操作或慢/网络目录体验。逐行列继续作为单独实验入口，不推广到普通物理目录视图，也未发布。
