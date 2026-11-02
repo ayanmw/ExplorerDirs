@@ -41,6 +41,17 @@ internal static class ShellRefreshPresentationSmoke
         Check(disposeStart >= 0 && host.IndexOf("ReleaseInitialVirtualSortRedrawLease(requestRedraw: false)", disposeStart, StringComparison.Ordinal) >= 0 &&
             detachStart >= 0 && host.IndexOf("ReleaseInitialVirtualSortRedrawLease(requestRedraw: false)", detachStart, StringComparison.Ordinal) >= 0,
             "closing or navigating away releases a pending initial-sort redraw lease");
+        var sortVerbStart = host.IndexOf("private bool InvokeVirtualSortVerb", StringComparison.Ordinal);
+        var sortVerbEnd = host.IndexOf("private sealed class NativeViewStateTarget", sortVerbStart, StringComparison.Ordinal);
+        var sortVerbPath = sortVerbStart >= 0 && sortVerbEnd > sortVerbStart ? host[sortVerbStart..sortVerbEnd] : string.Empty;
+        var viewProcStart = host.IndexOf("private IntPtr ViewWindowProc", StringComparison.Ordinal);
+        var viewProcEnd = host.IndexOf("private static double TicksToMilliseconds", viewProcStart, StringComparison.Ordinal);
+        var viewProcPath = viewProcStart >= 0 && viewProcEnd > viewProcStart ? host[viewProcStart..viewProcEnd] : string.Empty;
+        Check(sortVerbPath.Contains("Interlocked.Increment(ref _shellSortCommandDispatchDepth)", StringComparison.Ordinal) &&
+            sortVerbPath.Contains("Interlocked.Decrement(ref _shellSortCommandDispatchDepth)", StringComparison.Ordinal) &&
+            viewProcPath.Contains("childCommandNotification", StringComparison.Ordinal) &&
+            viewProcPath.Contains("programmaticSortCommand", StringComparison.Ordinal),
+            "Shell child command notifications do not masquerade as user input and cancel paired sorting");
         Check(refreshPath.Contains("shellView.Refresh()", StringComparison.Ordinal) &&
             !refreshPath.Contains("ShellViewRedrawLease.TrySuppress(folderView)", StringComparison.Ordinal) &&
             !refreshPath.Contains("refreshRedrawLease", StringComparison.Ordinal) &&

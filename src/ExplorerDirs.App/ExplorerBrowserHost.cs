@@ -60,6 +60,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private bool _nativeThemeRefreshQueued;
     private ShellViewRedrawLease? _initialVirtualSortRedrawLease;
     private IntPtr _initialVirtualSortRedrawWindow;
+    private int _shellSortCommandDispatchDepth;
     private readonly ViewStyleWheelAccumulator _ctrlWheelAccumulator = new();
     private readonly Dictionary<uint, int> _nativeUserMessages = new();
     private readonly Dictionary<IntPtr, string> _nativeViewWindowClasses = new();
@@ -2943,8 +2944,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     {
         if (!isCurrent()) return false;
         using var menu = OpenFileCommandMenu(background: true, allowHidden: true) as NativeShellCommandMenu;
-        if (menu?.InvokeCanonicalVerb(verb) is not { } result) return false;
-        return result >= 0;
+        if (menu is null) return false;
+        Interlocked.Increment(ref _shellSortCommandDispatchDepth);
+        try
+        {
+            if (menu.InvokeCanonicalVerb(verb) is not { } result) return false;
+            return result >= 0;
+        }
+        finally { Interlocked.Decrement(ref _shellSortCommandDispatchDepth); }
     }
 
     private sealed class NativeViewStateTarget(nint view, Func<bool> isCurrent) : IShellViewStateTarget
@@ -5528,7 +5535,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         try
         {
             // Finish the mouse gesture before caching selection; a button-down snapshot can be an intermediate range.
-            if (message is 0x0100 or 0x0104 or 0x0111 or 0x0201 or 0x0202 or 0x0203 or 0x0204 or 0x0207)
+            var childCommandNotification = message == 0x0111 && lParam != IntPtr.Zero;
+            var programmaticSortCommand = message == 0x0111 && lParam == IntPtr.Zero &&
+                Volatile.Read(ref _shellSortCommandDispatchDepth) > 0;
+            if (!childCommandNotification && !programmaticSortCommand &&
+                message is 0x0100 or 0x0104 or 0x0111 or 0x0201 or 0x0202 or 0x0203 or 0x0204 or 0x0207)
                 NoteNativeUserInput(hwnd);
             if (message == 0x020A && (wParam.ToInt64() & 0x0008) != 0 && CtrlWheelHandler is { } wheelHandler)
             {

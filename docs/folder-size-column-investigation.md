@@ -2750,3 +2750,9 @@ HostProbe 在同一 STA 调度流程内先发相反方向 Shell 排序，再发�
 在产品 `ExplorerBrowserHost.ScheduleInitialVirtualSort` 中试验一个仅作用于虚拟 provider 初始排序的 scoped redraw lease：在 Shell 反向排序前抑制当前 ListView 重绘，等待 Shell 行数恢复后再执行目标方向排序，等目标排序行数恢复后释放 lease 并请求无擦除重绘。导航离开、浏览器释放、Shell verb 失败以及 12 秒超时都释放 lease；物理文件夹、F5 刷新和普通视图模式切换不走此路径。
 
 隐藏 HostProbe 的 1,002 行场景最终顺序正确，Shell、ListView 内部行数仍两次出现 `0→1002`；探针未记录 WM_PAINT/WM_ERASEBKGND，前台 HWND 未变。普通两行场景最终顺序正确，行数保持 2。App、HostProbe、SettingsSmoke Release 构建通过，源码契约 smoke 确认 lease 在关闭/导航路径释放。隐藏窗口的无绘制消息结果不能证明桌面上的旧帧持续可见，也不证明用户完全看不到空白或闪烁；这仍是隔离实验原型，未发布预览，需后续 UI 验收确认是否有可感知收益后再决定保留或回退。
+
+### 2026-11-02：Shell 排序通知与用户输入版本区分
+
+启用已有 `EXPLORER_DIRS_FOCUS_TRACE` 后，1,002 行排序轨迹显示 Shell 排序会向 `SysListView32`/`SHELLDLL_DefView` 发送 `WM_COMMAND` 子控件通知（`lParam` 为发送通知的 HWND），而现有消息分类将所有 `WM_COMMAND` 都计作用户输入；一次轨迹中输入版本在反向排序后由 10 增至 18，初始排序因此在目标方向阶段前被 `IsCurrent` 中止。`InvokeVirtualSortVerb` 发出的程序化 canonical 命令则表现为 `WM_COMMAND` 且 `lParam=0`。
+
+产品现在忽略带 child HWND 的 `WM_COMMAND` 通知，并在同步执行程序化排序 canonical verb 时抑制对应菜单命令对用户输入版本的影响；真实键盘、鼠标消息仍计为用户输入。新增 SettingsSmoke 源码契约通过。修改后普通两项 HostProbe 通过；1,002 行 HostProbe 两次均最终升序，一次行数始终为 1,002，另一次仍两次出现 `1002→0→1002`。故此分类修正未破坏排序，但尚无证据证明能消除 Shell 的行重建或改善可见空帧。隐藏探针不观察桌面像素；选区/焦点保持也未在稳定、无竞争的自动调度场景完成验证。下一步需消除 HostProbe 中人为重调度的干扰，再单独验自动排序期间选区/焦点和超时/退役释放；不据本轮结果推广逐行列到普通目录。
