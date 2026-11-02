@@ -2836,3 +2836,11 @@ NativeProbe 通过出口将容量限制为 1，App Release 构建同时重建原
 同样负载将容量提高到 512 后通过：4 个 view 均读回 502/502 行，唯一扫描 501 次、重复 0、淘汰 0、通知 2、聚合重枚举 4 次；峰值 worker 2，四份选区/焦点均保留。缓存快照 501 条、载荷 163,316 B；进程 Private Bytes 约 89.2 MB 是单次绝对读数，没有同进程基线，不能归因于缓存实占。该结果只说明固定 500 同根场景 512 条足以避免本轮抖动；四个不同根目录会同时需要约 2,004 条摘要，不能据此将原型容量普遍调成 512。现有探针默认容量仍为 4,096；产品没有启用逐行递归列。
 
 两轮均通过 watchdog 隔离桌面守卫。日志：低容量未收敛 `src/.state/native-probe-watchdog/20261102-085656-41008315.stdout.log`（exit 1，预期暴露容量边界）；512 容量通过 `src/.state/native-probe-watchdog/20261102-085818-2365c7e5.stdout.log`（exit 0）。这仍是 synthetic provider 的隐藏 view 结果，未验证普通产品 Shell view、真实路径长度/慢 I/O、长期缓存回收或用户可见体验。
+
+### 2026-11-02：长解析路径对递归快照载荷的影响
+
+用相同 NativeProbe 负载执行两次四根目录 view-batch：每根 500 个同级目录、共 2,004 份唯一快照，缓存上限均为 4,096，minimal fixture 开启。基线在系统临时路径（35 字符）运行；对照把 `TEMP/TMP` 指向 161 字符的隔离临时根，使 backing parsing name 约增加 127 个字符，同时仍处于本机 Shell 可解析范围。两轮都扫描 2,004 次、重复扫描 0、容量淘汰 0、队列拒绝 0；四个 view 均 502/502 行就绪，选区/焦点保持，Private Desktop 清理守卫通过，watchdog exit 0。
+
+缓存报告载荷由 677,312 B 增至 1,186,328 B，差 509,016 B，即每个缓存摘要约多 254 B，与每条 parsing name 增加约 127 个 UTF-16 字符一致。这个载荷指标含快照对象与字符串字符的估算，但不含 map 节点/分配器的全部成本；进程 Private Bytes 两次为 93,253,632 B 与 97,456,128 B，跨进程差异混有运行时和 Shell 噪声，不用于归因。结果说明长路径会线性增加当前字符串键缓存的载荷；不代表产品真实目录分布或实际 Private Bytes 增量，也没有改变产品缓存策略。
+
+日志：基线路径 `src/.state/native-probe-watchdog/20261102-085946-995517ae.stdout.log`；加长 `TEMP/TMP` 根 `src/.state/native-probe-watchdog/20261102-090025-cb15e597.stdout.log`。两轮 view 值、选区/焦点、前台/输入和隔离清理均通过；没有打开可见产品 UI。
