@@ -2759,8 +2759,8 @@ HostProbe 在同一 STA 调度流程内先发相反方向 Shell 排序，再发�
 
 ### 2026-11-02：递归列初始排序保留选区和焦点
 
-将 1,002 行隐藏 HostProbe 扩展为在产品自动排序期间选中 `folder-extra-500`，并分别核对 ListView 选中项、ListView focused row 与 Shell focused item。初次运行复现 Shell 异步值重排清空行状态。焦点追踪显示，应用的延迟排序任务启动后，当前视图仍在扫描递归列值；当它准备排序时，DefView 当前选区已空，但 `_lastNativeSelection` 中仍有同导航、同路径、同输入版本的已确认 PIDL 快照。
+将 1,002 行隐藏 HostProbe 扩展为在产品自动排序期间同时选中 `folder-extra-500/501/502`，指定 500 为焦点，并分别核对 ListView 选中项、ListView focused row 与 Shell focused item。初次运行复现 Shell 异步值重排清空行状态。焦点追踪显示，应用的延迟排序任务启动后，当前视图仍在扫描递归列值；当它准备排序时，DefView 当前选区已空，但 `_lastNativeSelection` 中仍有同导航、同路径、同输入版本的已确认 PIDL 快照。
 
-产品初始排序现在在发出相反方向命令前捕获当前选择；若当前选择为空，则只在上述导航、路径、输入版本均匹配且缓存含选中项时回退到该快照。待目标方向的行数稳定后，使用 `ShellViewSelectionSnapshot.Restore` 恢复项目选择和项目焦点，且不抢应用/系统 HWND 焦点。缓存身份不匹配时不会复用。`FinishSortRecovery` 统一释放快照和 redraw lease；用户输入或导航导致原调度失效时不恢复过期状态。
+产品初始排序现在在发出相反方向命令前捕获当前选择；若当前选择为空，则只在上述导航、路径、输入版本均匹配且缓存含选中集时回退到该快照。待目标方向的行数稳定后，使用 `ShellViewSelectionSnapshot.Restore` 恢复项目选择和项目焦点，且不抢应用/系统 HWND 焦点。缓存身份不匹配时不会复用。`FinishSortRecovery` 统一释放快照和 redraw lease；用户输入或导航导致原调度失效时不恢复过期状态。
 
-红/绿验证：改动前探针报 `folder-extra-500 => []`，ListView/Shell focus 均由该项变空；修正后 1,002 行最终升序正确，选中项与两层焦点都保持为 `folder-extra-500`。该轮仍观测到 Shell/ListView 行数短暂 `1002→0→1002`；隐藏探针的 `paint-messages=[]` 不能证明用户可见空帧已消除。普通 2 行产品 HostProbe 也通过。Release App/HostProbe 构建 0 警告/错误，完整 Release SettingsSmoke 通过。该结果来自隐藏 ExplorerBrowser，不验证屏幕上的闪帧、真实桌面输入竞争或真实盘/慢 provider；递归大小列仍为隔离原型，暂不扩展到普通文件夹。
+红/绿验证：改动前探针报 `folder-extra-500 => []`，ListView/Shell focus 均由该项变空；修正后 1,002 行最终升序正确，三个选中项均保持，且两层焦点都保持为 `folder-extra-500`。该轮仍观测到 Shell/ListView 行数短暂 `1002→0→1002`；隐藏探针的 `paint-messages=[]` 不能证明用户可见空帧已消除。普通 2 行产品 HostProbe 也通过。Release App/HostProbe 构建 0 警告/错误，完整 Release SettingsSmoke 通过。该结果来自隐藏 ExplorerBrowser，不验证屏幕上的闪帧、真实桌面输入竞争或真实盘/慢 provider；递归大小列仍为隔离原型，暂不扩展到普通文件夹。

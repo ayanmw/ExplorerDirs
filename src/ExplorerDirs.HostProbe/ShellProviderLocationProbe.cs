@@ -173,12 +173,14 @@ internal static class ShellProviderLocationProbe
             string? largeSortShellFocusBefore = null;
             if (largeSortReadiness)
             {
-                SelectShellViewItemByPath(hostType, host, Path.Combine(viewRoot, "folder-extra-500"));
+                var selectionTargets = new[] { "folder-extra-500", "folder-extra-501", "folder-extra-502" };
+                SelectShellViewItemsByPath(hostType, host,
+                    selectionTargets.Select(name => Path.Combine(viewRoot, name)).ToArray());
                 var selection = ReadNativeListViewSelectionState((nint)viewWindowField.GetValue(host)!);
-                largeSortSelectedBefore = selection.Selected;
+                largeSortSelectedBefore = selection.Selected.Order(StringComparer.OrdinalIgnoreCase).ToArray();
                 largeSortListViewFocusBefore = selection.Focused;
                 largeSortShellFocusBefore = ReadShellFocusedRow(hostType, host);
-                if (!largeSortSelectedBefore.SequenceEqual(["folder-extra-500"], StringComparer.OrdinalIgnoreCase) ||
+                if (!largeSortSelectedBefore.SequenceEqual(selectionTargets.Order(StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase) ||
                     !string.Equals(largeSortListViewFocusBefore, "folder-extra-500", StringComparison.OrdinalIgnoreCase) ||
                     !string.Equals(largeSortShellFocusBefore, "folder-extra-500", StringComparison.OrdinalIgnoreCase))
                     throw new InvalidOperationException($"Could not establish the initial-sort selection/focus: selected=[{string.Join('|', largeSortSelectedBefore)}]; listview-focus={largeSortListViewFocusBefore}; shell-focus={largeSortShellFocusBefore}.");
@@ -571,7 +573,7 @@ internal static class ShellProviderLocationProbe
                 {
                     var largeSortOrderValid = observation.Names.SequenceEqual(expectedSizeSortedNames, StringComparer.OrdinalIgnoreCase);
                     var selection = ReadNativeListViewSelectionState((nint)viewWindowField.GetValue(host)!);
-                    largeSortSelectedAfter = selection.Selected;
+                    largeSortSelectedAfter = selection.Selected.Order(StringComparer.OrdinalIgnoreCase).ToArray();
                     largeSortListViewFocusAfter = selection.Focused;
                     largeSortShellFocusAfter = ReadShellFocusedRow(hostType, host);
                     if (!largeSortSelectedBefore.SequenceEqual(largeSortSelectedAfter, StringComparer.OrdinalIgnoreCase) ||
@@ -2280,21 +2282,30 @@ internal static class ShellProviderLocationProbe
     }
 
     private static void SelectShellViewItemByPath(Type hostType, HwndHost host, string itemPath)
+        => SelectShellViewItemsByPath(hostType, host, [itemPath]);
+
+    private static void SelectShellViewItemsByPath(Type hostType, HwndHost host, string[] itemPaths)
     {
+        if (itemPaths.Length == 0) throw new ArgumentException("At least one selected item is required.", nameof(itemPaths));
         var view = (nint)hostType.GetMethod("GetFolderView2Pointer", BindingFlags.Instance | BindingFlags.NonPublic)!
             .Invoke(host, null)!;
         if (view == 0) throw new InvalidOperationException("The product host returned no IFolderView2 for selection setup.");
+        var primaryItemName = Path.GetFileName(itemPaths[0]);
         try
         {
             var rows = ReadNativeListViewCells((nint)hostType.GetField("_viewWindow", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)!, 1);
-            var itemName = Path.GetFileName(itemPath);
-            var itemIndex = Array.FindIndex(rows, row => row[0].Equals(itemName, StringComparison.OrdinalIgnoreCase));
-            if (itemIndex < 0) throw new InvalidOperationException($"Could not find '{itemPath}' in the native view rows.");
-            Check(GetMethod<SelectFolderViewItem>(view, 15)(view, itemIndex, 0x1fu));
+            var selectItem = GetMethod<SelectFolderViewItem>(view, 15);
+            for (var itemNumber = 0; itemNumber < itemPaths.Length; itemNumber++)
+            {
+                var itemPath = itemPaths[itemNumber];
+                var itemName = Path.GetFileName(itemPath);
+                var itemIndex = Array.FindIndex(rows, row => row[0].Equals(itemName, StringComparison.OrdinalIgnoreCase));
+                if (itemIndex < 0) throw new InvalidOperationException($"Could not find '{itemPath}' in the native view rows.");
+                Check(selectItem(view, itemIndex, itemNumber == 0 ? 0x1fu : 0x1u));
+            }
         }
         finally { Marshal.Release(view); }
-        SetNativeListViewFocus((nint)hostType.GetField("_viewWindow", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)!,
-            Path.GetFileName(itemPath));
+        SetNativeListViewFocus((nint)hostType.GetField("_viewWindow", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)!, primaryItemName);
     }
 
     private static void SetNativeListViewFocus(nint viewWindow, string itemName)
