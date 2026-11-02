@@ -205,8 +205,22 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                         $"{paneValues[index].Length}:{string.Join('|', paneValues[index].Take(3))}..{string.Join('|', paneValues[index].TakeLast(3))}";
                     var failureNameEdges = actualNames.Length == 0 ? "empty" :
                         $"{actualNames.Length}:{string.Join('|', actualNames.Take(4))}..{string.Join('|', actualNames.TakeLast(4))}";
+                    var expectedDirection = index % 2 == 0 ? 1 : -1;
+                    var nameMismatches = Enumerable.Range(0, Math.Min(actualNames.Length, expectedNames.Length))
+                        .Where(row => !string.Equals(actualNames[row], expectedNames[row], StringComparison.OrdinalIgnoreCase))
+                        .ToArray();
+                    var mismatchSamples = string.Join('|', nameMismatches.Take(8).Select(row =>
+                        $"{row}:{actualNames[row]}→{expectedNames[row]}"));
+                    var numericValues = paneValues[index]
+                        .Select(value => ulong.TryParse(value, out var bytes) ? (ulong?)bytes : null)
+                        .ToArray();
+                    var sortViolations = Enumerable.Range(1, Math.Max(0, numericValues.Length - 1))
+                        .Count(row => numericValues[row - 1].HasValue && numericValues[row].HasValue &&
+                            (expectedDirection > 0
+                                ? numericValues[row - 1] > numericValues[row]
+                                : numericValues[row - 1] < numericValues[row]));
                     var failureCacheMetrics = adapterModule == 0 ? "diagnostic-counters=unavailable" : ReadCacheMetrics(adapterModule);
-                    throw new InvalidOperationException($"Product pane {index + 1} saved sort timed out: value-ready-ms={paneValueReadyMilliseconds[index]}; rows={totalRows}/{expectedItemCount}; actual-names={failureNameEdges}; actual-values={failureValueEdges}; actual-sort=[{string.Join('|', actualSorts)}]; cache=[{failureCacheMetrics}]; expected-direction={(index % 2 == 0 ? 1 : -1)}.", exception);
+                    throw new InvalidOperationException($"Product pane {index + 1} saved sort timed out: value-ready-ms={paneValueReadyMilliseconds[index]}; rows={totalRows}/{expectedItemCount}; actual-names={failureNameEdges}; actual-values={failureValueEdges}; name-mismatches={nameMismatches.Length}; first-mismatches=[{mismatchSamples}]; adjacent-sort-violations={sortViolations}; actual-sort=[{string.Join('|', actualSorts)}]; cache=[{failureCacheMetrics}]; expected-direction={expectedDirection}.", exception);
                 }
             }
 
