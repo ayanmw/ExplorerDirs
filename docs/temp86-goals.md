@@ -15,3 +15,5 @@
 2026-11-02 第一批入口回归修正：下箭头恢复路径菜单，F4 保留目录树；收藏夹增加初始占位项以允许 WPF 展开动态子菜单；普通 F5 撤回目录广播通知并直接调用当前 IShellView.Refresh。App Release build 0 warning/error。完整 SettingsSmoke 在 EnvironmentChangeMessageSmoke 因前台句柄改变中止，不能记为通过；共享桌面不重复该检查。尚未做可见速度、菜单验收，尚未覆盖发布包。
 
 2026-11-02 目标 4 后台验证补充：生产 Pane 未挂载模板已通过单/双标签显示、整行隐藏与焦点、窄/宽溢出、28 像素按钮、首尾状态、多行切换及扩大后自动隐藏检查。未创建窗口或 Shell 视图；实际鼠标、DPI 和主题仍留集中可见验收，不能据此判定 temp.86 整批可发布。
+
+2026-11-02 后台统一入口：pwsh -NoProfile -File scripts/verify-background.ps1。显式白名单包含 native product/probe 构建、四个 managed 项目构建、配置/路径/列/筛选与控件合同、真实 provider PIDL 无视图回调、原生文件操作/异步扫描及发布隔离夹具；不调用 SettingsSmoke 默认广域入口、不查询外部 Everything、不运行可见文件视图、不覆盖真实 release。首次完整执行 24 阶段全部成功，总阶段耗时约 34 秒，报告位于 src/.state/background-checks/20261102-145956-1d804f3addf94af4808d8fc421a66b79/summary.json，记录当时 HEAD a02331f 及 MainWindow/脚本未提交状态，不能冒充干净提交的不可变产物证据。报告与每项日志留在 src 调试目录。另修正重复点击已选大小来源/重复开关值触发的无效缓存清理与全窗格刷新。后台通过仍不满足本文全部发布门槛，集中 UI 项和原生历史问题保持待验证。

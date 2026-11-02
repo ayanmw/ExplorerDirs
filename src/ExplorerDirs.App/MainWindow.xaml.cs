@@ -2800,6 +2800,7 @@ public partial class MainWindow : Window
 
     private void ShowFolderSizes_Click(object sender, RoutedEventArgs e)
     {
+        if (ShowFolderSizesMenu.IsChecked == _folderSizeOptions.Enabled) return;
         try
         {
             var options = _folderSizeOptions with { Enabled = ShowFolderSizesMenu.IsChecked };
@@ -2815,6 +2816,8 @@ public partial class MainWindow : Window
     private void FolderSizeSource_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem { Tag: string text } || !Enum.TryParse<FolderSizeSource>(text, out var source)) return;
+        // Clicking the already selected source must not retire scans, clear caches or repaint every pane.
+        if (source == _folderSizeOptions.Source) return;
         try
         {
             var options = _folderSizeOptions with { Source = source };
