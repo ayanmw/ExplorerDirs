@@ -50,9 +50,9 @@ internal sealed class SpaceAnalysisWindow : Window
             button.Click += (_, _) => action(); actions.Children.Add(button);
         }
         Button("分析", () => _ = LoadAsync(_address.Text));
-        Button("上级", () => { if (System.IO.Path.GetDirectoryName(System.IO.Path.TrimEndingDirectorySeparator(_address.Text)) is { } parent) _ = LoadAsync(parent); });
+        Button("上级", NavigateParent);
         Button("取消", () => _cancellation?.Cancel());
-        Button("在文件视图定位", () => { if (_rows.SelectedItem is SpaceAnalysisEntry entry) _locate(entry.Path); });
+        Button("在文件视图定位", LocateSelection);
         _address.Text = directory; _address.VerticalContentAlignment = VerticalAlignment.Center;
         _address.KeyDown += (_, e) => { if (e.Key == Key.Enter) { e.Handled = true; _ = LoadAsync(_address.Text); } };
         navigation.Children.Add(_address);
@@ -92,8 +92,32 @@ internal sealed class SpaceAnalysisWindow : Window
         };
     }
 
+    private void NavigateParent()
+    {
+        if (_closed) return;
+        try
+        {
+            // An unfinished address draft is not the parent of the displayed analysis.
+            var path = System.IO.Path.GetFullPath(_snapshot?.Path ?? _address.Text);
+            if (System.IO.Path.GetDirectoryName(System.IO.Path.TrimEndingDirectorySeparator(path)) is { } parent)
+                _ = LoadAsync(parent);
+        }
+        catch (Exception error) when (error is IOException or ArgumentException)
+        { _status.Text = $"无法打开上级目录：{error.Message}"; }
+    }
+
+    private void LocateSelection()
+    {
+        if (_closed || _rows.SelectedItem is not SpaceAnalysisEntry entry) return;
+        // Opening a tab can fail at the tab limit; keep the analysis and report it in this window.
+        try { _locate(entry.Path); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        { _status.Text = $"定位失败：{error.Message}"; }
+    }
+
     private async Task LoadAsync(string directory)
     {
+        if (_closed) return;
         _cancellation?.Cancel();
         var request = ++_request;
         using var cancellation = new CancellationTokenSource(); _cancellation = cancellation;
