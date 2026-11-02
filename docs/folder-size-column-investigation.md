@@ -2800,3 +2800,9 @@ native `GetSyntheticDirectoryMetrics` 现在把 `ERROR_ACCESS_DENIED` 作为可�
 500 个同级目录的隐藏 WPF/IShellView 探针现为 `child` 构造 16 层可读子目录，最深层放 1 B 文件，并在旁边放一个 ACL 拒绝目录。生产 C# 后台 scanner 返回 1 B、1 file、17 directories、1 unreadable；跨到 native snapshot 后四项一致。恢复 ACL 后发布 snapshot 并刷新 502 行：值和排序正确，选区/焦点保持；只发生 1 次 Shell 枚举，502 行重建没有再次递归扫描，整段约 500 ms。全程未改前台 HWND 或输入状态，隔离 Desktop 清理通过。
 
 另复测产品 ExplorerBrowserHost 的 1,002 行递归排序就绪扫描：完整检查约 294.57 ms，分批后约 281.78 ms、126 批、最大批 3.08 ms。最终顺序、三项选区和 ListView/Shell 焦点正确，但 Shell/ListView 计数轨迹仍两次出现 `0→1002`；隐藏探针没有 paint 消息不能证明桌面像素无空帧。App、NativeProbe、HostProbe Release build 均 0 warning/0 error；递归扫描器 ACL smoke、native 同步/异步 ACL smoke、普通产品异步 HostProbe 均通过。该 Shell view 和跨边界发布桥仍是隔离验证，并非普通物理目录已启用的功能；未做可见 UI、慢盘/网络验证，也未发布。
+
+### 2026-11-02：同目录百分比扫描粒度对照
+
+运行既有生产 `RecursiveDirectoryScanner` 探针，先在 64 个同级目录夹具上预热并各重复 5 次，单次遍历与逐目录扫描的行值完全一致；中位数分别为 7 ms 与 12 ms，分配约 152 KB 与 171 KB。随后仅将夹具规模临时扩大为 500 个同级目录，每个目录含 16 个直接文件、一个含 1 个文件的子目录，根目录另含一个 13 B 文件；生产 SettingsSmoke Release build 通过后重复 5 次，最终结果仍完全一致：单次遍历 92–136 ms、中位数 115 ms、分配约 1.19 MB；逐目录扫描 146–214 ms、中位数 174 ms、分配约 1.35 MB。单遍遍历了 9,501 个目录项；逐目录方案分别遍历 9,000 个子树项，并单独读取根目录那 13 B 文件的长度。两组均在本机临时目录热缓存上测量。
+
+这组数据支持：若同一目录需要等待所有子目录递归值以计算准确百分比分母，聚合式单遍扫描比逐行启动独立扫描更省时、分配也更少。它仍是热缓存夹具，不能外推到慢盘、网络/云目录、权限异常，也没有测量逐目录惰性扫描在首屏可见行上的响应延迟。只更新扫描粒度评估，没有改变产品视图或百分比显示策略；具体格式、等待阶段与是否接受整目录预扫仍留待集中可见验收。
