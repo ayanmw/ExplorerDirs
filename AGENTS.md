@@ -1,5 +1,7 @@
 # Explorer Dirs project rules
 
+- On 2026-11-02 the user explicitly required all targets in docs/temp86-goals.md to be completed before another temp.86 publication or acceptance request. A finished repair sub-batch is not a release gate. Keep development in src, commit each batch, and preserve the existing preview until the full scope is ready; then replace the same preview directory with profile preservation and recoverable payload backup.
+
 - On 2026-10-27 the user requested background-first development and validation: avoid launching or controlling windows when source checks, nonvisual tests or isolated backend probes can establish the result. Accumulate required visible acceptance cases into a later batch; existing shared-desktop authorization is not a reason to perform routine one-off UI checks.
 
 - On 2026-10-27 the user authorized shared Computer Use for this repair, superseding the earlier no-Computer-Use period. Announce short action bursts, return control promptly, refresh after incidental input conflicts, and continue background work when front-end tooling is blocked. Honor tool-enforced stops; do not treat an incidental ESC report as cancellation of the whole development task. Explicit user text stopping desktop use takes immediate effect.

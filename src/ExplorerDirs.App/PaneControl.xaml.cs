@@ -1078,7 +1078,7 @@ public partial class PaneControl : UserControl
         addressPathButtonVisible: true,
         addressComputerButtonVisible: true,
         tabHeaderVisible: Tabs.Visibility == Visibility.Visible,
-        statusBarVisible: StatusBarRow.Visibility == Visibility.Visible);
+        statusBarVisible: StatusBarRow.Visibility == Visibility.Visible, goButtonVisible: false);
     internal int FocusStopCount => FocusMap.Count;
     internal IReadOnlyList<int> MajorFocusStops => FocusMap.MajorStops;
     private TreeFocusTarget CurrentTreeFocusTarget =>
@@ -1097,9 +1097,9 @@ public partial class PaneControl : UserControl
         var focus = FocusMap;
         UIElement[] controls = focus.TreeButton >= 0
             ? [BackButton, ForwardButton, UpButton, RefreshButton, TreeButton, ToolbarViewStyleButton,
-                Address, AddressMenuButton, AddressComputerButton, AddressHistoryButton, GoButton, NewTabButton, CloseTabButton]
+                Address, AddressMenuButton, AddressComputerButton, AddressHistoryButton, NewTabButton, CloseTabButton]
             : [BackButton, ForwardButton, UpButton, RefreshButton, ToolbarViewStyleButton,
-                Address, AddressMenuButton, AddressComputerButton, AddressHistoryButton, GoButton, NewTabButton, CloseTabButton];
+                Address, AddressMenuButton, AddressComputerButton, AddressHistoryButton, NewTabButton, CloseTabButton];
         for (var index = 0; index < controls.Length; index++)
             if (controls[index].IsKeyboardFocusWithin) return index;
         if (focus.SearchCount == 3)
@@ -2796,10 +2796,19 @@ public partial class PaneControl : UserControl
     private void UpdateTabScrollButtons()
     {
         if (TabHeaderScroll is not { } scroll) return;
-        if (Tabs.Template.FindName("ScrollTabsLeft", Tabs) is Button left)
-            left.IsEnabled = scroll.HorizontalOffset > 0.5;
-        if (Tabs.Template.FindName("ScrollTabsRight", Tabs) is Button right)
-            right.IsEnabled = scroll.HorizontalOffset + scroll.ViewportWidth < scroll.ExtentWidth - 0.5;
+        if (Tabs.Template.FindName("ScrollTabsLeft", Tabs) is not Button left ||
+            Tabs.Template.FindName("ScrollTabsRight", Tabs) is not Button right) return;
+        // Include the space occupied by already visible arrows; otherwise showing them can
+        // create its own overflow and prevent the buttons disappearing after tabs close.
+        var availableWidth = scroll.ViewportWidth +
+            (left.Visibility == Visibility.Visible ? left.ActualWidth : 0) +
+            (right.Visibility == Visibility.Visible ? right.ActualWidth : 0);
+        var overflow = !MultilineTabHeaders && scroll.ExtentWidth > availableWidth + 0.5;
+        var visibility = overflow ? Visibility.Visible : Visibility.Collapsed;
+        if (left.Visibility != visibility) left.Visibility = visibility;
+        if (right.Visibility != visibility) right.Visibility = visibility;
+        left.IsEnabled = scroll.HorizontalOffset > 0.5;
+        right.IsEnabled = scroll.HorizontalOffset + scroll.ViewportWidth < scroll.ExtentWidth - 0.5;
     }
 
     private void RenderBreadcrumb(string path)

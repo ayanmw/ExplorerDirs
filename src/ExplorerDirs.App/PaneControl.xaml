@@ -22,12 +22,8 @@
                             AutomationProperties.Name="查看方式" Click="ViewStyle_Click" Width="46" Margin="4,0,0,0"/>
                 </StackPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                    <Button x:Name="GoButton" Content="编辑" ToolTip="编辑地址或转到" Click="Go_Click"
+                    <Button x:Name="GoButton" Visibility="Collapsed" IsTabStop="False" Content="编辑" ToolTip="编辑地址或转到" Click="Go_Click"
                             LostKeyboardFocus="GoButton_LostKeyboardFocus" Margin="4,0,0,0" Padding="8,2"/>
-                    <Button x:Name="NewTabButton" ToolTip="新建标签页" AutomationProperties.Name="新建标签页"
-                            Click="NewTab_Click" Margin="8,0,0,0" Width="28"/>
-                    <Button x:Name="CloseTabButton" ToolTip="关闭标签页" AutomationProperties.Name="关闭标签页"
-                            Click="CloseTab_Click" Margin="4,0,0,0" Width="28"/>
                 </StackPanel>
                 <Grid x:Name="AddressHost" MinWidth="80" Margin="6,0,0,0">
                     <Grid.ColumnDefinitions>
@@ -141,7 +137,14 @@
                            TextTrimming="CharacterEllipsis" AutomationProperties.AutomationId="PaneStatus"/>
             </DockPanel>
             <DockPanel>
-                <TabControl x:Name="Tabs" DockPanel.Dock="Top" SelectionChanged="Tabs_SelectionChanged"
+                <DockPanel DockPanel.Dock="Top" LastChildFill="True">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button x:Name="NewTabButton" ToolTip="新建标签页" AutomationProperties.Name="新建标签页"
+                            Click="NewTab_Click" Margin="8,0,0,0" Width="28"/>
+                    <Button x:Name="CloseTabButton" ToolTip="关闭标签页" AutomationProperties.Name="关闭标签页"
+                            Click="CloseTab_Click" Margin="4,0,0,0" Width="28"/>
+                    </StackPanel>
+                <TabControl x:Name="Tabs" SelectionChanged="Tabs_SelectionChanged"
                             PreviewKeyDown="Tabs_PreviewKeyDown"
                             PreviewMouseMove="Tabs_PreviewMouseMove"
                             PreviewMouseLeftButtonUp="Tabs_PreviewMouseLeftButtonUp">
@@ -180,7 +183,7 @@
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
-                                <Button x:Name="ScrollTabsLeft" Grid.Column="0" Content="‹"
+                                <Button x:Name="ScrollTabsLeft" Grid.Column="0" Width="28" FontSize="18" Visibility="Collapsed" Content="‹"
                                         ToolTip="向左滚动标签" AutomationProperties.Name="向左滚动标签"
                                         Focusable="False" IsTabStop="False" Click="ScrollTabsLeft_Click"/>
                                 <ScrollViewer x:Name="TabHeaderScroll" Grid.Column="1"
@@ -195,7 +198,7 @@
                                               PreviewMouseWheel="TabHeaderScroll_PreviewMouseWheel">
                                     <ItemsPresenter/>
                                 </ScrollViewer>
-                                <Button x:Name="ScrollTabsRight" Grid.Column="2" Content="›"
+                                <Button x:Name="ScrollTabsRight" Grid.Column="2" Width="28" FontSize="18" Visibility="Collapsed" Content="›"
                                         ToolTip="向右滚动标签" AutomationProperties.Name="向右滚动标签"
                                         Focusable="False" IsTabStop="False" Click="ScrollTabsRight_Click"/>
                             </Grid>
@@ -210,6 +213,7 @@
                         </ControlTemplate>
                     </TabControl.Template>
                 </TabControl>
+                </DockPanel>
                 <Border BorderBrush="{DynamicResource ExplorerDirs.BorderBrush}" BorderThickness="1">
                     <Grid>
                         <Grid.ColumnDefinitions>

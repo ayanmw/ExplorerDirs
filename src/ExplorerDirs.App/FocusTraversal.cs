@@ -34,12 +34,12 @@ internal readonly record struct PaneFocusStopMap(
         bool paneViewStyleButtonVisible = true, bool addressHistoryButtonVisible = false,
         bool addressPathButtonVisible = false, bool addressComputerButtonVisible = false,
         bool tabHeaderVisible = true,
-        bool statusBarVisible = true)
+        bool statusBarVisible = true, bool goButtonVisible = true)
     {
         var navigationStopCount = BaseNavigationStopCount + (paneTreeButtonVisible ? 1 : 0) +
             (paneViewStyleButtonVisible ? 1 : 0) +
             (addressHistoryButtonVisible ? 1 : 0) + (addressPathButtonVisible ? 1 : 0) +
-            (addressComputerButtonVisible ? 1 : 0);
+            (addressComputerButtonVisible ? 1 : 0) - (goButtonVisible ? 0 : 1);
         var treeButton = paneTreeButtonVisible ? 4 : -1;
         var paneViewStyle = paneViewStyleButtonVisible ? 4 + (paneTreeButtonVisible ? 1 : 0) : -1;
         var address = 4 + (paneTreeButtonVisible ? 1 : 0) + (paneViewStyleButtonVisible ? 1 : 0);
@@ -47,10 +47,11 @@ internal readonly record struct PaneFocusStopMap(
         var addressComputer = addressComputerButtonVisible ? address + 1 + (addressPathButtonVisible ? 1 : 0) : -1;
         var addressHistory = addressHistoryButtonVisible ? address + 1 + (addressPathButtonVisible ? 1 : 0) +
             (addressComputerButtonVisible ? 1 : 0) : -1;
-        var go = address + 1 + (addressHistoryButtonVisible ? 1 : 0) + (addressPathButtonVisible ? 1 : 0) +
+        var afterAddress = address + 1 + (addressHistoryButtonVisible ? 1 : 0) + (addressPathButtonVisible ? 1 : 0) +
             (addressComputerButtonVisible ? 1 : 0);
-        var newTab = go + 1;
-        var closeTab = go + 2;
+        var go = goButtonVisible ? afterAddress : -1;
+        var newTab = afterAddress + (goButtonVisible ? 1 : 0);
+        var closeTab = newTab + 1;
         var searchCount = searchVisible ? 3 : 0;
         var filterCount = quickFilterVisible ? 8 : 0;
         var searchStart = navigationStopCount;

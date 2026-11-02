@@ -9,6 +9,22 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 
+if (args is ["--focus-traversal-smoke"])
+{
+    FocusTraversalSmoke.Run();
+    var withoutGo = PaneFocusStopMap.Create(false, false, false, true,
+        addressHistoryButtonVisible: true, addressPathButtonVisible: true,
+        addressComputerButtonVisible: true, goButtonVisible: false);
+    var withGo = PaneFocusStopMap.Create(false, false, false, true,
+        addressHistoryButtonVisible: true, addressPathButtonVisible: true,
+        addressComputerButtonVisible: true);
+    if (withoutGo.Go != -1 || withoutGo.NewTab != withoutGo.AddressHistory + 1 ||
+        withoutGo.CloseTab != withoutGo.NewTab + 1 || withoutGo.Count != withGo.Count - 1)
+        throw new InvalidOperationException("Removing the address edit button left a hidden keyboard focus stop.");
+    Console.WriteLine("Removed address button focus contract: PASS");
+    return;
+}
+
 if (args is ["--shell-provider-profile-store-smoke"])
 {
     ShellProviderProfileStoreSmoke.Run();
