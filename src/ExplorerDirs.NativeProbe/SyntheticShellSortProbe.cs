@@ -1,6 +1,8 @@
 using System.Runtime.InteropServices;
 using System.Diagnostics;
 using System.Text;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using Microsoft.Win32;
 using System.Windows.Threading;
 using ExplorerDirs.App;
@@ -253,11 +255,36 @@ public static class SyntheticShellSortProbe
     internal static int RunOnDemandRecursiveSizeColumnSmoke()
     {
         var fixture = Path.Combine(Path.GetTempPath(), $"ExplorerDirs-OnDemandRecursiveSize-{Guid.NewGuid():N}");
+        var deniedDirectory = Path.Combine(fixture, "unreadable-root", "denied");
+        DirectoryInfo? deniedInfo = null;
+        FileSystemAccessRule? denyRule = null;
         try
         {
             Directory.CreateDirectory(Path.Combine(fixture, "child", "nested-folder"));
             File.WriteAllBytes(Path.Combine(fixture, "child", "direct.bin"), [1, 2, 3, 4, 5, 6]);
             File.WriteAllBytes(Path.Combine(fixture, "child", "nested-folder", "nested.bin"), [1, 2, 3, 4]);
+            var deepPath = Path.Combine(fixture, "child", "nested-folder");
+            for (var depth = 0; depth < 16; depth++)
+            {
+                deepPath = Path.Combine(deepPath, $"depth-{depth:D2}-long-segment");
+                Directory.CreateDirectory(deepPath);
+                File.WriteAllBytes(Path.Combine(deepPath, "deep.bin"), [1]);
+            }
+            if (deepPath.Length <= 260)
+                throw new InvalidOperationException($"The recursive-size depth fixture did not cross MAX_PATH: {deepPath.Length} characters.");
+            Directory.CreateDirectory(Path.Combine(fixture, "unreadable-root", "accessible"));
+            Directory.CreateDirectory(deniedDirectory);
+            File.WriteAllBytes(Path.Combine(fixture, "unreadable-root", "accessible", "accessible.bin"), [1, 2, 3, 4, 5]);
+            File.WriteAllBytes(Path.Combine(deniedDirectory, "denied.bin"), new byte[7]);
+            deniedInfo = new DirectoryInfo(deniedDirectory);
+            var deniedSecurity = deniedInfo.GetAccessControl(AccessControlSections.Access);
+            var currentUser = WindowsIdentity.GetCurrent().User ??
+                throw new InvalidOperationException("The current Windows user has no security identifier.");
+            denyRule = new FileSystemAccessRule(currentUser,
+                FileSystemRights.ListDirectory | FileSystemRights.ReadAttributes | FileSystemRights.Traverse,
+                AccessControlType.Deny);
+            deniedSecurity.AddAccessRule(denyRule);
+            deniedInfo.SetAccessControl(deniedSecurity);
             var module = NativeLibrary.Load(FindAdapterLibrary());
             try
             {
@@ -266,10 +293,19 @@ public static class SyntheticShellSortProbe
                 Check(check(fixture));
             }
             finally { NativeLibrary.Free(module); }
-            Console.WriteLine("synthetic-on-demand-recursive-size-column-smoke: enumeration-does-not-scan=True; first-value-read-scans=True; repeated-value-read-uses-cache=True; compareids-does-not-scan=True; shell-view-created=False");
+            Console.WriteLine($"synthetic-on-demand-recursive-size-column-smoke: enumeration-does-not-scan=True; first-value-read-scans=True; deep-tree-depth=16; deep-path-chars={deepPath.Length}; recursive-total=26-bytes-18-files-17-folders; repeated-value-read-uses-cache=True; compareids-does-not-scan=True; native-acl-denial-propagates=True; shell-view-created=False");
             return 0;
         }
-        finally { Directory.Delete(fixture, recursive: true); }
+        finally
+        {
+            if (deniedInfo is not null && denyRule is not null)
+            {
+                var security = deniedInfo.GetAccessControl(AccessControlSections.Access);
+                security.RemoveAccessRuleSpecific(denyRule);
+                deniedInfo.SetAccessControl(security);
+            }
+            Directory.Delete(fixture, recursive: true);
+        }
     }
 
     internal static int RunAsyncOnDemandRecursiveSizeColumnSmoke()

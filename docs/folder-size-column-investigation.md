@@ -2753,6 +2753,12 @@ HostProbe 在同一 STA 调度流程内先发相反方向 Shell 排序，再发�
 真实重排期间 Shell/ListView 行数仍曾短暂为 0：一轮两段各约 30 ms，另一轮观察到约 47 ms 与 252 ms 的区间；隐藏窗口没有绘制消息证据，不能将这些时长等同屏幕空白时间。检查同时暴露出选区恢复时序问题：调度器可能在行尚未重新出现时只尝试一次。现在产品调度器等已保存的选中 PIDL 在当前视图重新可定位后才恢复选区/焦点，并在恢复未完成时继续重试。大列表逆序夹具连续两轮选区与焦点均通过，普通两项 HostProbe 也通过。
 
 验证：产品 App/HostProbe Release 构建 0 警告/错误；诊断 adapter `/W4 /WX` 构建通过；逆序 1,002 项隐藏 HostProbe 两轮、普通两项隐藏 HostProbe 一轮通过。计时、行数和焦点证据均来自隐藏 Shell 宿主，未采集可见帧；网络目录、慢盘、真实大目录及 GUI 体验仍待集中验收。该路径优化适用于本项目按需递归大小 namespace 原型，尚未发布，也未推广到普通 ExplorerBrowser 文件夹。
+
+### 2026-11-02：native 按需扫描深路径和访问拒绝边界
+
+将 native on-demand smoke 的夹具扩为 16 层嵌套，最深路径长 474 个字符，包含 26 B、18 个文件和 17 个目录。改动前扫描失败；根因是 native 递归指标遍历直接将普通路径交给 `FindFirstFileW`，文件身份检查也直接调用 `CreateFileW`。现在两处都先构造 Windows extended-length filesystem path（盘符路径转 `\\?\\`，UNC 转 `\\?\\UNC\\`）。NativeProbe Release build 0 警告/错误，native adapter `/W4 /WX` build 通过；深树首读值、18 次目录打开、35 个条目读取、重复读缓存及 CompareIDs 零额外扫描均通过。异步 8 项读取 smoke 也通过。
+
+另建真实 ACL 拒绝子目录，对比确认 C# 生产 `RecursiveDirectoryScanner` 能保留可访问兄弟的 5 B 结果，并把拒绝项计入 unreadable；native `GetSyntheticDirectoryMetrics` 则把嵌套 `ERROR_ACCESS_DENIED` 直接向上传播，导致整棵请求目录扫描失败。该结果由隔离 NativeProbe 直接观察，不表示 product ExplorerBrowser 可见行为已验收；native 按需列的“部分可读”语义仍未实现，读取值会保持未解析，可能阻断该视图的初始递归列排序。产品 App/HostProbe Release 构建 0 警告/错误，普通 2 项产品 HostProbe 通过；此前 1,002 行批量就绪扫描的最大 UI Dispatcher 批次约 3.3–3.9 ms。下一步需让 native provider 与 C# 扫描器对齐 unreadable/partial-result 数据契约，再扩大真实目录和慢 I/O 验收。无 GUI、无发布。
 ### 2026-11-02：500 个目录下的按需读取与整视图刷新
 
 使用既有 Private Desktop 隔离探针，将合成夹具扩至 500 个同级目录（每目录 10 个 1 B 子文件），并明确选择 `full-view-refresh-background-scan-live-cache-publish` 策略。首次读完 502 行列表后记录 501 次递归目录扫描、5,003 个子项指标读取，累计约 70.3 ms；这是本机热临时目录的合成 provider 结果，不代表慢盘/网络耗时。初始读列表约 502 次请求递归值，重复读命中缓存。

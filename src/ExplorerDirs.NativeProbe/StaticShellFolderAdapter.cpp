@@ -1455,6 +1455,26 @@ namespace
         bool available = false;
     };
 
+    HRESULT GetExtendedFilesystemPath(const std::wstring& path, std::wstring* extendedPath)
+    {
+        if (!extendedPath) return E_POINTER;
+        constexpr auto backslash = static_cast<wchar_t>(0x5C);
+        try
+        {
+            if (path.rfind(L"\\\\?\\", 0) == 0)
+                *extendedPath = path;
+            else if (path.size() >= 2 && (path[0] == backslash || path[0] == L'/') &&
+                (path[1] == backslash || path[1] == L'/'))
+                *extendedPath = L"\\\\?\\UNC\\" + path.substr(2);
+            else if (path.size() >= 3 && path[1] == L':' && (path[2] == backslash || path[2] == L'/'))
+                *extendedPath = L"\\\\?\\" + path;
+            else
+                *extendedPath = path;
+        }
+        catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+        return S_OK;
+    }
+
     // Minimal, unregistered namespace used only to ask DefView whether it will
     // call IShellFolder2::CompareIDs for the standard Size column.
     struct SyntheticChild
@@ -1491,7 +1511,9 @@ namespace
     bool TryGetSyntheticFileIdentity(PCWSTR path, SyntheticFileIdentity* identity)
     {
         if (!path || !identity) return false;
-        const auto file = CreateFileW(path, FILE_READ_ATTRIBUTES,
+        std::wstring extendedPath;
+        if (FAILED(GetExtendedFilesystemPath(path, &extendedPath))) return false;
+        const auto file = CreateFileW(extendedPath.c_str(), FILE_READ_ATTRIBUTES,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
             FILE_FLAG_BACKUP_SEMANTICS, nullptr);
         if (file == INVALID_HANDLE_VALUE) return false;
@@ -2380,8 +2402,10 @@ namespace
         *metrics = {};
         if (cancellationFlag && InterlockedCompareExchange(cancellationFlag, 0, 0))
             return HRESULT_FROM_WIN32(ERROR_CANCELLED);
-        std::wstring pattern;
-        try { pattern = directory + L"\\*"; }
+        std::wstring extendedDirectory, pattern;
+        auto pathResult = GetExtendedFilesystemPath(directory, &extendedDirectory);
+        if (FAILED(pathResult)) return pathResult;
+        try { pattern = extendedDirectory + L"\\*"; }
         catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
 
         WIN32_FIND_DATAW entry{};
@@ -6859,12 +6883,19 @@ extern "C" ED_PROBE_EXPORT HRESULT WINAPI RunSyntheticOnDemandRecursiveSizeColum
         SHELLDETAILS details{};
         operationResult = root->GetDetailsOf(item, 1, &details);
         const bool firstValueMatches = SUCCEEDED(operationResult) && details.str.uType == STRRET_WSTR &&
-            details.str.pOleStr && _wcsicmp(details.str.pOleStr, L"10") == 0;
+            details.str.pOleStr && _wcsicmp(details.str.pOleStr, L"26") == 0;
         if (details.str.uType == STRRET_WSTR && details.str.pOleStr) CoTaskMemFree(details.str.pOleStr);
         const auto requestedCalls = InterlockedCompareExchange(&g_syntheticDirectoryMetricsCallCount, 0, 0);
         const auto requestedEntries = InterlockedCompareExchange(&g_syntheticDirectoryMetricsEntryCount, 0, 0);
-        if (!firstValueMatches || requestedCalls != 2 || requestedEntries != 3)
-        { cleanup(); return E_FAIL; }
+        if (!firstValueMatches || requestedCalls != 18 || requestedEntries != 35)
+        {
+            char message[192]{};
+            sprintf_s(message, "synthetic-on-demand-size: deep-read hr=0x%08X; value-matched=%d; calls=%ld; entries=%ld",
+                static_cast<unsigned>(operationResult), firstValueMatches ? 1 : 0, requestedCalls, requestedEntries);
+            TraceSyntheticSortStage(message);
+            cleanup();
+            return E_FAIL;
+        }
 
         SHCOLUMNID recursiveSizeKey{};
         operationResult = root->MapColumnToSCID(1, &recursiveSizeKey);
@@ -6872,7 +6903,7 @@ extern "C" ED_PROBE_EXPORT HRESULT WINAPI RunSyntheticOnDemandRecursiveSizeColum
         if (SUCCEEDED(operationResult))
             operationResult = root->GetDetailsEx(item, &recursiveSizeKey, &propertyValue);
         const bool propertyValueMatches = SUCCEEDED(operationResult) && propertyValue.vt == VT_UI8 &&
-            propertyValue.ullVal == 10;
+            propertyValue.ullVal == 26;
         VariantClear(&propertyValue);
         if (!propertyValueMatches ||
             InterlockedCompareExchange(&g_syntheticDirectoryMetricsCallCount, 0, 0) != requestedCalls ||
@@ -6882,7 +6913,7 @@ extern "C" ED_PROBE_EXPORT HRESULT WINAPI RunSyntheticOnDemandRecursiveSizeColum
         details = {};
         operationResult = root->GetDetailsOf(item, 1, &details);
         const bool cachedValueMatches = SUCCEEDED(operationResult) && details.str.uType == STRRET_WSTR &&
-            details.str.pOleStr && _wcsicmp(details.str.pOleStr, L"10") == 0;
+            details.str.pOleStr && _wcsicmp(details.str.pOleStr, L"26") == 0;
         if (details.str.uType == STRRET_WSTR && details.str.pOleStr) CoTaskMemFree(details.str.pOleStr);
         const bool repeatedReadWasCached =
             InterlockedCompareExchange(&g_syntheticDirectoryMetricsCallCount, 0, 0) == requestedCalls &&
@@ -6895,7 +6926,13 @@ extern "C" ED_PROBE_EXPORT HRESULT WINAPI RunSyntheticOnDemandRecursiveSizeColum
             InterlockedCompareExchange(&g_syntheticDirectoryMetricsEntryCount, 0, 0) == requestedEntries;
         cleanup();
         if (!compareAvoidedScanning) return E_FAIL;
-        TraceSyntheticSortStage("synthetic-on-demand-size: enumeration=0; first-details-read=2-calls/3-entries; repeated-read=cached; compareids=0-additional-scans");
+        std::wstring unreadableRoot;
+        try { unreadableRoot = std::wstring(backingPath) + L"\\unreadable-root"; }
+        catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+        SyntheticDirectoryMetrics unreadableMetrics{};
+        const auto unreadableResult = GetSyntheticDirectoryMetrics(unreadableRoot, &unreadableMetrics);
+        if (unreadableResult != HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED)) return E_FAIL;
+        TraceSyntheticSortStage("synthetic-on-demand-size: enumeration=0; first-details-read=18-calls/35-entries; depth=16; total=26-bytes/18-files/17-folders; repeated-read=cached; compareids=0-additional-scans; nested-access-denied=propagated");
         return S_OK;
     }();
     InterlockedExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, previousDemandSetting);
