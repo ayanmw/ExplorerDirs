@@ -8,16 +8,21 @@ using System.Windows.Threading;
 
 internal static class ProfileOwnerMultiRootShellHostProbe
 {
+    private const int LargeFolderCount = 500;
+
     internal static object CreateViewStateForProbe(Assembly appAssembly) => CreateViewState(appAssembly, 0);
     internal static string FindProductAdapterForProbe() => FindProductAdapter();
 
-    internal static int Run()
+    internal static int Run(bool large = false)
     {
         var root = Path.Combine(Path.GetTempPath(), "ExplorerDirs-ProfileOwnerMultiRoot-" + Guid.NewGuid().ToString("N"));
         var profile = Path.Combine(root, "profile");
         var folders = Enumerable.Range(0, 4).Select(index => Path.Combine(root, $"pane-{index + 1}")).ToArray();
-        var expectedSizes = new[] { new ulong[] { 5, 29 }, new ulong[] { 7, 31 },
-            new ulong[] { 11, 37 }, new ulong[] { 13, 41 } };
+        var expectedSizes = large
+            ? Enumerable.Range(0, 4).Select(pane => Enumerable.Range(0, LargeFolderCount)
+                .Select(index => (ulong)((pane + 1) * 10_000 + LargeFolderCount - index)).Order().ToArray()).ToArray()
+            : new[] { new ulong[] { 5, 29 }, new ulong[] { 7, 31 }, new ulong[] { 11, 37 }, new ulong[] { 13, 41 } };
+        var expectedItemCount = large ? LargeFolderCount : 2;
         var classId = Guid.NewGuid();
         var classKeyPath = $@"Software\Classes\CLSID\{{{classId:D}}}";
         var namespaceKeyPath = $@"Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{{{classId:D}}}";
@@ -31,8 +36,20 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             for (var index = 0; index < folders.Length; index++)
             {
                 Directory.CreateDirectory(folders[index]);
-                CreateFolder(folders[index], "folder-small", checked((int)expectedSizes[index][0]));
-                CreateFolder(folders[index], "folder-large", checked((int)expectedSizes[index][1]));
+                if (large)
+                {
+                    for (var itemIndex = 0; itemIndex < LargeFolderCount; itemIndex++)
+                    {
+                        var name = $"folder-extra-{itemIndex:D3}";
+                        var bytes = checked((int)((index + 1) * 10_000 + LargeFolderCount - itemIndex));
+                        CreateFolder(folders[index], name, bytes);
+                    }
+                }
+                else
+                {
+                    CreateFolder(folders[index], "folder-small", checked((int)expectedSizes[index][0]));
+                    CreateFolder(folders[index], "folder-large", checked((int)expectedSizes[index][1]));
+                }
             }
 
             var appAssembly = Assembly.Load("ExplorerDirs.App");
@@ -95,8 +112,8 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 WaitUntil(() =>
                 {
                     var counts = readCounts.Invoke(host, [false, false]);
-                    return counts is not null && (int)counts.GetType().GetProperty("Total")!.GetValue(counts)! == 2;
-                }, TimeSpan.FromSeconds(15), $"Product pane {index + 1} did not enumerate its own two rows.");
+                    return counts is not null && (int)counts.GetType().GetProperty("Total")!.GetValue(counts)! == expectedItemCount;
+                }, TimeSpan.FromSeconds(30), $"Product pane {index + 1} did not enumerate its own {expectedItemCount} rows.");
             }
 
             var paneValues = new string[hosts.Count][];
@@ -105,10 +122,10 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 var host = hosts[index];
                 WaitUntil(() =>
                 {
-                    paneValues[index] = (string[])readValues.Invoke(null, [hostType, host, 2])!;
+                    paneValues[index] = (string[])readValues.Invoke(null, [hostType, host, expectedItemCount])!;
                     return paneValues[index].Select(value => ulong.TryParse(value, out var bytes) ? bytes : ulong.MaxValue)
                         .Order().SequenceEqual(expectedSizes[index]);
-                }, TimeSpan.FromSeconds(20), $"Product pane {index + 1} received another pane's recursive values.");
+                }, TimeSpan.FromSeconds(45), $"Product pane {index + 1} received another pane's recursive values.");
 
                 var captured = hostType.GetMethod("CaptureViewState", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!
                     .Invoke(host, null)!;
@@ -122,16 +139,16 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 var expectedOrder = index % 2 == 0 ? expectedSizes[index] : expectedSizes[index].Reverse();
                 WaitUntil(() =>
                 {
-                    paneValues[index] = (string[])readValues.Invoke(null, [hostType, host, 2])!;
+                    paneValues[index] = (string[])readValues.Invoke(null, [hostType, host, expectedItemCount])!;
                     return paneValues[index].Select(value => ulong.TryParse(value, out var bytes) ? bytes : ulong.MaxValue)
                         .SequenceEqual(expectedOrder);
-                }, TimeSpan.FromSeconds(15), $"Product pane {index + 1} did not restore its independent saved recursive-size sort.");
+                }, TimeSpan.FromSeconds(30), $"Product pane {index + 1} did not restore its independent saved recursive-size sort.");
             }
 
             // The production initial-sort timers run concurrently; inject selections only after every
             // pane has settled so this probe measures per-pane sort state, not synthetic input races.
             for (var index = 0; index < hosts.Count; index++)
-                selectItem.Invoke(null, [hostType, hosts[index], Path.Combine(folders[index], index % 2 == 0 ? "folder-small" : "folder-large")]);
+                selectItem.Invoke(null, [hostType, hosts[index], Path.Combine(folders[index], SelectionName(index, large))]);
 
             var paneSelections = hosts.Select(host =>
             {
@@ -141,7 +158,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             }).ToArray();
             for (var index = 0; index < paneSelections.Length; index++)
             {
-                var expectedSelection = index % 2 == 0 ? "folder-small" : "folder-large";
+                var expectedSelection = SelectionName(index, large);
                 if (!paneSelections[index].SequenceEqual([expectedSelection], StringComparer.OrdinalIgnoreCase))
                     throw new InvalidOperationException($"Selection crossed pane {index + 1} identity: [{string.Join('|', paneSelections[index])}].");
             }
@@ -152,14 +169,14 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             for (var index = 0; index < hosts.Count; index++)
             {
                 var host = hosts[index];
-                paneValues[index] = (string[])readValues.Invoke(null, [hostType, host, 2])!;
+                paneValues[index] = (string[])readValues.Invoke(null, [hostType, host, expectedItemCount])!;
 
                 var viewWindow = (nint)hostViewWindow.GetValue(host)!;
                 var selection = readSelection.Invoke(null, [viewWindow])!;
                 var selected = (string[])selection.GetType().GetField("Item1")!.GetValue(selection)!;
                 var listViewFocus = (string?)selection.GetType().GetField("Item2")!.GetValue(selection);
                 paneFocus[index] = (string?)readFocusedRow.Invoke(null, [hostType, host]);
-                var expectedFocused = index % 2 == 0 ? "folder-small" : "folder-large";
+                var expectedFocused = SelectionName(index, large);
                 if (!selected.SequenceEqual([expectedFocused], StringComparer.OrdinalIgnoreCase) ||
                     !string.Equals(listViewFocus, expectedFocused, StringComparison.OrdinalIgnoreCase) ||
                     !string.Equals(paneFocus[index], expectedFocused, StringComparison.OrdinalIgnoreCase))
@@ -168,7 +185,8 @@ internal static class ProfileOwnerMultiRootShellHostProbe
 
             if (GetForegroundWindow() != foreground)
                 throw new InvalidOperationException("The product panes changed the foreground window.");
-            Console.WriteLine($"profile-owner-multi-root-shell-host: simultaneous-hosts={hosts.Count}; roots=independent; recursive-sort-orders=[{string.Join(" || ", paneValues.Select(values => string.Join('|', values)))}]; selections=[{string.Join('|', paneSelections.Select(values => string.Join(',', values)))}]; focused-rows=[{string.Join('|', paneFocus)}]; parents-hidden=True; foreground-unchanged=True");
+            var valueEdges = paneValues.Select(values => $"{values.Length}:{values[0]}..{values[^1]}");
+            Console.WriteLine($"profile-owner-multi-root-shell-host: large={large}; simultaneous-hosts={hosts.Count}; rows-per-pane={expectedItemCount}; roots=independent; recursive-sort-value-edges=[{string.Join(" || ", valueEdges)}]; selections=[{string.Join('|', paneSelections.Select(values => string.Join(',', values)))}]; focused-rows=[{string.Join('|', paneFocus)}]; parents-hidden=True; foreground-unchanged=True");
             return 0;
         }
         finally
@@ -201,6 +219,10 @@ internal static class ProfileOwnerMultiRootShellHostProbe
         Directory.CreateDirectory(folder);
         File.WriteAllBytes(Path.Combine(folder, "payload.bin"), new byte[bytes]);
     }
+
+    private static string SelectionName(int paneIndex, bool large) => large
+        ? $"folder-extra-{(paneIndex % 2 == 0 ? LargeFolderCount - 1 : 0):D3}"
+        : paneIndex % 2 == 0 ? "folder-small" : "folder-large";
 
     private static object CreateViewState(Assembly appAssembly, int recursiveSortDirection)
     {
