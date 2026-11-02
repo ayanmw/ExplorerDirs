@@ -29,6 +29,7 @@ internal static class FolderNavigationCallbacksProbe
                 CheckSupersededCompletion(path, pidl);
                 CheckRepeatedRegistration(path, pidl);
                 CheckNativeNavigation(pidl);
+                CheckUnacceptedCallbacks(path, pidl);
                 if (path == "shell:MyComputerFolder") CheckQueuedCompletion(path, pidl);
             }
             finally { Marshal.FreeCoTaskMem(pidl); }
@@ -36,6 +37,67 @@ internal static class FolderNavigationCallbacksProbe
         CheckSearchHandoff();
         Ensure(GetForegroundWindow() == foreground, "foreground remained unchanged");
         Console.WriteLine("Folder navigation callbacks: PASS (five folder identities and search handoff; actual queued unhosted callbacks, no native view or desktop input)");
+        return 0;
+    }
+
+    internal static int RunProvider(string adapterPath)
+    {
+        var foreground = GetForegroundWindow();
+        var root = Path.Combine(AppContext.BaseDirectory, "provider-callbacks-" + Guid.NewGuid().ToString("N"));
+        var child = Path.Combine(root, "中文子目录");
+        var grandchild = Path.Combine(child, "第二层");
+        var classId = Guid.NewGuid();
+        var classKey = $@"Software\Classes\CLSID\{{{classId:D}}}";
+        var namespaceKey = $@"Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{{{classId:D}}}";
+        IDisposable? owner = null;
+        Directory.CreateDirectory(grandchild);
+        try
+        {
+            var ownerType = HostType.Assembly.GetType("ExplorerDirs.App.ProfileShellNamespaceOwner", true)!;
+            owner = (IDisposable)ownerType.GetMethod("Start", BindingFlags.Public | BindingFlags.Static)!
+                .Invoke(null, [classId, root, Path.GetFullPath(adapterPath)])!;
+            var codec = HostType.Assembly.GetType("ExplorerDirs.App.QdrShellPathCodec", true)!;
+            var identity = (string)codec.GetMethod("ToProviderIdentity", BindingFlags.Static | BindingFlags.NonPublic)!
+                .Invoke(null, [root, classId])!;
+            foreach (var (native, physical) in new[] { (identity, root), (identity + @"\中文子目录", child),
+                (identity + @"\中文子目录\第二层", grandchild) })
+            {
+                var parseResult = SHParseDisplayName(native, 0, out var pidl, 0, out _);
+                if (parseResult < 0) throw new InvalidOperationException($"Provider parsing failed for {physical}: 0x{parseResult:X8}");
+                try
+                {
+                    using var host = NewHost();
+                    Call(host, "ConfigureFolderSizeLocations", classId, true);
+                    var logicalIdentity = (string?)Call(host, "NavigationIdentity", pidl);
+                    Ensure(logicalIdentity == physical,
+                        $"provider callbacks retain the physical logical identity: expected={physical}; actual={logicalIdentity}; native={Call(host, "NativeNavigationIdentity", pidl)}");
+                    var nativeIdentity = (string?)Call(host, "NativeNavigationIdentity", pidl);
+                    Ensure(nativeIdentity is not null && nativeIdentity.StartsWith("::{" + classId.ToString(), StringComparison.OrdinalIgnoreCase),
+                        "provider callback matching retains the namespace identity");
+                    Call(host, "TrackIssuedPath", physical);
+                    Event(host, "OnNavigationPending", pidl);
+                    Event(host, "OnNavigationComplete", pidl);
+                    Ensure((string?)HostType.GetProperty("CurrentPath", Members)!.GetValue(host) == physical,
+                        "published provider location is physical");
+                    Ensure((string?)Field(host, "_nativeDirectoryIdentity") == nativeIdentity,
+                        "published location retains the native parent for selection binding");
+                    Ensure(((IDictionary)Field(host, "_issuedBrowserPaths")!).Count == 0,
+                        "provider completion retires its physical request registration");
+                    EnsureUnhosted(host);
+                }
+                finally { Marshal.FreeCoTaskMem(pidl); }
+            }
+        }
+        finally
+        {
+            owner?.Dispose();
+            using var registration = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(classKey);
+            using var namespaceRegistration = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(namespaceKey);
+            Ensure(registration is null && namespaceRegistration is null, "temporary provider registration was removed");
+            Directory.Delete(root, true);
+        }
+        Ensure(GetForegroundWindow() == foreground, "provider callbacks preserved foreground");
+        Console.WriteLine("Provider callbacks: PASS (real product provider PIDLs, Unicode nested folder, logical/native identities, registration cleanup; no HWND/ExplorerBrowser/file view)");
         return 0;
     }
 
@@ -52,6 +114,33 @@ internal static class FolderNavigationCallbacksProbe
         Ensure(((IDictionary)Field(host, "_issuedBrowserPaths")!).Count == 0,
             "completion retires registration even when the input is a Shell alias");
         Ensure(Field(host, "_retryPath") is null, "successful alias navigation clears its retry target");
+        EnsureUnhosted(host);
+    }
+
+    private static void CheckUnacceptedCallbacks(string path, nint pidl)
+    {
+        using var host = NewHost();
+        Call(host, "Navigate", path);
+        RegisterFolder(host, pidl);
+        var readiness = Field(host, "_viewReadiness")!;
+        var generationProperty = readiness.GetType().GetProperty("Generation", Members)!;
+        var before = (long)generationProperty.GetValue(readiness)!;
+        // A cancelled Pending never registered a visit. Its terminal callbacks must not consume
+        // a later same-location app registration before that replacement's Pending arrives.
+        Event(host, "OnNavigationFailed", pidl);
+        Event(host, "OnNavigationComplete", pidl);
+        Ensure(Count((IDictionary)Field(host, "_issuedBrowserPaths")!) == 1 &&
+            (long)generationProperty.GetValue(readiness)! == before,
+            "unaccepted callbacks leave replacement registration and read generation intact");
+        Event(host, "OnNavigationPending", pidl);
+        Event(host, "OnNavigationComplete", pidl);
+        Ensure(((IDictionary)Field(host, "_issuedBrowserPaths")!).Count == 0,
+            "accepted completion still retires its own registration");
+        var settled = (long)generationProperty.GetValue(readiness)!;
+        Event(host, "OnNavigationFailed", pidl);
+        Event(host, "OnNavigationComplete", pidl);
+        Ensure((long)generationProperty.GetValue(readiness)! == settled,
+            "duplicate terminal callbacks do not invalidate a settled read generation");
         EnsureUnhosted(host);
     }
 

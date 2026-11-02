@@ -2375,7 +2375,7 @@ namespace
         return S_OK;
     }
 
-    HRESULT ReadSyntheticRootPathFromPidl(PCIDLIST_ABSOLUTE value, std::wstring* path)
+    HRESULT ReadSyntheticRootPathFromPidl(PCIDLIST_ABSOLUTE value, std::wstring* path, bool includeChildren = false)
     {
         if (!value || !path) return E_POINTER;
         path->clear();
@@ -2401,6 +2401,18 @@ namespace
                     const auto characters = textBytes / sizeof(WCHAR);
                     path->append(header->text, characters);
                     segment = ILNext(segment);
+                }
+                if (includeChildren)
+                {
+                    // A bound absolute PIDL can contain real child segments after the encoded root.
+                    // Resolve the complete physical folder, rather than reopening the encoded ancestor.
+                    for (; !ILIsEmpty(segment); segment = ILNext(segment))
+                    {
+                        const auto* child = SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(segment));
+                        if (!child) return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+                        if (!path->empty() && path->back() != L'\\') path->push_back(L'\\');
+                        path->append(child->name);
+                    }
                 }
             }
             catch (const std::bad_alloc&) { path->clear(); return E_OUTOFMEMORY; }
@@ -3166,7 +3178,7 @@ namespace
             auto* copy = ILCloneFull(value);
             if (!copy) return E_OUTOFMEMORY;
             std::wstring backingPath;
-            auto result = ReadSyntheticRootPathFromPidl(value, &backingPath);
+            auto result = ReadSyntheticRootPathFromPidl(value, &backingPath, true);
             if (result == S_FALSE)
             {
                 try { backingPath = _configuredBackingPath.empty() ? g_syntheticSortBackingPath : _configuredBackingPath; }
@@ -3331,7 +3343,12 @@ namespace
             const bool hasUncRoot = (name[0] == L'\\' && name[1] == L'\\') ||
                 (name[0] == L'/' && name[1] == L'/');
             std::wstring pathFromToken;
-            auto tokenResult = DecodeSyntheticRootPathParsingToken(name, &pathFromToken);
+            // Decode only the root token. Shell absolute parsing names can append real child segments.
+            const auto* tokenSeparator = _wcsnicmp(name, L"edpath:", 7) == 0 ? wcschr(name, L'\\') : nullptr;
+            std::wstring rootToken;
+            try { if (tokenSeparator) rootToken.assign(name, tokenSeparator - name); }
+            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+            auto tokenResult = DecodeSyntheticRootPathParsingToken(tokenSeparator ? rootToken.c_str() : name, &pathFromToken);
             if (FAILED(tokenResult)) return tokenResult;
             if (tokenResult == S_OK || hasDriveRoot || hasUncRoot)
             {
@@ -3345,9 +3362,24 @@ namespace
                 PIDLIST_ABSOLUTE pathItem = nullptr;
                 pathResult = CreateSyntheticRootPathPidl(physicalPath, &pathItem);
                 if (FAILED(pathResult)) return pathResult;
+                if (tokenSeparator)
+                {
+                    IShellFolder2* nested = nullptr;
+                    PIDLIST_RELATIVE children = nullptr;
+                    pathResult = BindToObject(pathItem, bind, IID_PPV_ARGS(&nested));
+                    if (SUCCEEDED(pathResult)) pathResult = nested->ParseDisplayName(owner, bind,
+                        const_cast<LPWSTR>(tokenSeparator + 1), nullptr, &children, attributes);
+                    auto* combined = SUCCEEDED(pathResult) ? ILCombine(pathItem, children) : nullptr;
+                    if (children) CoTaskMemFree(children);
+                    if (nested) nested->Release();
+                    CoTaskMemFree(pathItem);
+                    if (FAILED(pathResult)) return pathResult;
+                    if (!combined) return E_OUTOFMEMORY;
+                    pathItem = combined;
+                }
                 *item = reinterpret_cast<PIDLIST_RELATIVE>(pathItem);
                 if (eaten) *eaten = static_cast<ULONG>(wcslen(name));
-                if (attributes) *attributes = SFGAO_FOLDER | SFGAO_HASSUBFOLDER;
+                if (attributes && !tokenSeparator) *attributes = SFGAO_FOLDER | SFGAO_HASSUBFOLDER;
                 return S_OK;
             }
             IShellFolder2* backingFolder = _inner;
@@ -3781,7 +3813,7 @@ namespace
             {
                 std::wstring path;
                 const auto pathResult = ReadSyntheticRootPathFromPidl(
-                    reinterpret_cast<PCIDLIST_ABSOLUTE>(items[0]), &path);
+                    reinterpret_cast<PCIDLIST_ABSOLUTE>(items[0]), &path, true);
                 if (pathResult == S_OK)
                 {
                     PIDLIST_ABSOLUTE pathPidl = nullptr;
@@ -3911,11 +3943,26 @@ namespace
             if (FAILED(rootPathResult)) return rootPathResult;
             const auto* child = SyntheticData(item);
             if (!child) return E_INVALIDARG;
+            std::wstring childDisplayName;
+            try { childDisplayName = child->name; }
+            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+            if ((flags & SHGDN_FORPARSING) && !(flags & SHGDN_INFOLDER))
+            {
+                // Desktop-absolute parsing must include this provider parent, not only the leaf.
+                // Otherwise Shell cannot identify a nested folder in navigation callbacks or bind saved selections.
+                LPWSTR parentName = nullptr;
+                auto result = SHGetNameFromIDList(_root, SIGDN_DESKTOPABSOLUTEPARSING, &parentName);
+                if (FAILED(result)) return result;
+                if (!parentName) return E_FAIL;
+                try { childDisplayName = std::wstring(parentName) + L"\\" + child->name; }
+                catch (const std::bad_alloc&) { CoTaskMemFree(parentName); return E_OUTOFMEMORY; }
+                CoTaskMemFree(parentName);
+            }
             name->uType = STRRET_WSTR;
-            const auto bytes = (wcslen(child->name) + 1) * sizeof(WCHAR);
+            const auto bytes = (childDisplayName.size() + 1) * sizeof(WCHAR);
             name->pOleStr = static_cast<LPWSTR>(CoTaskMemAlloc(bytes));
             if (!name->pOleStr) return E_OUTOFMEMORY;
-            CopyMemory(name->pOleStr, child->name, bytes);
+            CopyMemory(name->pOleStr, childDisplayName.c_str(), bytes);
             return S_OK;
         }
         HRESULT STDMETHODCALLTYPE SetNameOf(HWND owner, PCUITEMID_CHILD item, LPCWSTR name, SHGDNF flags,
