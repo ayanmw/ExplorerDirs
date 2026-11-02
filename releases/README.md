@@ -1,6 +1,6 @@
 # 可使用版本
 
-最新预览包为 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.86\app\ExplorerDirs.App.exe`，使用 temp.85 的独立 profile 副本。该版包含递归大小列的隔离原型与多根会话验证；原型尚未接入普通文件夹视图。App Release 构建、完整 Release SettingsSmoke 和发布隔离 smoke 通过；未启动 GUI。详情见[temp.86](../docs/releases/preview-0.6.0-temp.86.md)。
+最新预览包为 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.86\app\ExplorerDirs.App.exe`，使用 temp.85 的独立 profile 副本。程序集信息版本 `0.6.0-preview.temp.86+2e6214e836eb321abd0d4228be2f23c5c6122448`；EXE SHA-256 `F1B23EC4ACAD3752A5EBA3401E184B44860E3EAD6A29909ACD76198FF7E1B06D`。该版包含递归大小列的隔离原型与多根会话验证；原型尚未接入普通文件夹视图。App Release 构建、完整 Release SettingsSmoke、发布隔离 smoke 和 BuildIdentity smoke 通过；未启动 GUI。详情见[temp.86](../docs/releases/preview-0.6.0-temp.86.md)。
 
 上一个预览包为 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.85\app\ExplorerDirs.App.exe`，详情见[temp.85](../docs/releases/preview-0.6.0-temp.85.md)。
 
