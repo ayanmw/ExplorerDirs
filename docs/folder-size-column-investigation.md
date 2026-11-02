@@ -2812,3 +2812,13 @@ native `GetSyntheticDirectoryMetrics` 现在把 `ERROR_ACCESS_DENIED` 作为可�
 复查 profile Shell namespace owner 生命周期时发现，既有清理先核对根键标记，随后递归删除 CLSID/NameSpace 子树；若其他软件或用户在本程序运行期间向自有 CLSID 添加值或子键，该逻辑可能一并删除。清理现在要求根键、`InprocServer32`、`ShellFolder` 与 Desktop NameSpace 都只含预期值/子键，路径、线程模型和 ShellFolder 属性也吻合；随后仅删除已知拥有的值与键，不递归删除未知内容。若清理因外部编辑被拒绝，owner 保留 native module handle，使调用方恢复注册内容后可以重试。
 
 NativeProbe registration-owner smoke 验证正常创建/清理、陈旧自有注册恢复，以及外部修改 `ThreadingModel`、新增 CLSID 值/子键时拒绝清理并保留外部内容；移除外部编辑后重试成功。App、NativeProbe、SettingsSmoke Release build 与完整 SettingsSmoke 均通过。该 smoke 使用随机 volatile HKCU 注册，不创建 Shell view；未覆盖并发恶意写注册表竞态，也不声称修复逐行大小列本身。
+
+### 2026-11-02：按需列缓存容量与内存读数对照
+
+在同一 500 个同级目录、502 行、每目录 10 个 1 B 文件夹子树的隐藏 Private Desktop Shell view 中，分别将递归快照容量设为 128 和 512。两轮均先由 Shell 请求 22 行并扫描 22 个目录；探针随后读取整列，最终累计请求 502 行、扫描 501 个目录并读回全部大小值。容量 128 时缓存保留 128 条、报告载荷 41,728 B；容量 512 时保留 501 条、报告载荷 163,316 B。完整列读取期间累计扫描计时分别为约 33.96 ms 和 64.18 ms，存在热缓存/机器负载差异，不能据此比较容量导致的性能优劣。
+
+采样的 Private Bytes 在完整读列前后分别增加 131,072 B 和 147,456 B；Working Set 分别增加约 0.86 MiB 和 1.03 MiB。进程基线约 79–79.5 MiB Private Bytes / 126.5 MiB Working Set，差值包含 Shell、WPF、运行时及分配器噪声。载荷字节不含 map 节点、路径分配器和容量预留；两个容量档的 Private Bytes 差异也不能作为其真实内存差值。当前只能确认所缓存摘要载荷量级及完整读取时的本机进程区间。
+
+该探针未在缓存受限后强制重复读取早先已淘汰的行，也没有模拟多窗口长期保留、长路径、慢盘/网络或正常产品进程。因此不据此把产品候选容量调低到 128，也不宣称该容量可避免重复扫描；下一步应在隔离原型中对淘汰后回读的扫描次数作明确合同，再以真实路径长分布和多视图并发确定缓存边界。
+
+异步 8 项队列 smoke 同轮通过：首次读值在扫描前返回，峰值 worker 为 2，8 项快照发布成功，视图释放取消另 8 个未完成请求。两次容量实验的 Private Desktop watchdog 均 exit 0，前台和 last-input 守卫、临时 Shell 注册与夹具清理通过。日志：`src/.state/native-probe-watchdog/20261102-085215-b0ba9fa6.stdout.log`、`src/.state/native-probe-watchdog/20261102-085222-3f00295d.stdout.log`。
