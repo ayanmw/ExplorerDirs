@@ -43,6 +43,7 @@ internal static class Program
         if (args is ["--profile-owner-multi-root-shell-host-cache-boundary-product"]) return ProfileOwnerMultiRootShellHostProbe.Run(folderCount: 1024, diagnosticAdapter: false);
         if (args is ["--profile-owner-multi-root-shell-host-cache-overflow"]) return ProfileOwnerMultiRootShellHostProbe.Run(folderCount: 1025, cacheCapacity: 4096);
         if (args is ["--profile-owner-multi-root-shell-host-cache-overflow-8192"]) return ProfileOwnerMultiRootShellHostProbe.Run(folderCount: 1025, cacheCapacity: 8192);
+        if (args is ["--profile-owner-multi-root-shell-host-cache-overflow-8192-diagnostic-observer-on"]) return ProfileOwnerMultiRootShellHostProbe.Run(folderCount: 1025, cacheCapacity: 8192, captureNotificationIdentities: true);
         if (args is ["--profile-owner-multi-root-shell-host-cache-overflow-product"]) return ProfileOwnerMultiRootShellHostProbe.Run(folderCount: 1025, diagnosticAdapter: false);
         if (args is ["--profile-owner-session-recovery"]) return ProfileOwnerSessionRecoveryProbe.RunParent();
         if (args is ["--profile-owner-session-recovery-child", var sessionPath, var profile])

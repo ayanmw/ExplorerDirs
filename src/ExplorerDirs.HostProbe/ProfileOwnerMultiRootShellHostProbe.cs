@@ -15,7 +15,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
     internal static string FindProductAdapterForProbe() => FindProductAdapter();
 
     internal static int Run(bool large = false, int folderCount = 0, bool diagnosticAdapter = true,
-        int cacheCapacity = 8192)
+        int cacheCapacity = 8192, bool captureNotificationIdentities = false)
     {
         var root = Path.Combine(Path.GetTempPath(), "ExplorerDirs-ProfileOwnerMultiRoot-" + Guid.NewGuid().ToString("N"));
         var profile = Path.Combine(root, "profile");
@@ -66,7 +66,8 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 Marshal.GetDelegateForFunctionPointer<SetProductCompareTraceEnabled>(
                     NativeLibrary.GetExport(adapterModule, "SetProductCompareTraceEnabled"))(0);
                 Marshal.GetDelegateForFunctionPointer<SetProductNotificationIdentityCaptureEnabled>(
-                    NativeLibrary.GetExport(adapterModule, "SetProductNotificationIdentityCaptureEnabledForProbe"))(0);
+                    NativeLibrary.GetExport(adapterModule, "SetProductNotificationIdentityCaptureEnabledForProbe"))(
+                        captureNotificationIdentities ? 1 : 0);
                 var configureCache = Marshal.GetDelegateForFunctionPointer<ConfigureCacheCapacity>(
                     NativeLibrary.GetExport(adapterModule, "SetSyntheticRecursiveSizeCacheCapacityForProbe"));
                 var configureResult = configureCache(cacheCapacity);
@@ -251,7 +252,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 throw new InvalidOperationException("The product panes changed the foreground window.");
             var valueEdges = paneValues.Select(values => $"{values.Length}:{values[0]}..{values[^1]}");
             var cacheMetrics = adapterModule == 0 ? "diagnostic-counters=unavailable" : ReadCacheMetrics(adapterModule);
-            Console.WriteLine($"profile-owner-multi-root-shell-host: large={large}; diagnostic-notification-identity-capture-disabled={adapterModule != 0}; simultaneous-hosts={hosts.Count}; rows-per-pane={expectedItemCount}; roots=independent; value-ready-ms=[{string.Join('|', paneValueReadyMilliseconds)}]; sort-ready-ms=[{string.Join('|', paneSortReadyMilliseconds)}]; recursive-sort-value-edges=[{string.Join(" || ", valueEdges)}]; source-cache-capacity={cacheCapacity}; cache=[{cacheMetrics}]; selections=[{string.Join('|', paneSelections.Select(values => string.Join(',', values)))}]; focused-rows=[{string.Join('|', paneFocus)}]; parents-hidden=True; foreground-unchanged=True");
+            Console.WriteLine($"profile-owner-multi-root-shell-host: large={large}; diagnostic-notification-identity-capture={(adapterModule != 0 ? captureNotificationIdentities.ToString() : "unavailable")}; simultaneous-hosts={hosts.Count}; rows-per-pane={expectedItemCount}; roots=independent; value-ready-ms=[{string.Join('|', paneValueReadyMilliseconds)}]; sort-ready-ms=[{string.Join('|', paneSortReadyMilliseconds)}]; recursive-sort-value-edges=[{string.Join(" || ", valueEdges)}]; source-cache-capacity={cacheCapacity}; cache=[{cacheMetrics}]; selections=[{string.Join('|', paneSelections.Select(values => string.Join(',', values)))}]; focused-rows=[{string.Join('|', paneFocus)}]; parents-hidden=True; foreground-unchanged=True");
             return 0;
         }
         finally

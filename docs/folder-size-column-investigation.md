@@ -2890,3 +2890,5 @@ HostProbe Release build 0 警告/错误，`--profile-owner-session-recovery` exi
 新增仅供 HostProbe 使用的运行时开关，在保留通知发送、Shell 回调和标量计数器的前提下关闭逐项身份字符串采集。诊断 HostProbe 关闭比较轨迹与身份采集后，4×1,025 独立目录压力场景连续两轮完整通过：每窗格 1,025 行、四种升降序边界正确、缓存 4,100 条且 0 次淘汰，选区/焦点正确、前台不变。命令：`dotnet run --project src/ExplorerDirs.HostProbe/ExplorerDirs.HostProbe.csproj -c Release --no-build -- --profile-owner-multi-root-shell-host-cache-overflow-8192`。Native adapter 与 HostProbe Release 构建均为 0 警告/错误。
 
 这支持“诊断身份解析/字符串分配会扰动并行 Shell 排序”的解释，但两轮通过不足以证明它是此前间歇性部分排序的唯一根因；之前身份采集开启时也曾有一次通过。正式产品行为未改变，后续仍需在低观测负担下重复压力运行，并将这些诊断捕获限制为明确需要 PIDL 身份证据的专用探针。
+
+为验证该解释，HostProbe 增加显式 `--profile-owner-multi-root-shell-host-cache-overflow-8192-diagnostic-observer-on` 对照入口，构建通过。一次开启身份采集的尝试未得到排序结果：探针起始前台句柄为 `0`，运行期间变为 `0xC0CB6`，前台守卫按设计中止；这不是排序失败证据。该 HostProbe 尚未隔离到 Private Desktop，因此不再由后台命令直接重复运行。测试留下的唯一临时夹具位于 `%TEMP%\ExplorerDirs-ProfileOwnerMultiRoot-2dfad7d664c543b484f6e120cb11eb84`，本轮清理操作被自动审查拦截，需后续安全清理。
