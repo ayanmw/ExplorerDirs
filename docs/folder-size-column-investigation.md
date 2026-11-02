@@ -2792,3 +2792,11 @@ HostProbe 在同一 STA 调度流程内先发相反方向 Shell 排序，再发�
 native `GetSyntheticDirectoryMetrics` 现在把 `ERROR_ACCESS_DENIED` 作为可完成的部分扫描结果处理：不可遍历的根目录返回 0 B/0 项并记 1 个 unreadable；递归子目录被拒绝时保留可读兄弟的字节数/文件数，累计跳过位置并继续扫描。reparse 目录也按共享 C# 扫描器契约计为跳过而不深入。不可读数量随大小、文件数和目录数一并进入递归快照缓存；异步 worker 因扫描返回成功而发布快照和视图更新，避免大小列行持续空白。人类可读大小文本对部分值显示 `>= N B (partial; skipped N)`，内容摘要附上 unreadable/skipped 数；数值 Shell 属性仍为可读字节小计，供排序确定性完成。
 
 红/绿验证：先将 native ACL 探针改为要求 `S_OK`，重建 DLL 后在旧实现上按预期失败；实现后隔离 ACL 树得到 5 B、1 file、2 folders、1 skipped，且快照读回四个值一致。同步 on-demand smoke、异步 per-row 与 view-batch smoke 都通过；异步夹具中的 ACL 拒绝行不再保持 pending，兄弟值与跳过数均回读正确。生产递归扫描器的 ACL smoke 仍通过。NativeProbe 与 App Release build 均通过（0 warning/0 error），产品 adapter `/W4 /WX` 编译通过；隐藏产品 adapter + ExplorerBrowserHost 普通异步排序 smoke 也通过，行数全程 2 且前台未变。该普通目录 smoke 没有 ACL 拒绝项，不能替代真实产品可见 ACL 验收。无 GUI、无发布，逐行递归列仍是隔离原型。错误类型仍按失败处理，当前只把 `ERROR_ACCESS_DENIED` 归为可跳过结果。
+
+### 2026-11-02：递归快照保留不可读元数据并通过 500 行刷新
+
+上一轮把 native provider 自身的 ACL 扫描改为部分成功后，继续追踪生产 C# 扫描器到 Shell 快照的刷新链路，发现 `PublishSyntheticRecursiveSizeSnapshotForViewProbe` 只传字节数，文件数、目录数和 unreadable 会被丢弃。先增加跨边界读回断言，旧 adapter 因缺少该快照读取入口按预期失败；随后扩展快照发布/读取桥，将 `Bytes/Files/Directories/Unreadable` 四项都写入并读回。旧的 bytes-only 用例明确传零计数，避免伪造内容统计。
+
+500 个同级目录的隐藏 WPF/IShellView 探针现为 `child` 构造 16 层可读子目录，最深层放 1 B 文件，并在旁边放一个 ACL 拒绝目录。生产 C# 后台 scanner 返回 1 B、1 file、17 directories、1 unreadable；跨到 native snapshot 后四项一致。恢复 ACL 后发布 snapshot 并刷新 502 行：值和排序正确，选区/焦点保持；只发生 1 次 Shell 枚举，502 行重建没有再次递归扫描，整段约 500 ms。全程未改前台 HWND 或输入状态，隔离 Desktop 清理通过。
+
+另复测产品 ExplorerBrowserHost 的 1,002 行递归排序就绪扫描：完整检查约 294.57 ms，分批后约 281.78 ms、126 批、最大批 3.08 ms。最终顺序、三项选区和 ListView/Shell 焦点正确，但 Shell/ListView 计数轨迹仍两次出现 `0→1002`；隐藏探针没有 paint 消息不能证明桌面像素无空帧。App、NativeProbe、HostProbe Release build 均 0 warning/0 error；递归扫描器 ACL smoke、native 同步/异步 ACL smoke、普通产品异步 HostProbe 均通过。该 Shell view 和跨边界发布桥仍是隔离验证，并非普通物理目录已启用的功能；未做可见 UI、慢盘/网络验证，也未发布。

@@ -2940,7 +2940,8 @@ namespace
             return references;
         }
         HRESULT SetRecursiveSizeSnapshotForProbe(PCUITEMID_CHILD item, PCWSTR parsingName,
-            const SyntheticFileIdentity& expectedIdentity, ULONGLONG bytes)
+            const SyntheticFileIdentity& expectedIdentity, ULONGLONG bytes, ULONGLONG files = 0,
+            ULONGLONG folders = 0, ULONGLONG unreadable = 0)
         {
             const auto* child = SyntheticData(item);
             const SyntheticFileIdentityLess less{};
@@ -2951,19 +2952,21 @@ namespace
             auto result = GetAbsoluteParsingName(child, &shellParsingName);
             if (FAILED(result)) return result;
             if (CompareStringOrdinal(shellParsingName.c_str(), -1, parsingName, -1, TRUE) != CSTR_EQUAL) return E_INVALIDARG;
-            return _recursiveSizeStore->Set(parsingName, child->identity, bytes);
+            return _recursiveSizeStore->Set(parsingName, child->identity, bytes, files, folders, unreadable);
         }
         size_t RecursiveSizeSnapshotCountForProbe() const
         {
             return _recursiveSizeStore ? _recursiveSizeStore->Count() : 0;
         }
         bool TryGetRecursiveSizeSnapshotForProbe(PCWSTR parsingName,
-            const SyntheticFileIdentity& identity, ULONGLONG* bytes) const
+            const SyntheticFileIdentity& identity, ULONGLONG* bytes, ULONGLONG* files = nullptr,
+            ULONGLONG* folders = nullptr, ULONGLONG* unreadable = nullptr) const
         {
             return parsingName && _recursiveSizeStore &&
-                _recursiveSizeStore->TryGet(parsingName, identity, bytes);
+                _recursiveSizeStore->TryGet(parsingName, identity, bytes, files, folders, unreadable);
         }
-        HRESULT PublishRecursiveSizeSnapshotForChildProbe(PCWSTR childName, ULONGLONG bytes)
+        HRESULT PublishRecursiveSizeSnapshotForChildProbe(PCWSTR childName, ULONGLONG bytes,
+            ULONGLONG files, ULONGLONG folders, ULONGLONG unreadable)
         {
             if (!childName || !*childName || !_recursiveSizeStore) return E_INVALIDARG;
             PITEMID_CHILD childItem = nullptr;
@@ -2974,7 +2977,25 @@ namespace
             if (!child) result = E_INVALIDARG;
             else result = GetAbsoluteParsingName(child, &parsingName);
             if (SUCCEEDED(result))
-                result = SetRecursiveSizeSnapshotForProbe(childItem, parsingName.c_str(), child->identity, bytes);
+                result = SetRecursiveSizeSnapshotForProbe(childItem, parsingName.c_str(), child->identity,
+                    bytes, files, folders, unreadable);
+            CoTaskMemFree(childItem);
+            return result;
+        }
+        HRESULT ReadRecursiveSizeSnapshotForChildProbe(PCWSTR childName, ULONGLONG* bytes,
+            ULONGLONG* files, ULONGLONG* folders, ULONGLONG* unreadable)
+        {
+            if (!childName || !*childName || !bytes || !files || !folders || !unreadable || !_recursiveSizeStore)
+                return E_INVALIDARG;
+            PITEMID_CHILD childItem = nullptr;
+            auto result = ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(childName), nullptr, &childItem, nullptr);
+            if (FAILED(result)) return result;
+            const auto* child = SyntheticData(childItem);
+            std::wstring parsingName;
+            if (!child || !(child->attributes & FILE_ATTRIBUTE_DIRECTORY)) result = E_INVALIDARG;
+            else result = GetAbsoluteParsingName(child, &parsingName);
+            if (SUCCEEDED(result) && !_recursiveSizeStore->TryGet(parsingName, child->identity,
+                bytes, files, folders, unreadable)) result = HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
             CoTaskMemFree(childItem);
             return result;
         }
@@ -5881,7 +5902,8 @@ extern "C" ED_PROBE_EXPORT HRESULT WINAPI VerifySyntheticShellActivatedRecursive
     if (FAILED(result)) goto cleanup;
     if (firstIdentity == secondIdentity) { result = HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS); goto cleanup; }
 
-    result = static_cast<SyntheticSortFolder*>(first)->PublishRecursiveSizeSnapshotForChildProbe(L"child", sentinelBytes);
+    result = static_cast<SyntheticSortFolder*>(first)->PublishRecursiveSizeSnapshotForChildProbe(
+        L"child", sentinelBytes, 0, 0, 0);
     if (FAILED(result)) goto cleanup;
     result = second->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"child"), nullptr, &secondChild, nullptr);
     if (FAILED(result)) goto cleanup;
@@ -7794,14 +7816,29 @@ extern "C" ED_PROBE_EXPORT HRESULT WINAPI NotifySyntheticSortRefreshForProbe(ISh
 }
 
 extern "C" ED_PROBE_EXPORT HRESULT WINAPI PublishSyntheticRecursiveSizeSnapshotForViewProbe(
-    IShellView* view, PCWSTR childName, ULONGLONG bytes)
+    IShellView* view, PCWSTR childName, ULONGLONG bytes, ULONGLONG files, ULONGLONG folders,
+    ULONGLONG unreadable)
 {
     if (!view || !childName || !*childName) return E_INVALIDARG;
     for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
     {
         auto* folder = static_cast<SyntheticSortFolder*>(InterlockedCompareExchangePointer(&g_syntheticSortViewHolds[index], nullptr, nullptr));
         if (!folder || !folder->OwnsShellView(view)) continue;
-        return folder->PublishRecursiveSizeSnapshotForChildProbe(childName, bytes);
+        return folder->PublishRecursiveSizeSnapshotForChildProbe(childName, bytes, files, folders, unreadable);
+    }
+    return E_INVALIDARG;
+}
+
+extern "C" ED_PROBE_EXPORT HRESULT WINAPI GetSyntheticRecursiveSizeSnapshotForViewProbe(
+    IShellView* view, PCWSTR childName, ULONGLONG* bytes, ULONGLONG* files, ULONGLONG* folders,
+    ULONGLONG* unreadable)
+{
+    if (!view || !childName || !*childName) return E_INVALIDARG;
+    for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
+    {
+        auto* folder = static_cast<SyntheticSortFolder*>(InterlockedCompareExchangePointer(&g_syntheticSortViewHolds[index], nullptr, nullptr));
+        if (!folder || !folder->OwnsShellView(view)) continue;
+        return folder->ReadRecursiveSizeSnapshotForChildProbe(childName, bytes, files, folders, unreadable);
     }
     return E_INVALIDARG;
 }

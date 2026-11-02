@@ -3016,12 +3016,50 @@ public static class SyntheticShellSortProbe
         if (publishLiveSnapshot)
         {
             var childPath = Path.Combine(backingFolder, "child");
+            DirectoryInfo? deniedInfo = null;
+            FileSystemAccessRule? denyRule = null;
+            if (Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_DEEP_ACL_UPDATE") == "1")
+            {
+                File.Delete(Path.Combine(childPath, "direct.bin"));
+                var deepPath = childPath;
+                for (var depth = 0; depth < 16; depth++)
+                {
+                    deepPath = Path.Combine(deepPath, $"depth-{depth:D2}-long-segment");
+                    Directory.CreateDirectory(deepPath);
+                }
+                File.WriteAllBytes(Path.Combine(deepPath, "deep.bin"), new byte[checked((int)updatedSize)]);
+                var deniedDirectory = Path.Combine(childPath, "denied");
+                Directory.CreateDirectory(deniedDirectory);
+                File.WriteAllBytes(Path.Combine(deniedDirectory, "denied.bin"), new byte[7]);
+                deniedInfo = new DirectoryInfo(deniedDirectory);
+                var deniedSecurity = deniedInfo.GetAccessControl(AccessControlSections.Access);
+                var currentUser = WindowsIdentity.GetCurrent().User ??
+                    throw new InvalidOperationException("The current user has no security identifier for the ACL fixture.");
+                denyRule = new FileSystemAccessRule(currentUser,
+                    FileSystemRights.ListDirectory | FileSystemRights.ReadAttributes | FileSystemRights.Traverse,
+                    AccessControlType.Deny);
+                deniedSecurity.AddAccessRule(denyRule);
+                deniedInfo.SetAccessControl(deniedSecurity);
+            }
             var ownerThreadId = Environment.CurrentManagedThreadId;
             var workerThreadId = 0;
             var publishThreadId = 0;
-            var scan = scanInBackground
-                ? ScanRecursiveDirectoryOffOwnerThread(childPath, out workerThreadId, out publishThreadId)
-                : RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(backingFolder, [childPath], CancellationToken.None);
+            IReadOnlyDictionary<string, RecursiveDirectoryScanResult> scan;
+            try
+            {
+                scan = scanInBackground
+                    ? ScanRecursiveDirectoryOffOwnerThread(childPath, out workerThreadId, out publishThreadId)
+                    : RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(backingFolder, [childPath], CancellationToken.None);
+            }
+            finally
+            {
+                if (deniedInfo is not null && denyRule is not null)
+                {
+                    var deniedSecurity = deniedInfo.GetAccessControl(AccessControlSections.Access);
+                    deniedSecurity.RemoveAccessRuleSpecific(denyRule);
+                    deniedInfo.SetAccessControl(deniedSecurity);
+                }
+            }
             if (scanInBackground)
             {
                 if (workerThreadId == ownerThreadId || publishThreadId != ownerThreadId || Environment.CurrentManagedThreadId != ownerThreadId)
@@ -3031,9 +3069,24 @@ public static class SyntheticShellSortProbe
             if (!scan.TryGetValue(Path.GetFullPath(childPath), out var scannedChild) ||
                 scannedChild.Bytes != checked((ulong)updatedSize))
                 throw new InvalidOperationException($"The production scanner did not produce the expected {updatedSize}-byte live update.");
+            if (Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_DEEP_ACL_UPDATE") == "1" &&
+                scannedChild.Unreadable != 1)
+                throw new InvalidOperationException($"The deep ACL fixture should publish one unreadable location; got {scannedChild.Unreadable}.");
             var publish = Marshal.GetDelegateForFunctionPointer<PublishRecursiveSizeSnapshot>(
                 NativeLibrary.GetExport(module, "PublishSyntheticRecursiveSizeSnapshotForViewProbe"));
-            Check(publish(view, "child", scannedChild.Bytes));
+            Check(publish(view, "child", scannedChild.Bytes, checked((ulong)scannedChild.Files),
+                checked((ulong)scannedChild.Directories), checked((ulong)scannedChild.Unreadable)));
+            var readSnapshot = Marshal.GetDelegateForFunctionPointer<ReadRecursiveSizeSnapshot>(
+                NativeLibrary.GetExport(module, "GetSyntheticRecursiveSizeSnapshotForViewProbe"));
+            Check(readSnapshot(view, "child", out var publishedBytes, out var publishedFiles,
+                out var publishedDirectories, out var publishedUnreadable));
+            if (publishedBytes != scannedChild.Bytes || publishedFiles != (ulong)scannedChild.Files ||
+                publishedDirectories != (ulong)scannedChild.Directories ||
+                publishedUnreadable != (ulong)scannedChild.Unreadable)
+                throw new InvalidOperationException($"The native view snapshot lost scanner metadata: expected={scannedChild}; actual={publishedBytes} B/{publishedFiles} files/{publishedDirectories} folders/{publishedUnreadable} unreadable.");
+            if (Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_DEEP_ACL_UPDATE") == "1" &&
+                (publishedFiles != 1 || publishedDirectories != 17 || publishedUnreadable != 1))
+                throw new InvalidOperationException($"Deep ACL metrics did not cross the production scanner-to-provider boundary: {publishedFiles} files/{publishedDirectories} folders/{publishedUnreadable} unreadable.");
             Console.WriteLine($"synthetic-size-update: snapshot-source=production-recursive-scanner; bytes={scannedChild.Bytes}; " +
                 $"files={scannedChild.Files}; directories={scannedChild.Directories}; unreadable={scannedChild.Unreadable}");
             SetSyntheticSizeOverride(module, -1);
@@ -3624,7 +3677,7 @@ public static class SyntheticShellSortProbe
         var hasRecursiveSnapshot = Marshal.GetDelegateForFunctionPointer<HasRecursiveSizeSnapshot>(
             NativeLibrary.GetExport(module, "HasSyntheticRecursiveSizeSnapshotForViewProbe"));
         const ulong recursiveSnapshotSentinel = 0xD1A6BEEF;
-        Check(publishRecursiveSnapshot(view, "child", recursiveSnapshotSentinel));
+        Check(publishRecursiveSnapshot(view, "child", recursiveSnapshotSentinel, 0, 0, 0));
         if (!hasRecursiveSnapshot(view, "child"))
             throw new InvalidOperationException("The active synthetic view did not retain its published child recursive-size snapshot.");
         var childDirectory = Path.Combine(backingFolder, "child");
@@ -3641,7 +3694,7 @@ public static class SyntheticShellSortProbe
                 throw new TimeoutException("A real SHChangeNotify event did not reach the active synthetic view to invalidate the child's recursive-size snapshot.");
         }
         finally { ILFree(childDirectoryPidl); }
-        Check(publishRecursiveSnapshot(view, "child", recursiveSnapshotSentinel + 1));
+        Check(publishRecursiveSnapshot(view, "child", recursiveSnapshotSentinel + 1, 0, 0, 0));
         var changedNestedFile = Path.Combine(childDirectory, "recursive-size-notification-check.dat");
         File.WriteAllBytes(changedNestedFile, [0x52]);
         Check(SHParseDisplayName(childDirectory, 0, out childDirectoryPidl, 0, out _));
@@ -5093,7 +5146,8 @@ public static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CancelViewRefresh(nint view);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ScheduleSingleRefresh(nint view);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int NotifySingleRefresh(nint view);
-    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int PublishRecursiveSizeSnapshot(nint view, [MarshalAs(UnmanagedType.LPWStr)] string childName, ulong bytes);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int PublishRecursiveSizeSnapshot(nint view, [MarshalAs(UnmanagedType.LPWStr)] string childName, ulong bytes, ulong files, ulong directories, ulong unreadable);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int ReadRecursiveSizeSnapshot(nint view, [MarshalAs(UnmanagedType.LPWStr)] string childName, out ulong bytes, out ulong files, out ulong directories, out ulong unreadable);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] [return: MarshalAs(UnmanagedType.Bool)] private delegate bool HasRecursiveSizeSnapshot(nint view, [MarshalAs(UnmanagedType.LPWStr)] string childName);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] [return: MarshalAs(UnmanagedType.Bool)] private delegate bool HasRecursiveSizeScanReservationForChild(nint view, [MarshalAs(UnmanagedType.LPWStr)] string childName);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int InvalidateRecursiveSizeScanForChild(nint view, [MarshalAs(UnmanagedType.LPWStr)] string childName);
