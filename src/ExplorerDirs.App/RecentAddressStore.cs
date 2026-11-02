@@ -18,11 +18,19 @@ internal sealed class RecentAddressStore
 
     internal void Record(string path)
     {
-        if (string.IsNullOrWhiteSpace(path) || _paths.Count > 0 && FavoritesStore.SamePath(_paths[0], path)) return;
+        if (string.IsNullOrWhiteSpace(path)) return;
         try
         {
             // Reload before merging histories from cooperating windows; the writer still rejects a later race.
             var latest = _store.Load();
+            // Another window may have changed recency since our cached first item was read.
+            // Skip rewriting only after checking the shared snapshot, and refresh our local menu too.
+            if (latest.Count is > 0 and <= 20 && FavoritesStore.SamePath(latest[0], path))
+            {
+                _paths = latest.ToArray();
+                Warning = _store.LoadWarning;
+                return;
+            }
             var proposed = new[] { path }.Concat(latest.Where(item => !FavoritesStore.SamePath(item, path))).Take(20).ToArray();
             _store.Save(proposed);
             _paths = proposed;

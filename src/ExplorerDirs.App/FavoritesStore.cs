@@ -99,7 +99,9 @@ internal sealed class FavoritesStore
                 names.Keys.Any(index => !values.ContainsKey(index)) || groups.Keys.Any(index => !values.ContainsKey(index))))
                 complete = false;
             if (count != values.Count || values.Keys.Any(index => index >= count)) complete = false;
-            for (var index = 0; index < count; index++)
+            // A damaged Count is already marked incomplete; never loop beyond the supported catalog budget.
+            // Favorites, common locations and recent addresses all load this file on the UI thread.
+            for (var index = 0; index < Math.Clamp(count, 0, MaxFavorites); index++)
                 if (!values.ContainsKey(index)) complete = false;
             recovered = Normalize(values.OrderBy(entry => entry.Key).Select(entry => entry.Value));
             string DecodeMetadata(Dictionary<int, string> metadata, int index)

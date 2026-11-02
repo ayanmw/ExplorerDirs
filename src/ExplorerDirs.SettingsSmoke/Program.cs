@@ -58,6 +58,7 @@ if (args is ["--everything-size-live", var everythingDirectory])
 
 if (args is ["--favorites-catalog-smoke"])
 {
+    FavoritesStoreBoundsSmoke.Run();
     var fixturePath = Path.Combine(AppContext.BaseDirectory, "favorites-catalog-" + Guid.NewGuid().ToString("N") + ".ini");
     var catalogStore = new FavoritesStore(fixturePath);
     catalogStore.Load();
@@ -89,6 +90,9 @@ if (args is ["--favorites-catalog-smoke"])
     recentA.Record(@"C:\one"); recentB.Record(@"C:\two");
     if (!new RecentAddressStore(recentFixturePath).Paths.SequenceEqual(new[] { @"C:\two", @"C:\one" }))
         throw new Exception("Recent addresses from independent windows did not merge.");
+    recentA.Record(@"C:\one");
+    if (!new RecentAddressStore(recentFixturePath).Paths.SequenceEqual(new[] { @"C:\one", @"C:\two" }))
+        throw new Exception("Revisiting a locally current address ignored another window's more recent navigation.");
     for (var recentIndex = 0; recentIndex < 25; recentIndex++) recentA.Record($@"C:\folder-{recentIndex}");
     recentA.Record(@"C:\folder-24");
     var recentRestarted = new RecentAddressStore(recentFixturePath);
