@@ -6994,10 +6994,56 @@ extern "C" ED_PROBE_EXPORT HRESULT WINAPI RunSyntheticOnDemandRecursiveSizeColum
             InterlockedCompareExchange(&g_syntheticDirectoryMetricsEntryCount, 0, 0) == requestedEntries;
         if (!cachedValueMatches || !repeatedReadWasCached) { cleanup(); return E_FAIL; }
 
+        PITEMID_CHILD secondFolderItem = nullptr;
+        ULONG secondFetched = 0;
+        // Shell enumeration order is provider-controlled, so find the eviction row by name.
+        do
+        {
+            operationResult = enumerator->Next(1, &secondFolderItem, &secondFetched);
+            if (operationResult != S_OK || secondFetched != 1) break;
+            const auto* candidate = SyntheticData(secondFolderItem);
+            if (candidate && _wcsicmp(candidate->name, L"unreadable-root") == 0) break;
+            CoTaskMemFree(secondFolderItem);
+            secondFolderItem = nullptr;
+        } while (true);
+        if (operationResult != S_OK || secondFetched != 1 || !secondFolderItem)
+        {
+            if (secondFolderItem) CoTaskMemFree(secondFolderItem);
+            cleanup();
+            return E_FAIL;
+        }
+        details = {};
+        operationResult = root->GetDetailsOf(secondFolderItem, 1, &details);
+        if (details.str.uType == STRRET_WSTR && details.str.pOleStr) CoTaskMemFree(details.str.pOleStr);
+        const auto scansAfterSecondFolder = InterlockedCompareExchange(&g_syntheticOnDemandSizeScanCount, 0, 0);
+        if (FAILED(operationResult) || scansAfterSecondFolder != 2)
+        {
+            CoTaskMemFree(secondFolderItem);
+            cleanup();
+            return E_FAIL;
+        }
+
+        details = {};
+        operationResult = root->GetDetailsOf(item, 1, &details);
+        const bool evictedValueMatches = SUCCEEDED(operationResult) && details.str.uType == STRRET_WSTR &&
+            details.str.pOleStr && _wcsicmp(details.str.pOleStr, L"26") == 0;
+        if (details.str.uType == STRRET_WSTR && details.str.pOleStr) CoTaskMemFree(details.str.pOleStr);
+        const auto scansAfterEvictedRead = InterlockedCompareExchange(&g_syntheticOnDemandSizeScanCount, 0, 0);
+        CoTaskMemFree(secondFolderItem);
+        if (!evictedValueMatches || scansAfterEvictedRead != scansAfterSecondFolder + 1)
+        {
+            TraceSyntheticSortStage("synthetic-on-demand-size: evicted-row-reread-did-not-rescan");
+            cleanup();
+            return E_FAIL;
+        }
+        const auto metricsAfterEvictedRead = InterlockedCompareExchange(&g_syntheticDirectoryMetricsCallCount, 0, 0);
+        const auto entriesAfterEvictedRead = InterlockedCompareExchange(&g_syntheticDirectoryMetricsEntryCount, 0, 0);
+
         operationResult = root->CompareIDs(1, item, item);
         const bool compareAvoidedScanning = SUCCEEDED(operationResult) &&
-            InterlockedCompareExchange(&g_syntheticDirectoryMetricsCallCount, 0, 0) == requestedCalls &&
-            InterlockedCompareExchange(&g_syntheticDirectoryMetricsEntryCount, 0, 0) == requestedEntries;
+            InterlockedCompareExchange(&g_syntheticOnDemandSizeScanCount, 0, 0) == scansAfterEvictedRead &&
+            InterlockedCompareExchange(&g_syntheticDirectoryMetricsCallCount, 0, 0) == metricsAfterEvictedRead &&
+            InterlockedCompareExchange(&g_syntheticDirectoryMetricsEntryCount, 0, 0) == entriesAfterEvictedRead;
         cleanup();
         if (!compareAvoidedScanning) return E_FAIL;
         std::wstring unreadableRoot;
@@ -7016,7 +7062,7 @@ extern "C" ED_PROBE_EXPORT HRESULT WINAPI RunSyntheticOnDemandRecursiveSizeColum
         if (!unreadableStore.TryGet(unreadableRoot, unreadableIdentity, &cachedBytes, &cachedFiles,
             &cachedFolders, &cachedUnreadable) || cachedBytes != 5 || cachedFiles != 1 ||
             cachedFolders != 2 || cachedUnreadable != 1) return E_FAIL;
-        TraceSyntheticSortStage("synthetic-on-demand-size: enumeration=0; first-details-read=18-calls/35-entries; depth=16; total=26-bytes/18-files/17-folders; repeated-read=cached; compareids=0-additional-scans; nested-access-denied=partial-5-bytes/1-file/2-folders/1-skipped");
+        TraceSyntheticSortStage("synthetic-on-demand-size: enumeration=0; first-details-read=18-calls/35-entries; depth=16; total=26-bytes/18-files/17-folders; repeated-read=cached; capacity-1-eviction-reread=rescan; compareids=0-additional-scans; nested-access-denied=partial-5-bytes/1-file/2-folders/1-skipped");
         return S_OK;
     }();
     InterlockedExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, previousDemandSetting);

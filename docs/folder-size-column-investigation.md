@@ -2819,6 +2819,12 @@ NativeProbe registration-owner smoke 验证正常创建/清理、陈旧自有注
 
 采样的 Private Bytes 在完整读列前后分别增加 131,072 B 和 147,456 B；Working Set 分别增加约 0.86 MiB 和 1.03 MiB。进程基线约 79–79.5 MiB Private Bytes / 126.5 MiB Working Set，差值包含 Shell、WPF、运行时及分配器噪声。载荷字节不含 map 节点、路径分配器和容量预留；两个容量档的 Private Bytes 差异也不能作为其真实内存差值。当前只能确认所缓存摘要载荷量级及完整读取时的本机进程区间。
 
-该探针未在缓存受限后强制重复读取早先已淘汰的行，也没有模拟多窗口长期保留、长路径、慢盘/网络或正常产品进程。因此不据此把产品候选容量调低到 128，也不宣称该容量可避免重复扫描；下一步应在隔离原型中对淘汰后回读的扫描次数作明确合同，再以真实路径长分布和多视图并发确定缓存边界。
+该探针未在缓存受限后强制重复读取早先已淘汰的行，也没有模拟多窗口长期保留、长路径、慢盘/网络或正常产品进程。因此不据此把产品候选容量调低到 128，也不宣称该容量可避免重复扫描；隔离容量为 1 的淘汰回读合同已在下节补测；真实路径长分布和多视图并发仍需后续评估缓存边界。
 
 异步 8 项队列 smoke 同轮通过：首次读值在扫描前返回，峰值 worker 为 2，8 项快照发布成功，视图释放取消另 8 个未完成请求。两次容量实验的 Private Desktop watchdog 均 exit 0，前台和 last-input 守卫、临时 Shell 注册与夹具清理通过。日志：`src/.state/native-probe-watchdog/20261102-085215-b0ba9fa6.stdout.log`、`src/.state/native-probe-watchdog/20261102-085222-3f00295d.stdout.log`。
+
+### 2026-11-02：容量淘汰后重新请求会触发递归扫描
+
+扩展同步按需列合同，将隔离快照容量设为 1。首次读取深层 `child` 得到 26 B，重复读取和读取对应 `VT_UI8` 属性均命中缓存且不增加扫描；再读取 `unreadable-root` 发布其可访问部分摘要并挤出 `child` 快照。随后重新请求原 `child` 行，值仍为 26 B，按预期新增一次递归扫描；此后对该行调用 `CompareIDs` 不再增加目录指标调用或访问条目数。由此确认小于回看工作集的容量会在 Shell 再次请求已淘汰行时重复扫描，但不会返回错误旧值；缓存命中时排序比较不做磁盘扫描。
+
+NativeProbe 通过出口将容量限制为 1，App Release 构建同时重建原生 adapter；同步深层/ACL按需 smoke 和异步 8 请求队列 smoke 均通过（App、NativeProbe Release 0 警告/错误）。本项直接使用隔离 `IShellFolder` 合同，没有创建 Shell view；未证明 DefView 会在真实滚动/排序中以何种频率重读淘汰行，也不代表 ExplorerBrowser 产品启用。日志输出由两条 NativeProbe CLI 命令直接返回，临时 ACL/夹具清理在 smoke `finally` 中完成。

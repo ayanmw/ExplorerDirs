@@ -288,12 +288,20 @@ public static class SyntheticShellSortProbe
             var module = NativeLibrary.Load(FindAdapterLibrary());
             try
             {
+                var setCacheCapacity = Marshal.GetDelegateForFunctionPointer<SetCacheCapacity>(
+                    NativeLibrary.GetExport(module, "SetSyntheticRecursiveSizeCacheCapacityForProbe"));
+                Check(setCacheCapacity(1));
                 var check = Marshal.GetDelegateForFunctionPointer<FolderTreeContractSmoke>(
                     NativeLibrary.GetExport(module, "RunSyntheticOnDemandRecursiveSizeColumnSmoke"));
                 Check(check(fixture));
             }
-            finally { NativeLibrary.Free(module); }
-            Console.WriteLine($"synthetic-on-demand-recursive-size-column-smoke: enumeration-does-not-scan=True; first-value-read-scans=True; deep-tree-depth=16; deep-path-chars={deepPath.Length}; recursive-total=26-bytes-18-files-17-folders; repeated-value-read-uses-cache=True; compareids-does-not-scan=True; acl-denied-child-keeps-5-byte-accessible-subtotal=True; unreadable-count-cached=1; shell-view-created=False");
+            finally
+            {
+                _ = Marshal.GetDelegateForFunctionPointer<SetCacheCapacity>(
+                    NativeLibrary.GetExport(module, "SetSyntheticRecursiveSizeCacheCapacityForProbe"))(4096);
+                NativeLibrary.Free(module);
+            }
+            Console.WriteLine($"synthetic-on-demand-recursive-size-column-smoke: enumeration-does-not-scan=True; first-value-read-scans=True; deep-tree-depth=16; deep-path-chars={deepPath.Length}; recursive-total=26-bytes-18-files-17-folders; repeated-value-read-uses-cache=True; capacity-1-eviction-reread-rescans=True; compareids-does-not-scan=True; acl-denied-child-keeps-5-byte-accessible-subtotal=True; unreadable-count-cached=1; shell-view-created=False");
             return 0;
         }
         finally
