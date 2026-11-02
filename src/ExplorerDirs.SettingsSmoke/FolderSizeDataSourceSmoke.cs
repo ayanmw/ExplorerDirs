@@ -32,6 +32,7 @@ internal static class FolderSizeDataSourceSmoke
         try { await resolver.ResolveAsync(root, [missing], FolderSizeSource.Auto, cancellation.Token); throw new Exception("Cancellation ignored."); }
         catch (OperationCanceledException) { }
         await CheckRunningCancellation(root);
+        await CheckPagedResults(root);
 
         var settingsPath = Path.Combine(AppContext.BaseDirectory, "folder-size-options-" + Guid.NewGuid().ToString("N") + ".ini");
         var store = new FolderSizeOptionsStore(settingsPath);
@@ -99,6 +100,38 @@ internal static class FolderSizeDataSourceSmoke
     {
         try { await task; throw new Exception("Running scan cancellation was ignored."); }
         catch (OperationCanceledException) { }
+    }
+
+    private static async Task CheckPagedResults(string root)
+    {
+        var rows = Enumerable.Range(0, EverythingSizeClient.PageSize * 2 + 1)
+            .Select(index => new IndexedSizeItem(root + $@"\folder-{index:D5}", true,
+                index == EverythingSizeClient.PageSize ? null : (ulong)index)).ToArray();
+        var offsets = new List<uint>(); var scans = 0;
+        var resolver = new FolderSizeDataSource((_, offset, _) =>
+        {
+            offsets.Add(offset);
+            return Task.FromResult(new IndexedSizePage(EverythingSizeStatus.Available,
+                rows.Skip((int)offset).Take(EverythingSizeClient.PageSize).ToArray(), (uint)rows.Length, offset));
+        }, (_, _) => { scans++; return new(37, 1, 0, 0); });
+        var values = await resolver.ResolveAsync(root, rows.Select(row => row.Path), FolderSizeSource.Everything, CancellationToken.None);
+        if (!offsets.SequenceEqual(new uint[] { 0, 2048, 4096 }) || scans != 0 || values.Count != rows.Length ||
+            values[rows[0].Path].Bytes != 0 || values[rows[^1].Path].Bytes != 4096 || values[rows[2048].Path].Bytes is not null)
+            throw new Exception("Paged Everything results lost offsets, unknown/zero or last-page values.");
+        offsets.Clear();
+        values = await resolver.ResolveAsync(root, rows.Select(row => row.Path), FolderSizeSource.Auto, CancellationToken.None);
+        if (scans != 1 || values[rows[2048].Path].Bytes != 37 || offsets.Count != 3)
+            throw new Exception("Paged automatic resolution scanned already indexed directories.");
+
+        using var cancelled = new CancellationTokenSource();
+        var progress = new CountProgress();
+        var retiring = new FolderSizeDataSource((_, _, _) =>
+        {
+            cancelled.Cancel();
+            return Task.FromResult(new IndexedSizePage(EverythingSizeStatus.Available, rows.Take(2048).ToArray(), (uint)rows.Length));
+        });
+        await ExpectCancelled(retiring.ResolveAsync(root, rows.Select(row => row.Path), FolderSizeSource.Everything, cancelled.Token, progress));
+        if (progress.Count != 0) throw new Exception("A retired Everything page published progress after cancellation.");
     }
 
     private sealed class CountProgress : IProgress<KeyValuePair<string, FolderSizeValue>>

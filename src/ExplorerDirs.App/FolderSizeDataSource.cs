@@ -25,6 +25,7 @@ internal sealed class FolderSizeDataSource
         string parent, IEnumerable<string> directories, FolderSizeSource source, CancellationToken cancellationToken,
         IProgress<KeyValuePair<string, FolderSizeValue>>? progress = null)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var requested = directories.Select(Path.GetFullPath).Select(Path.TrimEndingDirectorySeparator)
             .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         if (requested.Any(path => !FavoritesStore.SamePath(Path.GetDirectoryName(path) ?? "", parent)))
@@ -39,10 +40,13 @@ internal sealed class FolderSizeDataSource
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var page = await _query(parent, offset, cancellationToken).ConfigureAwait(false);
+                // A completed IPC task can race closing or switching the analysis; retire before publishing its batch.
+                cancellationToken.ThrowIfCancellationRequested();
                 if (page.Status != EverythingSizeStatus.Available)
                 { unavailable = page.Detail ?? $"Everything: {page.Status}"; break; }
                 foreach (var item in page.Items)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     var path = Path.TrimEndingDirectorySeparator(item.Path);
                     if (item.IsDirectory && item.Bytes is { } bytes && requestedSet.Contains(path))
                     {
@@ -60,6 +64,7 @@ internal sealed class FolderSizeDataSource
         {
             foreach (var path in pending)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 result[path] = new(null, source, Detail: unavailable ?? "Everything 没有该目录的大小索引。");
                 progress?.Report(new(path, result[path]));
             }

@@ -34,17 +34,27 @@ internal static class FolderSizeNativeBridgeSmoke
             var query = Marshal.GetDelegateForFunctionPointer<Query>(NativeLibrary.GetExport(module, "QueryConfiguredFolderSizeForProbe"));
             var invalidate = Marshal.GetDelegateForFunctionPointer<Invalidate>(NativeLibrary.GetExport(module, "InvalidateConfiguredFolderSizeForProbe"));
             var invalidatePath = Marshal.GetDelegateForFunctionPointer<InvalidatePath>(NativeLibrary.GetExport(module, "InvalidateFolderSizePath"));
-            var calls = 0; var unknown = false;
+            var calls = 0; var unknown = false; var overflow = false; var exactCalls = 0;
+            var status = EverythingSizeStatus.Available;
             TaskCompletionSource<IndexedSizePage>? gate = null;
             using var entered = new ManualResetEventSlim();
             Task<IndexedSizePage> FakeQuery(string parent, uint offset, CancellationToken token)
             {
                 Interlocked.Increment(ref calls);
                 if (gate is { } pending) { entered.Set(); return pending.Task; }
+                if (status != EverythingSizeStatus.Available) return Task.FromResult(new IndexedSizePage(status, []));
+                if (overflow) return Task.FromResult(new IndexedSizePage(EverythingSizeStatus.Available,
+                    [new(Path.Combine(root, "large"), true, 29)], 2049));
                 return Task.FromResult(new IndexedSizePage(EverythingSizeStatus.Available,
                     [new(Path.Combine(root, "small"), true, unknown ? null : 17), new(Path.Combine(root, "large"), true, unknown ? null : 29)], 2));
             }
-            using var bridge = new FolderSizeNativeBridge(module, FolderSizeSource.Everything, FakeQuery);
+            Task<IndexedSizePage> FakeExact(string path, CancellationToken token)
+            {
+                token.ThrowIfCancellationRequested(); Interlocked.Increment(ref exactCalls);
+                return Task.FromResult(new IndexedSizePage(EverythingSizeStatus.Available,
+                    [new(path, true, unknown ? null : 17)], 1));
+            }
+            using var bridge = new FolderSizeNativeBridge(module, FolderSizeSource.Everything, FakeQuery, FakeExact);
             (int Hr, ulong Bytes, uint Flags) Read(string leaf)
             {
                 var hr = query(Path.Combine(root, leaf), cancellationFlag, out var bytes, out _, out _, out _, out var flags);
@@ -56,6 +66,24 @@ internal static class FolderSizeNativeBridgeSmoke
             if (Read("small").Bytes != 17 || calls != 2) throw new Exception("Descendant changes did not invalidate the shared parent query.");
             Marshal.ThrowExceptionForHR(invalidatePath(root));
             if (Read("small").Bytes != 17 || calls != 3) throw new Exception("Explicit refresh did not invalidate the parent query.");
+            overflow = true; bridge.SetSource(FolderSizeSource.Everything);
+            var beforeOverflow = calls;
+            if (Read("small") != (0, 17UL, 1U) || Read("large") != (0, 29UL, 1U) ||
+                exactCalls != 1 || calls != beforeOverflow + 1)
+                throw new Exception("Beyond-first-page lookup lost exact size or repeated the shared parent query.");
+            unknown = true; bridge.SetSource(FolderSizeSource.Everything);
+            if (Read("small") != (0, 0UL, 0U) || exactCalls != 2)
+                throw new Exception("Unknown exact lookup became an available zero or silently scanned.");
+            overflow = false; unknown = false;
+            foreach (var unavailable in new[] { EverythingSizeStatus.NotRunning, EverythingSizeStatus.IndexUnavailable,
+                EverythingSizeStatus.Timeout, EverythingSizeStatus.InvalidReply, EverythingSizeStatus.Failed })
+            {
+                status = unavailable; bridge.SetSource(FolderSizeSource.Everything);
+                if (Read("small") != (0, 0UL, 0U)) throw new Exception($"Everything-only scanned on {status}.");
+                bridge.SetSource(FolderSizeSource.Auto);
+                if (Read("small") != (0, 5UL, 3U)) throw new Exception($"Auto fallback failed on {status}.");
+            }
+            status = EverythingSizeStatus.Available;
             unknown = true; bridge.SetSource(FolderSizeSource.Everything);
             if (Read("small") != (0, 0UL, 0U)) throw new Exception("Unknown Everything size became an available zero.");
             bridge.SetSource(FolderSizeSource.Auto);
