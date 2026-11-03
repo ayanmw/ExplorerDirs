@@ -12,7 +12,7 @@ internal enum ExplorerShortcut
     ScreenMagnifier,
     View1, View2, View3, View4, View5, View6, View7, View8, SearchSelectedFolder, ActivateMenu,
     PasteSpecial, CopySelectedPaths,
-    AutoFitColumns,
+    OpenViewMenu, AutoFitColumns,
     NavigateDriveA, NavigateDriveB, NavigateDriveC, NavigateDriveD, NavigateDriveE,
     NavigateDriveF, NavigateDriveG, NavigateDriveH, NavigateDriveI, NavigateDriveJ,
     NavigateDriveK, NavigateDriveL, NavigateDriveM, NavigateDriveN, NavigateDriveO,
@@ -40,7 +40,7 @@ internal static class KeyboardShortcuts
         (0x75, 4) => ExplorerShortcut.PreviousFocusRegion, // Shift+F6
         (0x44, 1) => ExplorerShortcut.Address,        // Alt+D
         (0x53, 1) => ExplorerShortcut.Address,        // Q-Dir: Alt+S focuses the address bar.
-        (0x56, 1) => ExplorerShortcut.MoveSelectedItems, // Q-Dir: Alt+V cuts selected items for a later paste.
+        (0x56, 1) => ExplorerShortcut.OpenViewMenu, // Preserve the application View(V) menu access key.
         (0x4b, 1) => ExplorerShortcut.CopySelectedItems, // Q-Dir: Alt+K copies selected items for a later paste.
         (0x76, 0) => ExplorerShortcut.AddressLocations, // Q-Dir: F7 opens the address path hierarchy.
         (0x77, 0) => ExplorerShortcut.AddressComputer, // Q-Dir: F8 opens the This PC menu.

@@ -2066,6 +2066,10 @@ public partial class MainWindow : Window
             case ExplorerShortcut.RestartApplication:
                 RequestRestartApplication();
                 break;
+            case ExplorerShortcut.OpenViewMenu:
+                ViewMenu.Focus();
+                ViewMenu.IsSubmenuOpen = true;
+                break;
             case ExplorerShortcut.ActivateMenu:
                 if (MainMenu.Items.Count == 0 || MainMenu.Items[0] is not MenuItem firstMenu) return false;
                 firstMenu.Focus();

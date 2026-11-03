@@ -50,7 +50,7 @@ internal static class ShellFileCommands
 {
     internal static IReadOnlyList<ShellFileCommandInfo> All { get; } =
     [
-        new(ShellFileCommand.Cut, "剪切", "cut", "Ctrl+X / Alt+V", false),
+        new(ShellFileCommand.Cut, "剪切", "cut", "Ctrl+X", false),
         new(ShellFileCommand.Copy, "复制", "copy", "Ctrl+C / Alt+K", false),
         new(ShellFileCommand.Paste, "粘贴", "paste", "Ctrl+V", true),
         new(ShellFileCommand.Delete, "删除", "delete", "Delete", false),
