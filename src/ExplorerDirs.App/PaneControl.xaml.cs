@@ -348,7 +348,7 @@ public partial class PaneControl : UserControl
         if (Current == state && IsLoaded && IsVisible)
         {
             ItemCounts.Text = counts?.DisplayText ?? "项目统计暂不可用";
-            ItemCounts.ToolTip = counts?.Description;
+            ItemCounts.ToolTip = counts?.Description ?? ItemCounts.Text;
         }
     }
 

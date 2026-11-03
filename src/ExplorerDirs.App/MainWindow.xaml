@@ -111,7 +111,8 @@
                 <MenuItem x:Name="StatusBarMenu" Header="状态栏" IsCheckable="True" Click="StatusBar_Click"/>
                 <MenuItem x:Name="StatusBarSelectionSizeMenu" Header="状态栏显示选中项目大小" IsCheckable="True"
                           Click="StatusBarSelectionSize_Click"/>
-                <MenuItem x:Name="StatusBarFolderSizeWhenEmptyMenu" Header="未选中时显示当前目录可取得大小" IsCheckable="True"
+                <MenuItem x:Name="StatusBarFolderSizeWhenEmptyMenu" Header="状态栏：未选中时显示大小合计" IsCheckable="True"
+                          ToolTip="在状态栏显示 Shell 可快速取得的直接子项大小合计，不递归统计子目录；悬停状态栏可查看完整文字。"
                           Click="StatusBarFolderSizeWhenEmpty_Click"/>
                 <MenuItem x:Name="SelectionCheckBoxesMenu" Header="使用复选框选择项目" IsCheckable="True"
                           Click="SelectionCheckBoxes_Click"/>

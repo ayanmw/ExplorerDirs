@@ -20,12 +20,15 @@ internal sealed record ShellItemCounts(int Total, int Selected, ulong? KnownSele
         if (selected.Result != 0 || selected.Count < 0 || selected.Count > total.Value) return null;
         return new(total.Value, selected.Count);
     }
-    internal string DisplayText => $"{Total:N0} 项 · 已选 {Selected:N0} 项" +
+    internal string DisplayText =>
+        // Put the requested total first: the count label must not push its number
+        // beyond the pane's ellipsis when four panes share a narrow window.
+        (Selected == 0 && KnownFolderBytes is { } folderSize
+            ? $"合计 {ByteSizeFormatter.Format(folderSize)}（不含子目录） · " : "") +
+        $"{Total:N0} 项 · 已选 {Selected:N0} 项" +
         (Selected > 0 && KnownSelectionBytes is { } selectionSize
             ? $" · 可取得大小 {ByteSizeFormatter.Format(selectionSize)}"
-            : Selected == 0 && KnownFolderBytes is { } folderSize
-                ? $" · 当前目录可取得大小 {ByteSizeFormatter.Format(folderSize)}"
-                : "");
+            : "");
     internal string Description => DisplayText + (Selected > 0
         ? "\n仅汇总可取得的选中项目大小，未提供大小的项目不计入；未递归统计选中的文件夹。"
         : KnownFolderBytes is not null

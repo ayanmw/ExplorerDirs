@@ -49,13 +49,17 @@ internal static class ShellItemCountsSmoke
             "clearing selection is reflected on the next snapshot");
 
         var folder = new ShellItemCounts(3, 0, KnownFolderBytes: 8);
-        Check(folder.DisplayText.Contains("当前目录可取得大小", StringComparison.Ordinal),
-            "unselected folder-size summary is identified separately");
+        Check(folder.DisplayText.StartsWith("合计 ", StringComparison.Ordinal) &&
+            folder.DisplayText.Contains("（不含子目录）", StringComparison.Ordinal) &&
+            folder.DisplayText.IndexOf("合计", StringComparison.Ordinal) < folder.DisplayText.IndexOf("已选", StringComparison.Ordinal),
+            "unselected total precedes counts so its value survives narrow-pane truncation");
+        Check(folder.Description.StartsWith(folder.DisplayText, StringComparison.Ordinal) &&
+            folder.Description.Contains("不递归", StringComparison.Ordinal), "tooltip includes the complete label and its scope");
         var selection = new ShellItemCounts(3, 1, KnownSelectionBytes: 5, KnownFolderBytes: 8);
         Check(selection.DisplayText.Contains("可取得大小", StringComparison.Ordinal) &&
-              !selection.DisplayText.Contains("当前目录可取得大小", StringComparison.Ordinal),
+              !selection.DisplayText.Contains("合计", StringComparison.Ordinal),
             "selection size takes precedence over the folder-size summary");
-        Check(!new ShellItemCounts(3, 0).DisplayText.Contains("可取得大小", StringComparison.Ordinal),
+        Check(!new ShellItemCounts(3, 0).DisplayText.Contains("合计", StringComparison.Ordinal),
             "unknown folder size stays omitted instead of appearing as zero");
     }
 

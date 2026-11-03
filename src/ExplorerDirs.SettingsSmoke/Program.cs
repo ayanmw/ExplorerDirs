@@ -9,6 +9,13 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 
+if (args is ["--item-counts-smoke"])
+{
+    ShellItemCountsSmoke.Run();
+    Console.WriteLine("Item counts smoke: PASS (compact total, selection priority, full description; no UI)");
+    return;
+}
+
 if (args is ["--folder-size-location-policy-smoke"])
 {
     FolderSizeLocationPolicySmoke.Run();

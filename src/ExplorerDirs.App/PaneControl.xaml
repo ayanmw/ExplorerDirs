@@ -126,6 +126,7 @@
                            AutomationProperties.AutomationId="PaneDiskSpace"/>
                 <TextBlock x:Name="ItemCounts" DockPanel.Dock="Left" Margin="6,3"
                            MaxWidth="290" TextTrimming="CharacterEllipsis"
+                           ToolTipService.InitialShowDelay="250" ToolTipService.ShowDuration="60000"
                            AutomationProperties.AutomationId="PaneItemCounts"/>
                 <TextBlock x:Name="RecursiveSizeStatus" DockPanel.Dock="Left" Margin="6,3"
                            MaxWidth="420" TextTrimming="CharacterEllipsis" Visibility="Collapsed"
