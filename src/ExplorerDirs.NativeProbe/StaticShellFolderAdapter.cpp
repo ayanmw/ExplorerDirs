@@ -1962,7 +1962,11 @@ namespace
     volatile LONG g_syntheticOtherUiObjectRequests = 0;
     volatile LONG g_syntheticGetAttributesOfCount = 0;
     volatile LONG g_syntheticFilesystemAttributeCount = 0;
+#if defined(EXPLORERDIRS_NAMESPACE_ATTRIBUTES_EXPERIMENT)
+    volatile LONG g_syntheticMaskFilesystemAttributes = 1;
+#else
     volatile LONG g_syntheticMaskFilesystemAttributes = 0;
+#endif
     volatile LONG g_syntheticOwnAttributesForProbe = 0;
     // The app persists PKEY_Size. Advertising a different custom key makes that
     // saved column absent from the native catalog, even though GetDetailsEx accepts it.
@@ -3965,6 +3969,9 @@ namespace
                     if (pathPidl) CoTaskMemFree(pathPidl);
                     if (FAILED(parseResult)) return parseResult;
                     *attributes &= pathAttributes;
+                    if (InterlockedCompareExchange(&g_syntheticMaskFilesystemAttributes, 0, 0))
+                        *attributes &= ~(SFGAO_FILESYSTEM | SFGAO_FILESYSANCESTOR);
+                    ED_SIZE_TRACE("root-attributes", this, nullptr, 0, *attributes, 0);
                     return S_OK;
                 }
                 if (FAILED(pathResult)) return pathResult;
@@ -4014,6 +4021,8 @@ namespace
                 }
             }
             if (traceNestedChild) TraceSyntheticFolderAttributes(_backingPath, requestedAttributes, *attributes, result);
+            ED_SIZE_TRACE("item-attributes", this, count == 1 && SyntheticData(items[0]) ? SyntheticData(items[0])->name : nullptr,
+                requestedAttributes, *attributes, static_cast<ULONG>(result));
             for (auto item : original) if (item) CoTaskMemFree(item);
             return result;
         }
