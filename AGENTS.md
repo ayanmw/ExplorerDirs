@@ -25,6 +25,8 @@
 
 - On 2026-11-03 the user queued independent Magnifier/tray buttons and menu/right-side layout alignment for the version after temp.86. Keep these in docs/next-version-chrome-tools.md as planning until implementation is authorized; do not expand the current temp.86 repair/release gate. Tray behavior is temporary and per-window: double-click restores the same window and removes its icon, without changing ordinary minimize/close behavior.
 
+- On 2026-11-03 the user explicitly separated automatic updates from manual F5: Soft-Refresh defaults on for an unconfigured profile; automatic item notifications must not trigger a full-view fallback or full-directory sort refresh while enabled. F5 requests complete enumeration even with soft updates enabled, and may be slower. Incomplete automatic reconciliation may wait for F5; preserve explicitly saved preferences and selection/focus.
+
 ## Product boundary
 
 - Build a Windows file browsing window replacement with Q-Dir style multi-pane workflows. Do not replace the desktop, taskbar, login shell, or the `explorer.exe` system file.

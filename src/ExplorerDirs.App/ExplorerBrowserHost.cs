@@ -3604,19 +3604,16 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             var nativeRefreshStartedAt = _traceNativeUserMessages ? _directoryNativeRefreshTiming.Start() : 0;
             try
             {
-                if (_softRefresh)
+                var viewPointer = Marshal.GetIUnknownForObject(viewObject);
+                try
                 {
-                    // Q-Dir Soft-Refresh suppresses re-enumeration on refresh; avoid the
-                    // SHCNE_UPDATEDIR route, which makes DefView enumerate new filesystem rows.
-                    refreshResult = shellView.Refresh();
-                    LastShellRefreshStatus = "soft-refresh";
+                    refreshResult = ShellRefreshPolicy.Invoke(traceAsUserRefresh, _softRefresh,
+                        enabled => ShellFolderViewOptions.SetNoEnumRefresh(viewPointer, enabled),
+                        shellView.Refresh, IsCurrentRefreshRequest, () => _softRefresh);
+                    LastShellRefreshStatus = traceAsUserRefresh ? "manual-full-refresh" :
+                        _softRefresh ? "soft-refresh" : "IShellView.Refresh";
                 }
-                else
-                {
-                    refreshResult = shellView.Refresh();
-                    // Manual refresh targets this view directly; broadcast delivery added visible latency in temp.86.
-                    LastShellRefreshStatus = "IShellView.Refresh";
-                }
+                finally { Marshal.Release(viewPointer); }
             }
             catch when (!IsCurrentRefreshRequest())
             {
@@ -4750,6 +4747,16 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                                 monitorRequest.IsCurrent(_directoryChangeVersion, _viewReadiness.NavigationVersion,
                                     _viewReadiness.IsCurrent(navigationVersion), _completedDiskDirectory,
                                     _directoryChangeQueue), out actualCount)) return;
+                            if (_softRefresh)
+                            {
+                                // Native item notifications remain active. Do not turn an automatic
+                                // count mismatch or watcher recovery into a full-view refresh; F5 reconciles it.
+                                if (actualCount is { } observed) batch.Rebase(observed);
+                                _directoryChangeRecheckPending = false;
+                                LastShellRefreshStatus = "automatic-soft-update; full-refresh=manual";
+                                if (hasPendingDirectoryChanges) RestoreSelectionAfterNaturalDirectoryUpdate(path, navigationVersion);
+                                return;
+                            }
                             var lastEventAt = Interlocked.Read(ref _directoryChangeLastEventAt);
                             var largeBurstActive = lastEventAt != 0 &&
                                 Stopwatch.GetElapsedTime(lastEventAt) < TimeSpan.FromMilliseconds(750);
@@ -5129,7 +5136,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                             // If the active sort/group cannot be read, keep the
                             // Changed batch correct with one directory update.
                         }
-                        if (needsDirectorySortUpdate)
+                        if (needsDirectorySortUpdate && !_softRefresh)
                         {
                             foreach (var directory in paths!.Select(Path.GetDirectoryName)
                                          .Where(directory => !string.IsNullOrWhiteSpace(directory))

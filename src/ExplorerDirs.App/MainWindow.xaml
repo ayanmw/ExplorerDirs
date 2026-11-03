@@ -120,8 +120,8 @@
                 <MenuItem x:Name="DisableGroupingMenu" Header="停用所有视图分组" IsCheckable="True"
                           ToolTip="暂时关闭所有文件视图的分组；每个标签原有的分组设置会在重新启用时恢复。"
                           Click="DisableGrouping_Click"/>
-                <MenuItem x:Name="SoftRefreshMenu" Header="Soft-Refresh（不重枚举/防止自动重排）" IsCheckable="True"
-                          ToolTip="阻止 Shell 刷新时重新枚举当前列表，避免复制、拖放或重命名后项目自动重排；新增项目可能暂时不可见。关闭后按 F5 可完整重新读取。"
+                <MenuItem x:Name="SoftRefreshMenu" Header="自动软刷新（F5 完整刷新）" IsCheckable="True"
+                          ToolTip="自动更新只处理列表变化，不主动完整刷新视图，减少闪烁和自动重排；若内容未及时更新，按 F5 完整重新读取。"
                           Click="SoftRefresh_Click"/>
                 <MenuItem x:Name="TreeModeMenu" Header="目录树">
                     <MenuItem x:Name="TreeModeSharedMenu" Header="共享一棵树" IsCheckable="True" Tag="Shared" Click="TreeMode_Click"/>

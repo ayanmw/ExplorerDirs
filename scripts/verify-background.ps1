@@ -38,7 +38,7 @@ try {
     $settings = 'src/ExplorerDirs.SettingsSmoke/ExplorerDirs.SettingsSmoke.csproj'
     # Only early-dispatched, inspected flags belong here. The default SettingsSmoke suite is intentionally excluded.
     foreach ($flag in @('favorites-catalog-smoke', 'navigation-chrome-smoke', 'focus-traversal-smoke',
-        'view-state-restore-smoke', 'shell-refresh-presentation-smoke', 'folder-size-location-policy-smoke',
+        'view-state-restore-smoke', 'shell-refresh-presentation-smoke', 'soft-refresh-routing-smoke', 'folder-size-location-policy-smoke',
         'folder-size-data-source-smoke', 'everything-size-protocol-smoke', 'space-analysis-smoke',
         'column-layout-process-roundtrip', 'qdr-location-roundtrip-only')) {
         Invoke-BackgroundCheck $flag 'dotnet' @('run', '--project', $settings, '-c', 'Release', '--no-build', '--', "--$flag")

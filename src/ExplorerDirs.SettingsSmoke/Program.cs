@@ -325,6 +325,12 @@ if (args.Length == 1 && args[0] == "--shell-rename-window-gate-smoke")
     return;
 }
 
+if (args is ["--soft-refresh-routing-smoke"])
+{
+    ExplorerDirs.SettingsSmoke.SoftRefreshRoutingSmoke.Run();
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--full-row-selection-smoke")
 {
     var smokeRoot = Path.Combine(Path.GetTempPath(), $"ExplorerDirs.FullRowSelectionSmoke.{Guid.NewGuid():N}");

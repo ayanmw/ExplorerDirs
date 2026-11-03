@@ -143,7 +143,7 @@ internal sealed class FullRowSelectionStore(string path)
     : PortableBooleanPreference(path, "FullRowSelection", "FullRowSelect", "整行选择");
 
 internal sealed class SoftRefreshStore(string path)
-    : PortableBooleanPreference(path, "View", "SoftRefresh", "列表软刷新");
+    : PortableBooleanPreference(path, "View", "SoftRefresh", "列表软刷新", defaultValue: true);
 
 internal sealed class AddressBarStyleStore(string path)
     : PortableBooleanPreference(path, "AddressBar", "Classic", "地址栏样式");
