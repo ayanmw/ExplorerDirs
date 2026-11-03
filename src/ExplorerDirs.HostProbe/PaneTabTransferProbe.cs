@@ -847,7 +847,14 @@ internal static class PaneTabTransferProbe
             "reopening a closed tab preserves its complete address dropdown history");
         Ensure(!ReferenceEquals(originalHistory, reopenedHistory) && ReadBrowserPath(reopened) == currentPath,
             "restored history is independent and the closed directory is retained");
+        var reopenedBrowser = stateType.GetProperty("Browser", InstanceMembers)!.GetValue(reopened.Tag)!;
+        reopenedBrowser.GetType().GetField("_viewRestoreFailed", InstanceMembers)!.SetValue(reopenedBrowser, true);
+        var beforeDuplicate = tabs.Items.Count;
         paneType.GetMethod("DuplicateCurrentTab", InstanceMembers)!.Invoke(pane, null);
+        Ensure(tabs.Items.Count == beforeDuplicate + 1,
+            "ordinary duplication remains available using confirmed settings after a native restore failure");
+        reopenedBrowser.GetType().GetField("_viewRestoreFailed", InstanceMembers)!.SetValue(reopenedBrowser, false);
+        reopenedBrowser.GetType().GetProperty("ViewCaptureFailed", InstanceMembers)!.SetValue(reopenedBrowser, false);
         var duplicate = (TabItem)tabs.SelectedItem!;
         var duplicateHistory = historyProperty.GetValue(duplicate.Tag)!;
         record.Invoke(duplicateHistory, ["shell:ThisPCFolder"]);

@@ -27,3 +27,4 @@
 - 文件夹大小仍被用户反馈不可用，不能以后台检查通过关闭此项；需真实宿主证据。
 本批先修 Alt+V：原映射确认为 Q-Dir Cut，与 View(V) 冲突。新增显式 OpenViewMenu 路由，在原生文件视图焦点下也由应用打开 ViewMenu；剪切保留 Ctrl+X，Alt+K 保留复制。定向 Shell file commands 测试先复现冲突，修复后通过。未操作当前用户验收窗口、未覆盖 release。
 2026-11-03 Alt 导航焦点修正候选：导航快捷键已消费 keydown，但旧路由没有处理后续 Alt keyup。增加当前 UI 线程的消息过滤，仅在文件视图发起 Alt+上/左/右导航后消费对应的一次 Alt 释放；单按 Alt、Alt+V、普通 Backspace 不拦截，窗口失活清除状态，关闭注销线程事件。消息序列测试覆盖上述边界并通过，App Release build 零警告错误；未进行物理键盘验收，不声称焦点问题已实测解决。相关行为依据微软 WPF/Win32 interop input 文档：TranslateAccelerator 可处理 WM_KEYUP/WM_SYSKEYUP，不能只考虑 keydown。
+2026-11-03 普通复制标签恢复候选：未挂载生产 Pane 测试强制视图恢复失败后，旧 Duplicate 直接拒绝，新测试先失败。普通 Duplicate 现允许使用上次确认的 CachedViewState，实时选区暂不可读时不阻断目录/设置复制；状态栏说明使用缓存，复制前后校验源标签归属、导航版本和实际路径。Clone View 保持完整快照要求，会话保存仍拒绝不完整视图，未放宽覆盖保护。pane-tab-copy-order 回归通过，未创建 HWND/browser/file view。此证据复现一个失效路径，不直接断言是用户窗口的全部根因。

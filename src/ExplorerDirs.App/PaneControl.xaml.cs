@@ -721,19 +721,33 @@ public partial class PaneControl : UserControl
         if (!CanAddTabs(1)) return;
         try
         {
-            var view = state.Browser.CaptureViewState();
-            if (state.Browser.ViewCaptureFailed)
+            var path = state.Browser.CurrentPath;
+            var navigationVersion = state.Browser.NavigationVersion;
+            var view = state.Browser.CachedViewState();
+            var usedCachedView = true;
+            try
             {
-                Status.Text = "视图配置暂时不可读取，未复制标签。";
-                return;
+                var captured = state.Browser.CaptureViewState();
+                if (!state.Browser.ViewCaptureFailed) { view = captured; usedCachedView = false; }
             }
-            // A never-opened tab has no Shell selection yet; preserve its queued startup selection instead.
-            var selectedPaths = state.Browser.HasNativeBrowser ? state.Browser.CaptureSelectedShellParsingNames()
-                : state.StartupSelectItems?.ToArray() ?? [];
-            AddTab(state.Browser.CurrentPath, view, pinned: state.IsPinned, quickFilter: state.Browser.QuickFilter,
+            catch (Exception error) when (error is COMException or InvalidOperationException) { }
+            // Ordinary Duplicate copies the folder/settings. A transient native snapshot failure
+            // must not disable it; the separate Clone View command still requires a complete snapshot.
+            IReadOnlyList<string> selectedPaths = state.StartupSelectItems?.ToArray() ?? [];
+            if (state.Browser.HasNativeBrowser)
+            {
+                try { selectedPaths = state.Browser.CaptureSelectedShellParsingNames(); }
+                catch (Exception error) when (error is COMException or InvalidOperationException) { selectedPaths = []; }
+            }
+            if (state.Owner != this || !_tabOrder.Contains(state.Tab) ||
+                state.Browser.NavigationVersion != navigationVersion ||
+                !string.Equals(path, state.Browser.CurrentPath, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("复制期间目录已变化，请重试。");
+            AddTab(path, view, pinned: state.IsPinned, quickFilter: state.Browser.QuickFilter,
                 previewPaneVisible: state.Browser.PreviewPaneVisible,
                 detailsPaneVisible: state.Browser.DetailsPaneVisible,
                 addressHistory: state.AddressHistory.Copy(), startupSelectItems: selectedPaths);
+            if (usedCachedView) Status.Text = "已复制标签，使用上次确认的视图设置；实时视图配置暂不可读取。";
         }
         catch (Exception ex)
         {
