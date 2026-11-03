@@ -2788,18 +2788,18 @@ public partial class MainWindow : Window
         };
         FavoritesMenu.Items.Add(workspaces);
         FavoritesMenu.Items.Add(new Separator());
-        if (_favorites.Count == 0)
+        if (_favorites.Count == 0 && _favoritesStore.Folders.Count == 0)
             FavoritesMenu.Items.Add(new MenuItem { Header = "（暂无收藏）", IsEnabled = false });
-        FavoriteMenuBuilder.Populate(FavoritesMenu.Items, _favorites.Select(_favoritesStore.Describe), OpenFavorite);
+        FavoriteMenuBuilder.Populate(FavoritesMenu.Items, _favorites.Select(_favoritesStore.Describe), OpenFavorite, _favoritesStore.Folders);
     }
 
     private void ManageFavorites()
     {
-        var dialog = new FavoritesManagerWindow(this, _favorites.Select(_favoritesStore.Describe), ActivePane.CurrentPath);
+        var dialog = new FavoritesManagerWindow(this, _favorites.Select(_favoritesStore.Describe), ActivePane.CurrentPath, _favoritesStore.Folders);
         if (dialog.ShowDialog() != true || dialog.Result is not { } result) return;
         try
         {
-            _favoritesStore.SaveEntries(result);
+            _favoritesStore.SaveEntries(result, dialog.ResultFolders);
             _favorites.Clear(); _favorites.AddRange(result.Select(item => item.Path));
             EnvironmentStatus.Text = $"已保存 {_favorites.Count} 个收藏目录。";
         }
@@ -2808,11 +2808,11 @@ public partial class MainWindow : Window
 
     private void ManageCommonLocations()
     {
-        var dialog = new FavoritesManagerWindow(this, _commonLocations, ActivePane.CurrentPath) { Title = "管理常用位置" };
+        var dialog = new FavoritesManagerWindow(this, _commonLocations, ActivePane.CurrentPath, _commonLocationsStore.Folders) { Title = "管理常用位置" };
         if (dialog.ShowDialog() != true || dialog.Result is not { } result) return;
         try
         {
-            _commonLocationsStore.SaveEntries(result);
+            _commonLocationsStore.SaveEntries(result, dialog.ResultFolders);
             _commonLocations.Clear(); _commonLocations.AddRange(result);
         }
         catch (Exception ex) { EnvironmentStatus.Text = $"常用位置保存失败：{ex.Message}"; }

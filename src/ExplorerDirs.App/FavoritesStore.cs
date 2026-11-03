@@ -14,6 +14,7 @@ internal sealed class FavoritesStore
     private bool _canOverwrite = true;
     private string? _lastSeenContent;
     private Dictionary<string, FavoriteEntry> _details = new(StringComparer.OrdinalIgnoreCase);
+    internal IReadOnlyList<string> Folders { get; private set; } = [];
     internal FavoriteEntry Describe(string path) => _details.GetValueOrDefault(path) ?? new(path);
 
     public string? LoadWarning { get; private set; }
@@ -26,6 +27,7 @@ internal sealed class FavoritesStore
         _canOverwrite = true;
         _lastSeenContent = null;
         _details.Clear();
+        Folders = [];
         if (!File.Exists(_path)) return [];
 
         List<string> recovered = [];
@@ -35,6 +37,8 @@ internal sealed class FavoritesStore
             var values = new Dictionary<int, string>();
             var names = new Dictionary<int, string>();
             var groups = new Dictionary<int, string>();
+            var folders = new Dictionary<int, string>();
+            var folderCount = -1;
             var count = -1;
             BigInteger version = -1;
             var inSection = false;
@@ -70,6 +74,16 @@ internal sealed class FavoritesStore
                     if (count >= 0 || !int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out count))
                         complete = false;
                 }
+                else if (key.Equals("FolderCount", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (folderCount >= 0 || !int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out folderCount))
+                        complete = false;
+                }
+                else if (key.StartsWith("Folder", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!int.TryParse(key[6..], NumberStyles.None, CultureInfo.InvariantCulture, out var folderIndex) ||
+                        folderIndex is < 0 or >= MaxFavorites || !folders.TryAdd(folderIndex, value)) complete = false;
+                }
                 else if ((key.StartsWith("Name", StringComparison.OrdinalIgnoreCase) ||
                           key.StartsWith("Group", StringComparison.OrdinalIgnoreCase)))
                 {
@@ -87,15 +101,18 @@ internal sealed class FavoritesStore
                 else complete = false;
             }
 
-            if (version > 2)
+            if (version > 3)
             {
                 _canOverwrite = false;
                 LoadWarning = "收藏夹格式高于当前版本；已停止写入原文件。";
                 return [];
             }
-            if (version < 1 || version > 2 || count is < 0 or > MaxFavorites) complete = false;
+            if (version < 1 || version > 3 || count is < 0 or > MaxFavorites) complete = false;
+            if (version < 3 && (folderCount >= 0 || folders.Count != 0)) complete = false;
+            if (version == 3 && (folderCount is < 0 or > MaxFavorites || folders.Count != folderCount ||
+                folders.Keys.Any(index => index >= folderCount))) complete = false;
             if (version == 1 && (names.Count != 0 || groups.Count != 0)) complete = false;
-            if (version == 2 && (names.Count != values.Count || groups.Count != values.Count ||
+            if (version >= 2 && (names.Count != values.Count || groups.Count != values.Count ||
                 names.Keys.Any(index => !values.ContainsKey(index)) || groups.Keys.Any(index => !values.ContainsKey(index))))
                 complete = false;
             if (count != values.Count || values.Keys.Any(index => index >= count)) complete = false;
@@ -113,6 +130,12 @@ internal sealed class FavoritesStore
             }
             foreach (var pair in values)
                 _details[pair.Value] = new(pair.Value, DecodeMetadata(names, pair.Key), DecodeMetadata(groups, pair.Key));
+            var decodedFolders = folders.OrderBy(pair => pair.Key).Select(pair => DecodeMetadata(folders, pair.Key)).ToArray();
+            if (decodedFolders.Any(string.IsNullOrWhiteSpace) ||
+                decodedFolders.Distinct(StringComparer.OrdinalIgnoreCase).Count() != decodedFolders.Length) complete = false;
+            Folders = decodedFolders.Where(name => !string.IsNullOrWhiteSpace(name))
+                .Concat(_details.Values.Select(item => item.Group).Where(name => name.Length > 0))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             if (recovered.Count != values.Count) complete = false;
         }
         catch (Exception)
@@ -137,9 +160,10 @@ internal sealed class FavoritesStore
     public void Save(IEnumerable<string> paths)
         => SaveCore(paths.Select(Describe).ToArray(), useMetadata: _details.Values.Any(item => item.Name.Length > 0 || item.Group.Length > 0));
 
-    internal void SaveEntries(IEnumerable<FavoriteEntry> entries) => SaveCore(entries.ToArray(), useMetadata: true);
+    internal void SaveEntries(IEnumerable<FavoriteEntry> entries, IEnumerable<string>? folders = null)
+        => SaveCore(entries.ToArray(), useMetadata: true, folders);
 
-    private void SaveCore(IReadOnlyList<FavoriteEntry> entries, bool useMetadata)
+    private void SaveCore(IReadOnlyList<FavoriteEntry> entries, bool useMetadata, IEnumerable<string>? folders = null)
     {
         if (!_canOverwrite) throw new IOException($"收藏夹原文件受到保护，已停止覆盖：{_path}");
         if (entries.Any(item => item.Path.Contains('\n') || item.Path.Contains('\r')))
@@ -148,11 +172,24 @@ internal sealed class FavoritesStore
         var details = favorites.ToDictionary(path => path, path => entries.First(item => SamePath(item.Path.Trim(), path)) with { Path = path },
             StringComparer.OrdinalIgnoreCase);
         if (favorites.Count > MaxFavorites) throw new IOException($"收藏夹最多保存 {MaxFavorites} 项。");
+        var folderNames = (folders ?? Folders).Select(name => name.Trim())
+            .Concat(details.Values.Select(item => item.Group.Trim()).Where(name => name.Length > 0))
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (folderNames.Length > MaxFavorites || folderNames.Any(string.IsNullOrWhiteSpace))
+            throw new IOException("收藏夹分组不能为空，最多保存 200 个分组。");
+        var treeFormat = folderNames.Length > 0;
+        useMetadata |= treeFormat;
         var builder = new StringBuilder();
         builder.AppendLine("; Explorer Dirs portable favorites. Close the app before editing.");
         builder.AppendLine("[Favorites]");
-        builder.AppendLine(useMetadata ? "FormatVersion=2" : "FormatVersion=1");
+        builder.AppendLine(treeFormat ? "FormatVersion=3" : useMetadata ? "FormatVersion=2" : "FormatVersion=1");
         builder.AppendLine($"Count={favorites.Count}");
+        if (treeFormat)
+        {
+            builder.AppendLine($"FolderCount={folderNames.Length}");
+            for (var index = 0; index < folderNames.Length; index++)
+                builder.AppendLine($"Folder{index}={Convert.ToBase64String(Encoding.UTF8.GetBytes(folderNames[index]))}");
+        }
         for (var index = 0; index < favorites.Count; index++)
         {
             builder.AppendLine($"Item{index}={favorites[index]}");
@@ -164,6 +201,9 @@ internal sealed class FavoritesStore
             }
         }
         var content = builder.ToString();
+        // Empty tree groups require v3; retain the last v2 snapshot before upgrading it.
+        if (treeFormat && _lastSeenContent is not null && _lastSeenContent.Contains("FormatVersion=2", StringComparison.Ordinal))
+            File.WriteAllText(_path + $".v2-{Guid.NewGuid():N}.bak", _lastSeenContent, new UTF8Encoding(false));
         // Preserve the loaded v1 snapshot before the first metadata upgrade.
         if (useMetadata && _lastSeenContent is not null && _lastSeenContent.Contains("FormatVersion=1", StringComparison.Ordinal))
             File.WriteAllText(_path + $".v1-{Guid.NewGuid():N}.bak", _lastSeenContent, new UTF8Encoding(false));
@@ -171,6 +211,7 @@ internal sealed class FavoritesStore
             $"收藏夹已被其他实例修改，请重新启动后再保存：{_path}");
         _lastSeenContent = content;
         _details = details;
+        Folders = folderNames;
     }
 
     internal static bool SamePath(string left, string right) =>

@@ -73,6 +73,7 @@ if (args is ["--everything-size-live", var everythingDirectory])
 if (args is ["--favorites-catalog-smoke"])
 {
     FavoritesStoreBoundsSmoke.Run();
+    FavoritesTreeStoreSmoke.Run();
     var fixturePath = Path.Combine(AppContext.BaseDirectory, "favorites-catalog-" + Guid.NewGuid().ToString("N") + ".ini");
     var catalogStore = new FavoritesStore(fixturePath);
     catalogStore.Load();
@@ -94,7 +95,7 @@ if (args is ["--favorites-catalog-smoke"])
     try { reader.SaveEntries([]); throw new Exception("External edit was overwritten."); }
     catch (IOException) { }
     if (File.ReadAllText(fixturePath) != external) throw new Exception("External data changed.");
-    File.WriteAllText(fixturePath, "[Favorites]\nFormatVersion=3\nCount=0\n");
+    File.WriteAllText(fixturePath, "[Favorites]\nFormatVersion=4\nCount=0\n");
     reader.Load();
     try { reader.SaveEntries([]); throw new Exception("Future format was overwritten."); }
     catch (IOException) { }
