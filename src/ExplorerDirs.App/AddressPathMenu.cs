@@ -35,7 +35,9 @@ internal static class AddressPathMenu
     }
 
     internal static IReadOnlyList<AddressPathMenuEntry> BuildComputerMenu() =>
-        Build(ThisPcIdentity, BuildComputerLocations().Skip(1)
+        Build(ThisPcIdentity, BuildComputerLocations().Skip(1).Concat(new AddressPathMenuLocation[] {
+            new("库", "shell:Libraries"), new("网络", "shell:NetworkPlacesFolder"),
+            new("控制面板", "shell:ControlPanelFolder"), new("回收站", "shell:RecycleBinFolder") })
             .Select(location => location with { ParentIdentity = null }));
 
     private static IReadOnlyList<AddressPathMenuLocation> BuildCommonLocations()

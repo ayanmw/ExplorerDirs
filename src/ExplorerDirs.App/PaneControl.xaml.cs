@@ -1130,7 +1130,7 @@ public partial class PaneControl : UserControl
         Current?.Browser.HasColumnHeader() == true,
         TreeButton.Visibility == Visibility.Visible,
         paneViewStyleButtonVisible: ToolbarViewStyleButton.Visibility == Visibility.Visible,
-        addressHistoryButtonVisible: true,
+        addressHistoryButtonVisible: false,
         addressPathButtonVisible: true,
         addressComputerButtonVisible: true,
         tabHeaderVisible: Tabs.Visibility == Visibility.Visible,
@@ -1695,9 +1695,26 @@ public partial class PaneControl : UserControl
     internal void ShowAddressMenu()
     {
         if (Current is not { } state) return;
-        ShowAddressMenu(state, AddressPathMenu.Build(state.Path), AddressMenuButton);
+        var menu = new ContextMenu
+        {
+            PlacementTarget = AddressHost, Placement = PlacementMode.Bottom,
+            MinWidth = AddressHost.ActualWidth, MaxHeight = 450, DataContext = state
+        };
+        void NavigateCurrent(string path) { if (ReferenceEquals(Current, state)) Navigate(path); }
+        // One address dropdown serves recent visits; system locations belong to This PC.
+        var recent = (RecentLocations?.Invoke() ?? []).Concat(state.AddressHistory.Paths)
+            .Distinct(StringComparer.OrdinalIgnoreCase).Take(20).ToArray();
+        menu.Items.Add(new MenuItem { Header = "最近访问", IsEnabled = false });
+        FavoriteMenuBuilder.Populate(menu.Items, recent.Select(path => new FavoriteEntry(path)), NavigateCurrent);
+        var ancestors = AddressPathMenu.Build(state.Browser.CurrentPath, []).Where(item => item.IsAncestor).ToArray();
+        if (ancestors.Length > 0)
+        {
+            menu.Items.Add(new Separator());
+            menu.Items.Add(new MenuItem { Header = "上级目录", IsEnabled = false });
+            FavoriteMenuBuilder.Populate(menu.Items, ancestors.Select(item => new FavoriteEntry(item.Identity, item.Header)), NavigateCurrent);
+        }
+        menu.IsOpen = true;
     }
-
     internal void ShowComputerMenu()
     {
         if (Current is not { } state) return;
@@ -1720,59 +1737,6 @@ public partial class PaneControl : UserControl
         menu.IsOpen = true;
     }
 
-    private void ShowAddressMenu(TabState state, IReadOnlyList<AddressPathMenuEntry> entries,
-        FrameworkElement placementTarget)
-    {
-        var menu = new ContextMenu
-        {
-            PlacementTarget = placementTarget,
-            Placement = PlacementMode.Bottom,
-            DataContext = state
-        };
-        var addedCommonSeparator = false;
-        var itemsByIdentity = new Dictionary<string, MenuItem>(StringComparer.OrdinalIgnoreCase);
-        foreach (var entry in entries)
-        {
-            // Only separate top-level common locations from the current path; nested drives
-            // belong to their This PC parent and must not create a stray root-menu separator.
-            if (!entry.IsAncestor && entry.ParentIdentity is null && !addedCommonSeparator)
-            {
-                menu.Items.Add(new Separator());
-                addedCommonSeparator = true;
-            }
-            var item = new MenuItem
-            {
-                Header = entry.Header,
-                ToolTip = entry.Identity,
-                IsCheckable = entry.IsCurrent,
-                IsChecked = entry.IsCurrent,
-                Icon = new Image
-                {
-                    Source = ShellIconProvider.GetIcon(entry.Identity, isDirectory: true),
-                    Width = 16,
-                    Height = 16
-                }
-            };
-            item.Click += (_, _) =>
-            {
-                if (ReferenceEquals(Current, state)) state.Browser.Navigate(entry.Identity);
-            };
-            if (entry.ParentIdentity is null) menu.Items.Add(item);
-            else itemsByIdentity[entry.ParentIdentity].Items.Add(item);
-            itemsByIdentity[entry.Identity] = item;
-        }
-        if (RecentLocations?.Invoke() is { Count: > 0 } recentPaths)
-        {
-            var recent = new MenuItem { Header = "最近访问（所有标签）" };
-            FavoriteMenuBuilder.Populate(recent.Items, recentPaths.Select(path => new FavoriteEntry(path)), path =>
-            {
-                if (ReferenceEquals(Current, state)) Navigate(path);
-            });
-            menu.Items.Add(new Separator()); menu.Items.Add(recent);
-        }
-        menu.IsOpen = true;
-    }
-
     internal void SetCompactMode(bool compact)
     {
         _compactMode = compact;
@@ -1792,7 +1756,7 @@ public partial class PaneControl : UserControl
         AddressComputerButton.Width = compact ? 20 : 24;
         AddressMenuColumn.Width = new GridLength(compact ? 20 : 24);
         AddressComputerColumn.Width = new GridLength(compact ? 20 : 24);
-        AddressHistoryColumn.Width = new GridLength(compact ? 20 : 24);
+        AddressHistoryColumn.Width = new GridLength(0);
         NewTabButton.Width = navigationWidth;
         CloseTabButton.Width = navigationWidth;
         GoButton.Padding = compact ? new Thickness(4, 0, 4, 0) : new Thickness(8, 2, 8, 2);

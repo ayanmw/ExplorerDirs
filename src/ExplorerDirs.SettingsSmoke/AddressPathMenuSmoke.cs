@@ -41,6 +41,9 @@ internal static class AddressPathMenuSmoke
                 StringComparer.OrdinalIgnoreCase)),
             "the path menu includes logical drives discovered at build time");
 
+        foreach (var systemIdentity in new[] { "shell:Libraries", "shell:NetworkPlacesFolder", "shell:ControlPanelFolder", "shell:RecycleBinFolder" })
+            Check(AddressPathMenu.BuildComputerMenu().Count(entry => entry.Identity == systemIdentity) == 1,
+                "This PC exposes each common Shell system location once");
         var computerMenu = AddressPathMenu.BuildComputerMenu();
         Check(computerMenu[0].Identity == "shell:MyComputerFolder" && computerMenu[0].IsCurrent,
             "the F8 menu begins at This PC");

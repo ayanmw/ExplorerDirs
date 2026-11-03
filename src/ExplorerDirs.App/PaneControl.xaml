@@ -30,7 +30,7 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition x:Name="AddressMenuColumn" Width="24"/>
                         <ColumnDefinition x:Name="AddressComputerColumn" Width="24"/>
-                        <ColumnDefinition x:Name="AddressHistoryColumn" Width="24"/>
+                        <ColumnDefinition x:Name="AddressHistoryColumn" Width="0"/>
                     </Grid.ColumnDefinitions>
                     <ScrollViewer x:Name="BreadcrumbScroll" Grid.Column="0" HorizontalScrollBarVisibility="Hidden"
                                   VerticalScrollBarVisibility="Disabled" Focusable="False" Background="Transparent"
@@ -44,12 +44,12 @@
                              LostKeyboardFocus="Address_LostKeyboardFocus"
                              Visibility="Collapsed" VerticalContentAlignment="Center"/>
                     <Button x:Name="AddressMenuButton" Grid.Column="1" Width="24" Padding="0"
-                            ToolTip="上级目录、系统位置和最近访问；F4 打开目录树" AutomationProperties.Name="路径与最近位置"
+                            ToolTip="最近访问和上级目录；F4 打开目录树" AutomationProperties.Name="路径与最近位置"
                             Click="AddressMenu_Click"/>
                     <Button x:Name="AddressComputerButton" Grid.Column="2" Width="24" Padding="0"
                             ToolTip="常用位置、磁盘和收藏夹 (F8)" AutomationProperties.Name="此电脑"
                             Click="AddressComputer_Click"/>
-                    <Button x:Name="AddressHistoryButton" Grid.Column="3" Width="24" Padding="0"
+                    <Button x:Name="AddressHistoryButton" Grid.Column="3" Width="24" Padding="0" Visibility="Collapsed" IsTabStop="False"
                             ToolTip="当前标签的访问历史" AutomationProperties.Name="地址历史"
                             Click="AddressHistory_Click"/>
                 </Grid>
