@@ -8,7 +8,7 @@ using ExplorerDirs.App;
 
 // Real Shell folder PIDLs and actual host callbacks, without attaching the host
 // to a window or creating ExplorerBrowser. Callback ordering is synthetic.
-internal static class FolderNavigationCallbacksProbe
+internal static partial class FolderNavigationCallbacksProbe
 {
     private const BindingFlags Members = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
     private static readonly Type HostType = typeof(ExplorerDirs.App.MainWindow).Assembly
@@ -40,7 +40,7 @@ internal static class FolderNavigationCallbacksProbe
         return 0;
     }
 
-    internal static int RunProvider(string adapterPath)
+    internal static int RunProvider(string adapterPath, bool notificationBridge = false, bool bridgeLifetimeOnly = false)
     {
         var foreground = GetForegroundWindow();
         var root = Path.Combine(AppContext.BaseDirectory, "provider-callbacks-" + Guid.NewGuid().ToString("N"));
@@ -65,7 +65,8 @@ internal static class FolderNavigationCallbacksProbe
             var codec = HostType.Assembly.GetType("ExplorerDirs.App.QdrShellPathCodec", true)!;
             var identity = (string)codec.GetMethod("ToProviderIdentity", BindingFlags.Static | BindingFlags.NonPublic)!
                 .Invoke(null, [root, classId])!;
-            CheckProductDirectorySize(owner, ownerType, identity, root);
+            CheckProductDirectorySize(owner, ownerType, identity, root, notificationBridge);
+            if (notificationBridge) CheckProductNotificationBridge(identity, root, bridgeLifetimeOnly);
             foreach (var (native, physical) in new[] { (identity, root), (identity + @"\中文子目录", child),
                 (identity + @"\中文子目录\第二层", grandchild) })
             {
@@ -121,11 +122,13 @@ internal static class FolderNavigationCallbacksProbe
             Directory.Delete(root, true);
         }
         Ensure(GetForegroundWindow() == foreground, "provider callbacks preserved foreground");
-        Console.WriteLine("Provider callbacks: PASS (real product PIDLs, Unicode nested folders, logical/native identities, direct-child selection and wrong-parent rejection, registration cleanup; no HWND/ExplorerBrowser/file view)");
+        Console.WriteLine(notificationBridge
+            ? "Provider callbacks: PASS (real product PIDLs, nested paths, selection, cleanup; message-only recipients, no ExplorerBrowser/file view)"
+            : "Provider callbacks: PASS (real product PIDLs, Unicode nested folders, logical/native identities, direct-child selection and wrong-parent rejection, registration cleanup; no HWND/ExplorerBrowser/file view)");
         return 0;
     }
 
-    private static void CheckProductDirectorySize(IDisposable owner, Type ownerType, string nativeRoot, string physicalRoot)
+    private static void CheckProductDirectorySize(IDisposable owner, Type ownerType, string nativeRoot, string physicalRoot, bool requireNotificationScope)
     {
         var directory = Path.Combine(physicalRoot, "size-probe");
         Directory.CreateDirectory(Path.Combine(directory, "nested"));
@@ -149,7 +152,7 @@ internal static class FolderNavigationCallbacksProbe
                 } while (clock.Elapsed < TimeSpan.FromSeconds(5));
                 throw new InvalidOperationException($"Product async size did not fill: expected={expected}; actual={actual ?? "empty"}.");
             }
-            InspectSizeNotificationScope(pidl);
+            InspectSizeNotificationScope(pidl, requireNotificationScope);
             WaitForSize(12);
             File.WriteAllBytes(Path.Combine(directory, "a.bin"), new byte[20]);
             ownerType.GetMethod("InvalidateFolderSizes", Members)!.Invoke(owner, [directory]);
@@ -158,7 +161,7 @@ internal static class FolderNavigationCallbacksProbe
         }
         finally { Marshal.FreeCoTaskMem(pidl); }
     }
-    private static void InspectSizeNotificationScope(nint itemPidl)
+    private static void InspectSizeNotificationScope(nint itemPidl, bool required)
     {
         var folderId = new Guid("93f2f68c-1d1b-11d3-a30e-00c04f79abd1");
         Marshal.ThrowExceptionForHR(SHBindToParent(itemPidl, ref folderId, out var folder, out _));
@@ -175,6 +178,7 @@ internal static class FolderNavigationCallbacksProbe
             Marshal.ThrowExceptionForHR(message(callback, 49, rootOutput, maskOutput)); // SFVM_GETNOTIFY
             var root = Marshal.ReadIntPtr(rootOutput); // Borrowed from callback; never free it here.
             var withinScope = root != 0 && ILIsParent(root, itemPidl, false);
+            if (required) Ensure(withinScope, "size completion identity belongs to the registered view notification root");
             Console.WriteLine($"Product size notification scope: provider-child-covered={withinScope}; event-mask=0x{Marshal.ReadInt32(maskOutput):X}; no view created.");
         }
         finally

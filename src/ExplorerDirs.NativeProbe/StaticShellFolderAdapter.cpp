@@ -3320,6 +3320,9 @@ namespace
             if (message == SFVM_WINDOWCREATED)
             {
                 TraceSyntheticSortStage("synthetic-sort: SFVM_WINDOWCREATED");
+#if defined(EXPLORERDIRS_NOTIFICATION_BRIDGE_EXPERIMENT)
+                return AttachBackingNotifications(reinterpret_cast<HWND>(wParam));
+#endif
             }
             if (message != SFVM_GETNOTIFY) return E_NOTIMPL;
             if (!wParam || !lParam || !_backingRoot) return E_POINTER;
@@ -3344,7 +3347,13 @@ namespace
                 CoTaskMemFree(parsingName);
             }
 #else
+            // Completed size values use provider item identities. Physical events
+            // arrive through the separate registration attached to the view window.
+#if !defined(EXPLORERDIRS_NOTIFICATION_BRIDGE_EXPERIMENT)
             *reinterpret_cast<PIDLIST_ABSOLUTE*>(wParam) = _backingRoot;
+#else
+            *reinterpret_cast<PIDLIST_ABSOLUTE*>(wParam) = _root;
+#endif
             *reinterpret_cast<LONG*>(lParam) = SHCNE_ALLEVENTS;
 #endif
             return S_OK;
@@ -3803,6 +3812,13 @@ namespace
                 _backingPath, result);
             if (SUCCEEDED(result) && *value && !_shellView)
             {
+#if defined(EXPLORERDIRS_NOTIFICATION_BRIDGE_EXPERIMENT)
+                // Borrow the view: it owns this callback. Keeping both alive here
+                // formed a reference cycle and exhausted the prototype's 32 slots.
+                _shellView = static_cast<IShellView*>(*value);
+                InterlockedExchange(&_asyncScansCancelled, 0);
+                InterlockedExchange(&_asyncNotificationsEnabled, 1);
+#else
                 bool held = false;
                 for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
                 {
@@ -3819,6 +3835,7 @@ namespace
                     }
                 }
                 if (!held) TraceSyntheticSortStage("synthetic-sort: view-hold-capacity-exhausted");
+#endif
             }
             return result;
         }
@@ -4290,13 +4307,136 @@ namespace
             }
             return result;
         }
+#if defined(EXPLORERDIRS_NOTIFICATION_BRIDGE_EXPERIMENT)
+        static UINT BackingNotificationMessage()
+        {
+            static const UINT message = RegisterWindowMessageW(L"ExplorerDirs.BackingFolderChange.v1");
+            return message;
+        }
+        HRESULT AttachBackingNotifications(HWND window)
+        {
+            if (!window || !_backingRoot || !_root) return E_INVALIDARG;
+            if (_notificationWindow) return _notificationWindow == window ? S_FALSE : E_UNEXPECTED;
+            if (!BackingNotificationMessage() || !SetWindowSubclass(window, BackingNotificationProc,
+                reinterpret_cast<UINT_PTR>(this), reinterpret_cast<DWORD_PTR>(this))) return E_FAIL;
+            // This reference belongs to the HWND, not to the Shell view COM object.
+            AddRef();
+            _notificationWindow = window;
+            SHChangeNotifyEntry entry{ _backingRoot, FALSE };
+            _backingNotificationRegistration = SHChangeNotifyRegister(window,
+                SHCNRF_ShellLevel | SHCNRF_InterruptLevel | SHCNRF_NewDelivery,
+                SHCNE_ALLEVENTS, BackingNotificationMessage(), 1, &entry);
+            if (!_backingNotificationRegistration)
+            {
+                _notificationWindow = nullptr;
+                RemoveWindowSubclass(window, BackingNotificationProc, reinterpret_cast<UINT_PTR>(this));
+                Release();
+                return E_FAIL;
+            }
+            return S_OK;
+        }
+        PIDLIST_ABSOLUTE ProviderNotificationIdentity(PCIDLIST_ABSOLUTE physical, LONG event) const
+        {
+            if (!physical || !_root || !_backingRoot) return nullptr;
+            if (ILIsEqual(physical, _backingRoot)) return ILCloneFull(_root);
+            if (!ILIsParent(_backingRoot, physical, TRUE)) return nullptr;
+            LPWSTR path = nullptr;
+            if (FAILED(SHGetNameFromIDList(physical, SIGDN_FILESYSPATH, &path)) || !path) return nullptr;
+            SyntheticChild child{};
+            child.cb = sizeof(child);
+            child.id = 1;
+            const auto copied = StringCchCopyW(child.name, ARRAYSIZE(child.name), PathFindFileNameW(path));
+            const auto kind = event & ~SHCNE_INTERRUPT;
+            child.attributes = kind == SHCNE_MKDIR || kind == SHCNE_RMDIR || kind == SHCNE_RENAMEFOLDER
+                ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
+            WIN32_FIND_DATAW data{};
+            const auto search = FindFirstFileW(path, &data);
+            if (search != INVALID_HANDLE_VALUE)
+            {
+                FindClose(search);
+                child.attributes = data.dwFileAttributes;
+                child.size = (static_cast<ULONGLONG>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
+                if (child.attributes & FILE_ATTRIBUTE_DIRECTORY) TryGetSyntheticFileIdentity(path, &child.identity);
+            }
+            CoTaskMemFree(path);
+            // Deleted items have no filesystem metadata, but their name still identifies the row.
+            if (FAILED(copied) || !*child.name) return nullptr;
+            auto* relative = CloneSyntheticChild(child);
+            if (!relative) return nullptr;
+            auto* absolute = ILCombine(_root, relative);
+            CoTaskMemFree(relative);
+            return absolute;
+        }
+        void ForwardBackingNotification(PCIDLIST_ABSOLUTE first, PCIDLIST_ABSOLUTE second, LONG event)
+        {
+            const auto kind = event & ~SHCNE_INTERRUPT;
+            if (!first || !_notificationWindow) return;
+            // Retain the existing cache invalidation behavior for physical paths.
+            PCIDLIST_ABSOLUTE physical[] = { first, second };
+            MessageSFVCB(SFVM_FSNOTIFY, reinterpret_cast<WPARAM>(physical), kind);
+            if (!_notificationWindow) return;
+            auto* translatedFirst = ProviderNotificationIdentity(first, kind);
+            auto* translatedSecond = second ? ProviderNotificationIdentity(second, kind) : nullptr;
+            if (translatedFirst && (!second || translatedSecond))
+                SHChangeNotify(kind, SHCNF_IDLIST | SHCNF_FLUSHNOWAIT, translatedFirst, translatedSecond);
+            else if (ILIsEqual(first, _backingRoot) || ILIsParent(_backingRoot, first, FALSE))
+                SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_IDLIST | SHCNF_FLUSHNOWAIT, _root, nullptr);
+            if (translatedFirst) CoTaskMemFree(translatedFirst);
+            if (translatedSecond) CoTaskMemFree(translatedSecond);
+        }
+        static LRESULT CALLBACK BackingNotificationProc(HWND window, UINT message, WPARAM wParam,
+            LPARAM lParam, UINT_PTR subclassId, DWORD_PTR data)
+        {
+            auto* self = reinterpret_cast<SyntheticSortFolder*>(data);
+            if (message == WM_NCDESTROY)
+            {
+                self->_notificationWindow = nullptr;
+                const auto registration = self->_backingNotificationRegistration;
+                self->_backingNotificationRegistration = 0;
+                if (registration) SHChangeNotifyDeregister(registration);
+                RemoveWindowSubclass(window, BackingNotificationProc, subclassId);
+                self->ReleaseViewHold();
+                const auto result = DefSubclassProc(window, message, wParam, lParam);
+                self->Release();
+                return result;
+            }
+            if (message == BackingNotificationMessage())
+            {
+                PIDLIST_ABSOLUTE* pidls = nullptr;
+                LONG event = 0;
+                const auto lock = SHChangeNotification_Lock(reinterpret_cast<HANDLE>(wParam),
+                    static_cast<DWORD>(lParam), &pidls, &event);
+                if (lock)
+                {
+                    auto* first = pidls && pidls[0] ? ILCloneFull(pidls[0]) : nullptr;
+                    const auto kind = event & ~SHCNE_INTERRUPT;
+                    const bool rename = kind == SHCNE_RENAMEITEM || kind == SHCNE_RENAMEFOLDER;
+                    auto* second = rename && pidls && pidls[1] ? ILCloneFull(pidls[1]) : nullptr;
+                    SHChangeNotification_Unlock(lock);
+                    // Parsing can reenter window destruction; hold the callback until all clones are released.
+                    self->AddRef();
+                    try { self->ForwardBackingNotification(first, second, event); }
+                    catch (...) { TraceSyntheticSortStage("backing-notification: forwarding-failed"); }
+                    if (first) CoTaskMemFree(first);
+                    if (second) CoTaskMemFree(second);
+                    self->Release();
+                }
+                return 0;
+            }
+            return DefSubclassProc(window, message, wParam, lParam);
+        }
+#endif
         void ReleaseViewHold()
         {
             InterlockedExchange(&_asyncNotificationsEnabled, 0);
             InterlockedExchange(&_asyncScansCancelled, 1);
             auto* view = _shellView;
             _shellView = nullptr;
+#if !defined(EXPLORERDIRS_NOTIFICATION_BRIDGE_EXPERIMENT)
             if (view) view->Release();
+#else
+            (void)view; // Product views are borrowed, not AddRef'd by their callback.
+#endif
         }
         bool CancelPendingRefresh()
         {
@@ -5488,6 +5628,10 @@ namespace
         SyntheticRecursiveSizeSnapshotStore* _recursiveSizeStore = nullptr;
         std::vector<SyntheticChild> _pendingSelected;
         mutable std::mutex _asyncSizeScanMutex;
+#if defined(EXPLORERDIRS_NOTIFICATION_BRIDGE_EXPERIMENT)
+        HWND _notificationWindow = nullptr;
+        ULONG _backingNotificationRegistration = 0;
+#endif
         mutable std::mutex _backingColumnMutex;
         mutable std::vector<UINT> _backingColumnOrdinals;
         mutable bool _backingColumnMapReady = false;
