@@ -3739,6 +3739,26 @@ namespace
         {
             SyntheticCompareCallbackScope compareScope;
             (void)compareScope;
+            if (!left || !right) return E_INVALIDARG;
+            const auto isPathMarker = [](PCUIDLIST_RELATIVE value)
+            {
+                return value->mkid.cb >= kSyntheticRootPathPidlHeaderSize &&
+                    reinterpret_cast<const SyntheticRootPathPidlItem*>(value)->magic == kSyntheticRootPathPidlMagic;
+            };
+            if (isPathMarker(left) || isPathMarker(right))
+            {
+                // Root markers are namespace children too. Rejecting even marker==marker
+                // breaks Shell's canonical identity comparisons before ordinary rows are reached.
+                std::wstring leftPath, rightPath;
+                const auto leftResult = ReadSyntheticRootPathFromPidl(left, &leftPath, true);
+                const auto rightResult = ReadSyntheticRootPathFromPidl(right, &rightPath, true);
+                if (FAILED(leftResult)) return leftResult;
+                if (FAILED(rightResult)) return rightResult;
+                const auto comparison = leftResult != rightResult ? (leftResult == S_OK ? -1 : 1) :
+                    _wcsicmp(leftPath.c_str(), rightPath.c_str());
+                return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL,
+                    comparison < 0 ? static_cast<USHORT>(-1) : comparison > 0 ? 1 : 0);
+            }
             const auto* leftChild = SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(left));
             const auto* rightChild = SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(right));
             if (!leftChild || !rightChild) return E_INVALIDARG;

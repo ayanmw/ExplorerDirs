@@ -4,6 +4,30 @@ using System.Reflection;
 
 internal static partial class FolderNavigationCallbacksProbe
 {
+    private static void CheckProviderRootComparison(string identity)
+    {
+        System.Runtime.InteropServices.Marshal.ThrowExceptionForHR(SHParseDisplayName(identity, 0, out var pidl, 0, out _));
+        nint folder = 0;
+        try
+        {
+            var iid = new Guid("000214E6-0000-0000-C000-000000000046");
+            System.Runtime.InteropServices.Marshal.ThrowExceptionForHR(SHBindToParent(pidl, ref iid, out folder, out var child));
+            var compare = System.Runtime.InteropServices.Marshal.GetDelegateForFunctionPointer<ViewCallback>(
+                System.Runtime.InteropServices.Marshal.ReadIntPtr(System.Runtime.InteropServices.Marshal.ReadIntPtr(folder), 7 * nint.Size));
+            foreach (var flags in new uint[] { 0, 0x10000000 })
+            {
+                var result = compare(folder, flags, child, child);
+                Ensure(result == 0, $"provider root marker must compare equal to itself; flags={flags:X}; hr={result:X8}");
+            }
+        }
+        finally
+        {
+            if (folder != 0) System.Runtime.InteropServices.Marshal.Release(folder);
+            System.Runtime.InteropServices.Marshal.FreeCoTaskMem(pidl);
+        }
+        Console.WriteLine("Provider root marker comparison: PASS (name/canonical identity; no Shell view).");
+    }
+
     private static void CheckUnconfiguredShellActivation(Guid classId, string adapterPath, string root)
     {
         // Unlike older enumeration probes, this child must not configure or preload the DLL.

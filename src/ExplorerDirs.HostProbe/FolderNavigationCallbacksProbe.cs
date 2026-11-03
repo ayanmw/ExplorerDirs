@@ -66,6 +66,7 @@ internal static partial class FolderNavigationCallbacksProbe
             var identity = (string)codec.GetMethod("ToProviderIdentity", BindingFlags.Static | BindingFlags.NonPublic)!
                 .Invoke(null, [root, classId])!;
             if (unconfiguredActivation) CheckUnconfiguredShellActivation(classId, adapterPath, root);
+            CheckProviderRootComparison(identity);
             CheckProductDirectorySize(owner, ownerType, identity, root, notificationBridge);
             if (notificationBridge) CheckProductNotificationBridge(identity, root, bridgeLifetimeOnly);
             foreach (var (native, physical) in new[] { (identity, root), (identity + @"\中文子目录", child),
