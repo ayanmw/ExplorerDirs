@@ -14,15 +14,29 @@ internal static class ShellNamespaceRegistrationOwnerSmoke
         try
         {
             var firstOwner = ProfileShellNamespaceOwner.Start(classId, profileRoot, adapterPath);
-            VerifyOwnedRegistration(classId, adapterPath);
+            VerifyOwnedRegistration(classId, adapterPath, profileRoot);
             var recoveredOwner = ProfileShellNamespaceOwner.Start(classId, profileRoot, adapterPath);
-            VerifyOwnedRegistration(classId, adapterPath);
+            VerifyOwnedRegistration(classId, adapterPath, profileRoot);
             recoveredOwner.Dispose();
             firstOwner.Dispose();
             VerifyRegistrationAbsent(classId);
 
             var editedId = Guid.NewGuid();
             var editedOwner = ProfileShellNamespaceOwner.Start(editedId, profileRoot, adapterPath);
+            using (var editedClass = Registry.CurrentUser.OpenSubKey(ClassKeyPath(editedId), writable: true)!)
+                editedClass.SetValue("ExplorerDirsProfileRoot", profileRoot + "-external", RegistryValueKind.String);
+            try
+            {
+                var refused = false;
+                try { editedOwner.Dispose(); }
+                catch (InvalidOperationException error) when (error.Message.Contains("changed ownership", StringComparison.Ordinal)) { refused = true; }
+                if (!refused) throw new InvalidOperationException("External runtime-root metadata was not protected during cleanup.");
+            }
+            finally
+            {
+                using var editedClass = Registry.CurrentUser.OpenSubKey(ClassKeyPath(editedId), writable: true);
+                editedClass?.SetValue("ExplorerDirsProfileRoot", profileRoot, RegistryValueKind.String);
+            }
             var inprocPath = $"{ClassKeyPath(editedId)}\\InprocServer32";
             using (var inproc = Registry.CurrentUser.OpenSubKey(inprocPath, writable: true)
                    ?? throw new InvalidOperationException("Could not open the owned InprocServer32 fixture."))
@@ -105,7 +119,7 @@ internal static class ShellNamespaceRegistrationOwnerSmoke
         }
     }
 
-    private static void VerifyOwnedRegistration(Guid classId, string adapterPath)
+    private static void VerifyOwnedRegistration(Guid classId, string adapterPath, string profileRoot)
     {
         using var classKey = Registry.CurrentUser.OpenSubKey(ClassKeyPath(classId));
         using var inproc = classKey?.OpenSubKey("InprocServer32");
@@ -116,7 +130,8 @@ internal static class ShellNamespaceRegistrationOwnerSmoke
             !string.Equals(inproc?.GetValue(null) as string, adapterPath, StringComparison.OrdinalIgnoreCase) ||
             inproc?.GetValue("ThreadingModel") as string != "Apartment" ||
             shellFolder?.GetValue("Attributes") is not int attributes || attributes != unchecked((int)0xA0100000) ||
-            namespaceKey?.GetValue(null) as string != OwnerName)
+            namespaceKey?.GetValue(null) as string != OwnerName ||
+            !string.Equals(classKey?.GetValue("ExplorerDirsProfileRoot") as string, profileRoot, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("The profile Shell registration did not match its owned values.");
     }
 

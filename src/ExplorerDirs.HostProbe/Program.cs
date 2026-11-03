@@ -30,6 +30,11 @@ internal static class Program
             bool.TryParse(args[5], out var sessionChildIgnoreFolderSort))
             return ShellProviderLocationProbe.RunSessionRecoveryChild(args[1], args[2], sessionChildClassId,
                 args[4], sessionChildIgnoreFolderSort);
+        if (args.Length == 5 && args[0] == "--shell-provider-enumeration-child-unconfigured" &&
+            Guid.TryParse(args[1], out var unconfiguredClassId))
+            return ShellProviderEnumerationChildProbe.Run(unconfiguredClassId, args[2], args[3], args[4], configureRoot: false);
+        if (args is ["--product-unconfigured-activation", var activationAdapter])
+            return FolderNavigationCallbacksProbe.RunProvider(activationAdapter, unconfiguredActivation: true);
         if (args.Length == 5 && args[0] == "--shell-provider-enumeration-child" &&
             Guid.TryParse(args[1], out var enumerationClassId))
             return ShellProviderEnumerationChildProbe.Run(enumerationClassId, args[2], args[3], args[4]);

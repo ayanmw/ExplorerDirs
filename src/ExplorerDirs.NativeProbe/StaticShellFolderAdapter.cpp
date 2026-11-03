@@ -2242,12 +2242,62 @@ namespace
     volatile LONG g_syntheticColumnMetadataTraceCount = 0;
     std::wstring g_syntheticSortBackingPath;
 
+#if !defined(EXPLORERDIRS_NATIVEPROBE)
+    bool ReadRegisteredNamespaceString(PCWSTR key, PCWSTR name, std::wstring* text)
+    {
+        DWORD bytes = 0;
+        if (RegGetValueW(HKEY_CURRENT_USER, key, name, RRF_RT_REG_SZ | RRF_NOEXPAND,
+            nullptr, nullptr, &bytes) != ERROR_SUCCESS || bytes < sizeof(WCHAR) || bytes > 65536 || bytes % sizeof(WCHAR)) return false;
+        try
+        {
+            std::vector<WCHAR> buffer(bytes / sizeof(WCHAR));
+            if (RegGetValueW(HKEY_CURRENT_USER, key, name, RRF_RT_REG_SZ | RRF_NOEXPAND,
+                nullptr, buffer.data(), &bytes) != ERROR_SUCCESS || buffer.back() != L'\0') return false;
+            text->assign(buffer.data());
+            return !text->empty();
+        }
+        catch (const std::bad_alloc&) { return false; }
+    }
+    bool TryGetRegisteredNamespaceRoot(REFCLSID classId, std::wstring* path)
+    {
+        WCHAR className[40]{};
+        WCHAR key[128]{};
+        if (!StringFromGUID2(classId, className, ARRAYSIZE(className)) ||
+            FAILED(StringCchPrintfW(key, ARRAYSIZE(key), L"Software\\Classes\\CLSID\\%s", className))) return false;
+        HMODULE module = nullptr;
+        if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCWSTR>(&TryGetRegisteredNamespaceRoot), &module)) return false;
+        try
+        {
+            std::vector<WCHAR> modulePath(32768);
+            const auto length = GetModuleFileNameW(module, modulePath.data(), static_cast<DWORD>(modulePath.size()));
+            if (!length || length >= modulePath.size()) return false;
+            std::wstring owner, adapter, root;
+            if (!ReadRegisteredNamespaceString(key, nullptr, &owner) || owner != L"Explorer Dirs profile Shell namespace" ||
+                !ReadRegisteredNamespaceString(key, L"ExplorerDirsAdapterPath", &adapter) ||
+                CompareStringOrdinal(adapter.c_str(), -1, modulePath.data(), -1, TRUE) != CSTR_EQUAL ||
+                !ReadRegisteredNamespaceString(key, L"ExplorerDirsProfileRoot", &root) || PathIsRelativeW(root.c_str())) return false;
+            *path = std::move(root);
+            return true;
+        }
+        catch (const std::bad_alloc&) { return false; }
+    }
+#endif
     bool TryGetSyntheticRootBackingPath(REFCLSID classId, std::wstring* path)
     {
         if (!path) return false;
         std::lock_guard<std::mutex> lock(g_syntheticRootConfigurationMutex);
         const auto found = g_syntheticRootBackingPaths.find(classId);
-        if (found == g_syntheticRootBackingPaths.end()) return false;
+        if (found == g_syntheticRootBackingPaths.end())
+        {
+#if !defined(EXPLORERDIRS_NATIVEPROBE)
+            // Shell notification/metadata consumers load the registered DLL in another process.
+            // They cannot inherit ConfigureShellNamespaceRoot's application-local map.
+            return TryGetRegisteredNamespaceRoot(classId, path);
+#else
+            return false;
+#endif
+        }
         try { *path = found->second; }
         catch (const std::bad_alloc&) { return false; }
         return !path->empty();

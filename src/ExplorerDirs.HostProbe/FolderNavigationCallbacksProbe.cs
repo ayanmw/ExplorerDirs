@@ -40,7 +40,7 @@ internal static partial class FolderNavigationCallbacksProbe
         return 0;
     }
 
-    internal static int RunProvider(string adapterPath, bool notificationBridge = false, bool bridgeLifetimeOnly = false)
+    internal static int RunProvider(string adapterPath, bool notificationBridge = false, bool bridgeLifetimeOnly = false, bool unconfiguredActivation = false)
     {
         var foreground = GetForegroundWindow();
         var root = Path.Combine(AppContext.BaseDirectory, "provider-callbacks-" + Guid.NewGuid().ToString("N"));
@@ -65,6 +65,7 @@ internal static partial class FolderNavigationCallbacksProbe
             var codec = HostType.Assembly.GetType("ExplorerDirs.App.QdrShellPathCodec", true)!;
             var identity = (string)codec.GetMethod("ToProviderIdentity", BindingFlags.Static | BindingFlags.NonPublic)!
                 .Invoke(null, [root, classId])!;
+            if (unconfiguredActivation) CheckUnconfiguredShellActivation(classId, adapterPath, root);
             CheckProductDirectorySize(owner, ownerType, identity, root, notificationBridge);
             if (notificationBridge) CheckProductNotificationBridge(identity, root, bridgeLifetimeOnly);
             foreach (var (native, physical) in new[] { (identity, root), (identity + @"\中文子目录", child),

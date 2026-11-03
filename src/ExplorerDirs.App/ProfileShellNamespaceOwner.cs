@@ -12,16 +12,19 @@ internal sealed class ProfileShellNamespaceOwner : IDisposable
 {
     private const string OwnerName = "Explorer Dirs profile Shell namespace";
     private const string AdapterPathValue = "ExplorerDirsAdapterPath";
+    private const string ProfileRootValue = "ExplorerDirsProfileRoot";
     private const int ShellFolderAttributes = unchecked((int)0xA0100000);
     private readonly Guid _classId;
     private readonly string _adapterPath;
+    private readonly string _profileRoot;
     private nint _adapterModule;
     private FolderSizeNativeBridge? _folderSizeBridge;
 
-    private ProfileShellNamespaceOwner(Guid classId, string adapterPath, nint adapterModule)
+    private ProfileShellNamespaceOwner(Guid classId, string adapterPath, string profileRoot, nint adapterModule)
     {
         _classId = classId;
         _adapterPath = adapterPath;
+        _profileRoot = profileRoot;
         _adapterModule = adapterModule;
     }
 
@@ -39,8 +42,8 @@ internal sealed class ProfileShellNamespaceOwner : IDisposable
             var configure = Marshal.GetDelegateForFunctionPointer<ConfigureShellNamespaceRoot>(
                 NativeLibrary.GetExport(module, "ConfigureShellNamespaceRoot"));
             Marshal.ThrowExceptionForHR(configure(ref classId, root));
-            RegisterVolatileNamespace(classId, library);
-            return new ProfileShellNamespaceOwner(classId, library, module);
+            RegisterVolatileNamespace(classId, library, root);
+            return new ProfileShellNamespaceOwner(classId, library, root, module);
         }
         catch
         {
@@ -58,7 +61,7 @@ internal sealed class ProfileShellNamespaceOwner : IDisposable
         _folderSizeBridge?.Dispose();
         _folderSizeBridge = null;
         // Keep the module owner retryable if an external registry edit makes cleanup unsafe.
-        DeleteOwnedRegistration(_classId, _adapterPath);
+        DeleteOwnedRegistration(_classId, _adapterPath, _profileRoot);
         module = Interlocked.Exchange(ref _adapterModule, 0);
         if (module != 0) NativeLibrary.Free(module);
     }
@@ -82,13 +85,13 @@ internal sealed class ProfileShellNamespaceOwner : IDisposable
         Marshal.ThrowExceptionForHR(invalidate(path));
     }
 
-    private static void RegisterVolatileNamespace(Guid classId, string adapterPath)
+    private static void RegisterVolatileNamespace(Guid classId, string adapterPath, string profileRoot)
     {
         if (HasRegistration(classId))
         {
-            if (!HasOwnedRegistration(classId, adapterPath))
+            if (!HasOwnedRegistration(classId, adapterPath, profileRoot))
                 throw new InvalidOperationException($"Refusing to overwrite an unowned Shell registration for profile {classId:D}.");
-            DeleteOwnedRegistration(classId, adapterPath);
+            DeleteOwnedRegistration(classId, adapterPath, profileRoot);
         }
 
         try
@@ -99,6 +102,8 @@ internal sealed class ProfileShellNamespaceOwner : IDisposable
             {
                 clsid.SetValue(null, OwnerName, RegistryValueKind.String);
                 clsid.SetValue(AdapterPathValue, adapterPath, RegistryValueKind.String);
+                // Runtime activation metadata, not a preference; it shares the volatile registration lifetime.
+                clsid.SetValue(ProfileRootValue, profileRoot, RegistryValueKind.String);
                 using var inproc = clsid.CreateSubKey("InprocServer32",
                     RegistryKeyPermissionCheck.ReadWriteSubTree, RegistryOptions.Volatile)
                     ?? throw new InvalidOperationException("Could not create the profile Shell InprocServer32 key.");
@@ -117,7 +122,7 @@ internal sealed class ProfileShellNamespaceOwner : IDisposable
         }
         catch
         {
-            DeleteOwnedRegistration(classId, adapterPath);
+            DeleteOwnedRegistration(classId, adapterPath, profileRoot);
             throw;
         }
     }
@@ -129,7 +134,7 @@ internal sealed class ProfileShellNamespaceOwner : IDisposable
         return classKey is not null || nameSpace is not null;
     }
 
-    private static bool HasOwnedRegistration(Guid classId, string adapterPath)
+    private static bool HasOwnedRegistration(Guid classId, string adapterPath, string profileRoot)
     {
         using var classKey = Registry.CurrentUser.OpenSubKey(ClassKeyPath(classId));
         using var inproc = classKey?.OpenSubKey("InprocServer32");
@@ -138,7 +143,8 @@ internal sealed class ProfileShellNamespaceOwner : IDisposable
         if (classKey is null && nameSpace is null) return false;
         var classOwned = classKey is null || classKey.GetValue(null) is string classOwner && classOwner == OwnerName &&
                          classKey.GetValue(AdapterPathValue) is string registeredAdapter && IsSamePath(registeredAdapter, adapterPath) &&
-                         HasOnlyRegistryContent(classKey, [string.Empty, AdapterPathValue], ["InprocServer32", "ShellFolder"]) &&
+                         (classKey.GetValue(ProfileRootValue) is null || classKey.GetValue(ProfileRootValue) is string registeredRoot && IsSamePath(registeredRoot, profileRoot)) &&
+                         HasOnlyRegistryContent(classKey, [string.Empty, AdapterPathValue, ProfileRootValue], ["InprocServer32", "ShellFolder"]) &&
                          (inproc is null || inproc.GetValue(null) is string registeredPath && IsSamePath(registeredPath, adapterPath) &&
                              inproc.GetValue("ThreadingModel") as string == "Apartment" &&
                              HasOnlyRegistryContent(inproc, [string.Empty, "ThreadingModel"], [])) &&
@@ -150,12 +156,12 @@ internal sealed class ProfileShellNamespaceOwner : IDisposable
         return classOwned && namespaceOwned;
     }
 
-    private static void DeleteOwnedRegistration(Guid classId, string adapterPath)
+    private static void DeleteOwnedRegistration(Guid classId, string adapterPath, string profileRoot)
     {
         using var classKey = Registry.CurrentUser.OpenSubKey(ClassKeyPath(classId), writable: true);
         using var nameSpace = Registry.CurrentUser.OpenSubKey(NamespaceKeyPath(classId), writable: true);
         if (classKey is null && nameSpace is null) return;
-        if (!HasOwnedRegistration(classId, adapterPath))
+        if (!HasOwnedRegistration(classId, adapterPath, profileRoot))
             throw new InvalidOperationException($"The profile Shell registration for {classId:D} changed ownership; it was left untouched.");
 
         if (classKey is not null)
@@ -165,6 +171,7 @@ internal sealed class ProfileShellNamespaceOwner : IDisposable
             if (classKey.GetSubKeyNames().Contains("ShellFolder", StringComparer.OrdinalIgnoreCase))
                 classKey.DeleteSubKey("ShellFolder", throwOnMissingSubKey: false);
             classKey.DeleteValue(AdapterPathValue, throwOnMissingValue: false);
+            classKey.DeleteValue(ProfileRootValue, throwOnMissingValue: false);
             classKey.DeleteValue(string.Empty, throwOnMissingValue: false);
             if (classKey.ValueCount == 0 && classKey.SubKeyCount == 0)
                 Registry.CurrentUser.DeleteSubKey(ClassKeyPath(classId), throwOnMissingSubKey: false);

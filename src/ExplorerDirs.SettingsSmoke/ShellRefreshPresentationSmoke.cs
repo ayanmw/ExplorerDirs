@@ -52,7 +52,10 @@ internal static class ShellRefreshPresentationSmoke
             viewProcPath.Contains("childCommandNotification", StringComparison.Ordinal) &&
             viewProcPath.Contains("programmaticSortCommand", StringComparison.Ordinal),
             "Shell child command notifications do not masquerade as user input and cancel paired sorting");
-        Check(refreshPath.Contains("shellView.Refresh()", StringComparison.Ordinal) &&
+        // Refresh now passes the native call through the manual/automatic flag policy;
+        // keep checking the presentation boundary rather than the old invocation spelling.
+        Check(refreshPath.Contains("ShellRefreshPolicy.Invoke(traceAsUserRefresh, _softRefresh", StringComparison.Ordinal) &&
+            refreshPath.Contains("shellView.Refresh, IsCurrentRefreshRequest", StringComparison.Ordinal) &&
             !refreshPath.Contains("TryNotifyDirectoryRefresh(", StringComparison.Ordinal) &&
             !refreshPath.Contains("ShellViewRedrawLease.TrySuppress(folderView)", StringComparison.Ordinal) &&
             !refreshPath.Contains("refreshRedrawLease", StringComparison.Ordinal) &&

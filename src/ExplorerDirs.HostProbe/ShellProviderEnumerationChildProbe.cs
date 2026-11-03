@@ -7,7 +7,7 @@ internal static class ShellProviderEnumerationChildProbe
 {
     private static readonly Guid ShellFolderId = new("000214E6-0000-0000-C000-000000000046");
 
-    internal static int Run(Guid classId, string adapterPath, string fallbackRoot, string backingPath)
+    internal static int Run(Guid classId, string adapterPath, string fallbackRoot, string backingPath, bool configureRoot = true)
     {
         nint adapter = 0;
         nint absolutePidl = 0;
@@ -15,10 +15,13 @@ internal static class ShellProviderEnumerationChildProbe
         IEnumIdList? items = null;
         try
         {
-            adapter = NativeLibrary.Load(adapterPath);
-            var configure = Marshal.GetDelegateForFunctionPointer<ConfigureShellNamespaceRoot>(
-                NativeLibrary.GetExport(adapter, "ConfigureShellNamespaceRoot"));
-            Marshal.ThrowExceptionForHR(configure(ref classId, fallbackRoot));
+            if (configureRoot)
+            {
+                adapter = NativeLibrary.Load(adapterPath);
+                var configure = Marshal.GetDelegateForFunctionPointer<ConfigureShellNamespaceRoot>(
+                    NativeLibrary.GetExport(adapter, "ConfigureShellNamespaceRoot"));
+                Marshal.ThrowExceptionForHR(configure(ref classId, fallbackRoot));
+            }
 
             var parsingName = $"::{{{classId:D}}}\\edpath:{EncodePath(backingPath)}";
             Marshal.ThrowExceptionForHR(SHParseDisplayName(parsingName, 0, out absolutePidl, 0, out _));
