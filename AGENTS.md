@@ -23,6 +23,8 @@
 
 - Active/inactive pane highlighting must preserve the same total border/padding inset so focus transfer cannot resize both Shell views. Skip repeated application of an unchanged active state; native selection/focus repaint remains Shell-owned.
 
+- On 2026-11-03 the user queued independent Magnifier/tray buttons and menu/right-side layout alignment for the version after temp.86. Keep these in docs/next-version-chrome-tools.md as planning until implementation is authorized; do not expand the current temp.86 repair/release gate. Tray behavior is temporary and per-window: double-click restores the same window and removes its icon, without changing ordinary minimize/close behavior.
+
 ## Product boundary
 
 - Build a Windows file browsing window replacement with Q-Dir style multi-pane workflows. Do not replace the desktop, taskbar, login shell, or the `explorer.exe` system file.
