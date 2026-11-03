@@ -26,3 +26,4 @@
 - 复制当前标签失效须修复；其他标签整理获反馈正常，滚动/移动箭头样式继续调整。
 - 文件夹大小仍被用户反馈不可用，不能以后台检查通过关闭此项；需真实宿主证据。
 本批先修 Alt+V：原映射确认为 Q-Dir Cut，与 View(V) 冲突。新增显式 OpenViewMenu 路由，在原生文件视图焦点下也由应用打开 ViewMenu；剪切保留 Ctrl+X，Alt+K 保留复制。定向 Shell file commands 测试先复现冲突，修复后通过。未操作当前用户验收窗口、未覆盖 release。
+2026-11-03 Alt 导航焦点修正候选：导航快捷键已消费 keydown，但旧路由没有处理后续 Alt keyup。增加当前 UI 线程的消息过滤，仅在文件视图发起 Alt+上/左/右导航后消费对应的一次 Alt 释放；单按 Alt、Alt+V、普通 Backspace 不拦截，窗口失活清除状态，关闭注销线程事件。消息序列测试覆盖上述边界并通过，App Release build 零警告错误；未进行物理键盘验收，不声称焦点问题已实测解决。相关行为依据微软 WPF/Win32 interop input 文档：TranslateAccelerator 可处理 WM_KEYUP/WM_SYSKEYUP，不能只考虑 keydown。

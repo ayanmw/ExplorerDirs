@@ -85,6 +85,7 @@ public partial class MainWindow : Window
     private bool? _fullRowSelection;
     private bool _disableGrouping;
     private bool _softRefresh;
+    private readonly AltNavigationReleaseGate _altNavigationRelease = new();
     private readonly HiddenItemsPreferenceStore _hiddenItemsPreferenceStore;
     private readonly SizeDisplayPreferenceStore _sizeDisplayPreferenceStore;
     private readonly PortableBooleanPreference _treePreferences;
@@ -173,6 +174,7 @@ public partial class MainWindow : Window
         Closed += (_, _) => ByteSizeFormatter.OptionsChanged -= ByteSizeFormatter_OptionsChanged;
         Deactivated += (_, _) =>
         {
+            _altNavigationRelease.Reset();
             foreach (var pane in _panes) pane.CloseAddressTree();
         };
         _fileCommandRefreshTimer.Tick += FileCommandRefreshTimer_Tick;
@@ -535,6 +537,7 @@ public partial class MainWindow : Window
         }));
         SourceInitialized += (_, _) =>
         {
+            ComponentDispatcher.ThreadFilterMessage += FilterAltNavigationRelease;
             RestoreSavedWindowPlacement();
             try { MouseWheelFocusMessageHook.Register(this, _mouseWheelFocusEnabled); }
             catch (Exception ex)
@@ -565,6 +568,7 @@ public partial class MainWindow : Window
         Closed += (_, _) =>
         {
             _closed = true;
+            ComponentDispatcher.ThreadFilterMessage -= FilterAltNavigationRelease;
             _saveTimer.Stop();
             foreach (var pane in _panes) pane.DisposeViews();
             try { _sharedTreeHost?.Dispose(); }
@@ -1958,6 +1962,12 @@ public partial class MainWindow : Window
         catch (Exception ex) { EnvironmentStatus.Text = $"布局比例仅在本次会话生效，保存失败：{ex.Message}"; }
     }
 
+    private void FilterAltNavigationRelease(ref MSG message, ref bool handled)
+    {
+        if (!IsActive || handled) return;
+        if (_altNavigationRelease.Filter(message.message, unchecked((int)message.wParam.ToInt64())))
+            handled = true;
+    }
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (Keyboard.FocusedElement is MenuItem && _fullScreenRestoreState is null) return;
@@ -2038,6 +2048,7 @@ public partial class MainWindow : Window
             source.SelectTabByNumber((int)shortcut - (int)ExplorerShortcut.Tab1 + 1);
             return true;
         }
+        if (source.HasFileViewFocus) _altNavigationRelease.Mark(shortcut, (int)Keyboard.Modifiers);
         switch (shortcut)
         {
             case ExplorerShortcut.Parent: source.GoParent(); break;

@@ -128,3 +128,23 @@ internal static class KeyboardShortcuts
         return (current + (reverse ? visibleCount - 1 : 1)) % visibleCount;
     }
 }
+
+// Consuming an Alt navigation keydown does not consume the later Alt keyup.
+// Keep that release out of WPF menu activation; a standalone Alt remains untouched.
+internal sealed class AltNavigationReleaseGate
+{
+    private bool _pending;
+    internal void Mark(ExplorerShortcut shortcut, int modifiers)
+    {
+        if (modifiers == 1 && shortcut is ExplorerShortcut.Parent or ExplorerShortcut.Back or ExplorerShortcut.Forward)
+            _pending = true;
+    }
+    internal bool Filter(int message, int key)
+    {
+        if (key is not (0x12 or 0xA4 or 0xA5)) return false;
+        if (message is 0x0100 or 0x0104) { _pending = false; return false; }
+        if (message is not (0x0101 or 0x0105)) return false;
+        var consume = _pending; _pending = false; return consume;
+    }
+    internal void Reset() => _pending = false;
+}
