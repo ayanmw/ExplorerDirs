@@ -172,6 +172,11 @@ internal static partial class FolderNavigationCallbacksProbe
         var maskOutput = Marshal.AllocCoTaskMem(4);
         try
         {
+            var mapColumn = Marshal.GetDelegateForFunctionPointer<MapProviderColumn>(
+                Marshal.ReadIntPtr(Marshal.ReadIntPtr(folder), 19 * nint.Size));
+            Marshal.ThrowExceptionForHR(mapColumn(folder, 1, out var mappedSize));
+            Ensure(mappedSize.FormatId == new Guid("b725f130-47ef-101a-a5f1-02608c9eebac") && mappedSize.PropertyId == 12,
+                "product size column maps to the same standard PKEY_Size used by saved layouts");
             var callbackId = new Guid("2047e320-f2a9-11ce-ae65-08002b2e1262");
             Marshal.ThrowExceptionForHR(Marshal.QueryInterface(folder, in callbackId, out callback));
             var message = Marshal.GetDelegateForFunctionPointer<ViewCallback>(
@@ -191,6 +196,8 @@ internal static partial class FolderNavigationCallbacksProbe
         }
     }
 
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int MapProviderColumn(nint self, uint column, out NativePropertyKey key);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int ViewCallback(nint self, uint message, nint wParam, nint lParam);
     [DllImport("shell32.dll")]

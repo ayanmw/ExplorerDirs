@@ -1964,13 +1964,10 @@ namespace
     volatile LONG g_syntheticFilesystemAttributeCount = 0;
     volatile LONG g_syntheticMaskFilesystemAttributes = 0;
     volatile LONG g_syntheticOwnAttributesForProbe = 0;
-#if defined(EXPLORERDIRS_NATIVEPROBE)
+    // The app persists PKEY_Size. Advertising a different custom key makes that
+    // saved column absent from the native catalog, even though GetDetailsEx accepts it.
+    // Keep custom-key comparisons opt-in for isolated probes only.
     volatile LONG g_syntheticCustomSizeColumnForProbe = 0;
-#else
-    // The product build exposes recursive size as its default Shell size column;
-    // the probe build keeps the physical-size baseline available for A/B tests.
-    volatile LONG g_syntheticCustomSizeColumnForProbe = 1;
-#endif
     volatile LONG g_syntheticIgnoreRecursiveFolderSizeSortForProbe = 0;
 #if defined(EXPLORERDIRS_NATIVEPROBE)
     volatile LONG g_syntheticHumanSizeTextForProbe = 0;
