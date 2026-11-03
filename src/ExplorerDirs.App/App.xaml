@@ -257,15 +257,17 @@
             </Style.Triggers>
         </Style>
         <Style TargetType="{x:Type DataGridColumnHeader}">
+            <Setter Property="BorderThickness" Value="0,0,1,1"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
             <Setter Property="Background" Value="{DynamicResource ExplorerDirs.ControlBackgroundBrush}"/>
             <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource ExplorerDirs.BorderBrush}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="{x:Type DataGridColumnHeader}">
-                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="0,0,1,1" Padding="5,4">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Padding="5,4">
                             <Grid>
-                                <ContentPresenter VerticalAlignment="Center"/>
+                                <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"/>
                                 <Thumb x:Name="PART_LeftHeaderGripper" Width="5" HorizontalAlignment="Left" Background="Transparent"/>
                                 <Thumb x:Name="PART_RightHeaderGripper" Width="5" HorizontalAlignment="Right" Background="Transparent"/>
                             </Grid>

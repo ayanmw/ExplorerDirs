@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -62,7 +63,29 @@ internal sealed class SpaceAnalysisWindow : Window
         panels.RowDefinitions.Add(new RowDefinition());
         _rows.SetResourceReference(BackgroundProperty, "ExplorerDirs.ControlBackgroundBrush");
         _rows.SetResourceReference(ForegroundProperty, "ExplorerDirs.ControlTextBrush");
-        _rows.SetResourceReference(DataGrid.RowBackgroundProperty, "ExplorerDirs.WindowBackgroundBrush");
+        var rowStyle = new Style(typeof(DataGridRow), TryFindResource(typeof(DataGridRow)) as Style);
+        rowStyle.Setters.Add(new Setter(DataGridRow.BorderBrushProperty, new DynamicResourceExtension("ExplorerDirs.AccentBrush")));
+        var fill = new MultiBinding { Converter = new SpaceAnalysisPercentageBrushConverter() };
+        fill.Bindings.Add(new Binding("Percentage"));
+        fill.Bindings.Add(new Binding("BorderBrush") { RelativeSource = RelativeSource.Self });
+        rowStyle.Setters.Add(new Setter(DataGridRow.BackgroundProperty, fill));
+        _rows.RowStyle = rowStyle;
+        // Opaque cell backgrounds would hide the percentage fill painted by the row.
+        var cellStyle = new Style(typeof(DataGridCell), TryFindResource(typeof(DataGridCell)) as Style);
+        cellStyle.Setters.Add(new Setter(DataGridCell.BackgroundProperty, Brushes.Transparent));
+        _rows.CellStyle = cellStyle;
+        var headerStyle = new Style(typeof(DataGridColumnHeader), TryFindResource(typeof(DataGridColumnHeader)) as Style);
+        headerStyle.Setters.Add(new Setter(Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Center));
+        headerStyle.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(0, 0, 0, 1)));
+        _rows.ColumnHeaderStyle = headerStyle;
+        _rows.PreviewMouseRightButtonUp += (_, e) =>
+        {
+            var element = e.OriginalSource as DependencyObject;
+            while (element is not null && element is not DataGridColumnHeader)
+                element = element is FrameworkContentElement content ? content.Parent : VisualTreeHelper.GetParent(element);
+            if (element is DataGridColumnHeader { Column: { } column })
+            { column.Width = DataGridLength.Auto; e.Handled = true; }
+        };
         foreach (var (title, property, width) in new[] { ("名称", "DisplayName", 280d), ("逻辑大小", "DisplaySize", 130d),
                      ("占可用总量", "DisplayPercentage", 100d), ("来源", "DisplaySource", 110d), ("状态", "DisplayDetail", 330d) })
             _rows.Columns.Add(new DataGridTextColumn { Header = title, Binding = new Binding(property), Width = width,

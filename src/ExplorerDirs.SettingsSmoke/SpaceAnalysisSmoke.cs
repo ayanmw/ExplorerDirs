@@ -5,6 +5,15 @@ internal static class SpaceAnalysisSmoke
 {
     internal static async Task Run()
     {
+        var percentageBrush = new SpaceAnalysisPercentageBrushConverter();
+        var fill = (System.Windows.Media.LinearGradientBrush)percentageBrush.Convert(
+            [35m, System.Windows.Media.Brushes.Blue], typeof(System.Windows.Media.Brush), "", System.Globalization.CultureInfo.InvariantCulture);
+        if (!fill.IsFrozen || fill.GradientStops[1].Offset != 0.35 || fill.GradientStops[2].Offset != 0.35 ||
+            fill.GradientStops[0].Color.A is 0 or 255 || fill.GradientStops[3].Color.A != 0)
+            throw new Exception("Percentage row fill must have a sharp 35% boundary and readable translucent color.");
+        if (!ReferenceEquals(percentageBrush.Convert([0m, System.Windows.Media.Brushes.Blue], typeof(object), "",
+                System.Globalization.CultureInfo.InvariantCulture), System.Windows.Media.Brushes.Transparent))
+            throw new Exception("Zero/unknown percentage must not paint a progress fill.");
         decimal[] sizes = [0, 1, 7, 31, 2, 100, 4];
         var rectangles = SpaceTreemapLayout.Create(sizes, 900, 500);
         var total = sizes.Sum();

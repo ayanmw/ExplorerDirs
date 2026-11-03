@@ -42,6 +42,7 @@
     <Compile Include="../ExplorerDirs.App/FolderSizeLocationPolicy.cs" Link="FolderSizeLocationPolicy.cs" />
     <Compile Include="../ExplorerDirs.App/SpaceTreemapLayout.cs" Link="SpaceTreemapLayout.cs" />
     <Compile Include="../ExplorerDirs.App/SpaceAnalysisSnapshot.cs" Link="SpaceAnalysisSnapshot.cs" />
+    <Compile Include="../ExplorerDirs.App/SpaceAnalysisPercentageBrushConverter.cs" Link="SpaceAnalysisPercentageBrushConverter.cs" />
     <Compile Include="../ExplorerDirs.App/ClassicAddressBarPath.cs" Link="ClassicAddressBarPath.cs" />
     <Compile Include="../ExplorerDirs.App/AddressPathMenu.cs" Link="AddressPathMenu.cs" />
     <Compile Include="../ExplorerDirs.App/RecursiveDirectoryScanner.cs" Link="RecursiveDirectoryScanner.cs" />
