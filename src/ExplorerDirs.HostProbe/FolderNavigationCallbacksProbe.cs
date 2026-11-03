@@ -65,6 +65,7 @@ internal static class FolderNavigationCallbacksProbe
             var codec = HostType.Assembly.GetType("ExplorerDirs.App.QdrShellPathCodec", true)!;
             var identity = (string)codec.GetMethod("ToProviderIdentity", BindingFlags.Static | BindingFlags.NonPublic)!
                 .Invoke(null, [root, classId])!;
+            CheckProductDirectorySize(owner, ownerType, identity, root);
             foreach (var (native, physical) in new[] { (identity, root), (identity + @"\中文子目录", child),
                 (identity + @"\中文子目录\第二层", grandchild) })
             {
@@ -124,6 +125,71 @@ internal static class FolderNavigationCallbacksProbe
         return 0;
     }
 
+    private static void CheckProductDirectorySize(IDisposable owner, Type ownerType, string nativeRoot, string physicalRoot)
+    {
+        var directory = Path.Combine(physicalRoot, "size-probe");
+        Directory.CreateDirectory(Path.Combine(directory, "nested"));
+        File.WriteAllBytes(Path.Combine(directory, "a.bin"), new byte[7]);
+        File.WriteAllBytes(Path.Combine(directory, "nested", "b.bin"), new byte[5]);
+        var sourceType = HostType.Assembly.GetType("ExplorerDirs.App.FolderSizeSource", true)!;
+        ownerType.GetMethod("SetFolderSizeSource", Members)!.Invoke(owner, [Enum.Parse(sourceType, "BuiltIn"), true]);
+        Marshal.ThrowExceptionForHR(SHParseDisplayName(nativeRoot + @"\size-probe", 0, out var pidl, 0, out _));
+        try
+        {
+            var size = new NativePropertyKey(new Guid("b725f130-47ef-101a-a5f1-02608c9eebac"), 12);
+            void WaitForSize(ulong expected)
+            {
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                object? actual = null;
+                do
+                {
+                    actual = ReadParentProperty(pidl, size);
+                    if (actual is ulong value && value == expected) return;
+                    Thread.Sleep(20);
+                } while (clock.Elapsed < TimeSpan.FromSeconds(5));
+                throw new InvalidOperationException($"Product async size did not fill: expected={expected}; actual={actual ?? "empty"}.");
+            }
+            InspectSizeNotificationScope(pidl);
+            WaitForSize(12);
+            File.WriteAllBytes(Path.Combine(directory, "a.bin"), new byte[20]);
+            ownerType.GetMethod("InvalidateFolderSizes", Members)!.Invoke(owner, [directory]);
+            WaitForSize(25);
+            Console.WriteLine("Product directory size: 12 B async fill, invalidate and 25 B refill; no Shell view.");
+        }
+        finally { Marshal.FreeCoTaskMem(pidl); }
+    }
+    private static void InspectSizeNotificationScope(nint itemPidl)
+    {
+        var folderId = new Guid("93f2f68c-1d1b-11d3-a30e-00c04f79abd1");
+        Marshal.ThrowExceptionForHR(SHBindToParent(itemPidl, ref folderId, out var folder, out _));
+        nint callback = 0;
+        var rootOutput = Marshal.AllocCoTaskMem(nint.Size);
+        var maskOutput = Marshal.AllocCoTaskMem(4);
+        try
+        {
+            var callbackId = new Guid("2047e320-f2a9-11ce-ae65-08002b2e1262");
+            Marshal.ThrowExceptionForHR(Marshal.QueryInterface(folder, in callbackId, out callback));
+            var message = Marshal.GetDelegateForFunctionPointer<ViewCallback>(
+                Marshal.ReadIntPtr(Marshal.ReadIntPtr(callback), 3 * nint.Size));
+            Marshal.WriteIntPtr(rootOutput, 0); Marshal.WriteInt32(maskOutput, 0);
+            Marshal.ThrowExceptionForHR(message(callback, 49, rootOutput, maskOutput)); // SFVM_GETNOTIFY
+            var root = Marshal.ReadIntPtr(rootOutput); // Borrowed from callback; never free it here.
+            var withinScope = root != 0 && ILIsParent(root, itemPidl, false);
+            Console.WriteLine($"Product size notification scope: provider-child-covered={withinScope}; event-mask=0x{Marshal.ReadInt32(maskOutput):X}; no view created.");
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(rootOutput); Marshal.FreeCoTaskMem(maskOutput);
+            if (callback != 0) Marshal.Release(callback);
+            Marshal.Release(folder);
+        }
+    }
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int ViewCallback(nint self, uint message, nint wParam, nint lParam);
+    [DllImport("shell32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ILIsParent(nint parent, nint child, [MarshalAs(UnmanagedType.Bool)] bool immediate);
     private static void CheckProviderSelection(object host, string nativeParent, string physicalParent, Guid classId)
     {
         var file = Path.Combine(physicalParent, "selected.txt");
