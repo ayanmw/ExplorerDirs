@@ -64,6 +64,35 @@ static void InvalidateManagedFolderSize(PCWSTR path)
 
 namespace
 {
+#if defined(EXPLORERDIRS_SIZE_TRACE_EXPERIMENT)
+#define ED_SIZE_TRACE TraceSizeRequest
+    void TraceSizeRequest(const char* stage, const void* instance, PCWSTR name, DWORD code,
+        DWORD attributes, ULONGLONG size)
+    {
+        // Opt-in isolated-build evidence only. Bound synchronous diagnostic IO and never
+        // log full browsing paths; normal product builds compile this body out.
+        static volatile LONG entries = 0;
+        if (InterlockedIncrement(&entries) > 4096) return;
+        HMODULE module = nullptr;
+        WCHAR path[2048]{};
+        if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCWSTR>(&TraceSizeRequest), &module)) return;
+        const auto length = GetModuleFileNameW(module, path, ARRAYSIZE(path));
+        if (!length || length >= ARRAYSIZE(path) || FAILED(StringCchCatW(path, ARRAYSIZE(path), L".size-trace.log"))) return;
+        char item[1024]{};
+        if (name) WideCharToMultiByte(CP_UTF8, 0, name, -1, item, ARRAYSIZE(item), nullptr, nullptr);
+        char line[1400]{};
+        const auto count = sprintf_s(line, "%llu tid=%lu self=%p %s code=%08lX attrs=%08lX bytes=%llu item=%s\r\n",
+            GetTickCount64(), GetCurrentThreadId(), instance, stage, code, attributes, size, item);
+        if (count <= 0) return;
+        const auto file = CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE) return;
+        DWORD written = 0; WriteFile(file, line, static_cast<DWORD>(count), &written, nullptr); CloseHandle(file);
+    }
+#else
+#define ED_SIZE_TRACE(...) ((void)0)
+#endif
     void TraceSyntheticSortStage(const char* stage)
     {
 #if defined(EXPLORERDIRS_NATIVEPROBE)
@@ -3299,6 +3328,7 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE MessageSFVCB(UINT message, WPARAM wParam, LPARAM lParam) override
         {
+            ED_SIZE_TRACE("view-callback", this, nullptr, message, static_cast<DWORD>(lParam), 0);
             if (message == SFVM_GETNOTIFY) TraceSyntheticSortStage("synthetic-sort: SFVM_GETNOTIFY");
             if (message == SFVM_FSNOTIFY)
             {
@@ -3995,6 +4025,7 @@ namespace
             if (iid == IID_IPropertyStoreFactory) ED_PROBE_METRIC_INCREMENT(g_syntheticPropertyStoreFactoryRequests);
             else if (iid == IID_IPropertyStore) ED_PROBE_METRIC_INCREMENT(g_syntheticPropertyStoreRequests);
             else ED_PROBE_METRIC_INCREMENT(g_syntheticOtherUiObjectRequests);
+            ED_SIZE_TRACE("ui-object", this, nullptr, iid.Data1, count, 0);
             if (!value) return E_POINTER;
             *value = nullptr;
             if (!_inner || count == 0 || !items) return E_NOINTERFACE;
@@ -4182,6 +4213,7 @@ namespace
             const auto* child = SyntheticData(item);
             if (!child) return E_INVALIDARG;
             VariantInit(value);
+            ED_SIZE_TRACE("details-ex-key", this, child->name, key->pid, key->fmtid.Data1, child->size);
             if (*key == kSyntheticRelativeSizeKey &&
                 InterlockedCompareExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0, 0))
             {
@@ -4231,6 +4263,8 @@ namespace
                 if (original) CoTaskMemFree(original);
                 return result;
             }
+            ED_SIZE_TRACE("details-ex-value", this, child->name, value->vt, child->attributes,
+                value->vt == VT_UI8 ? value->ullVal : 0);
             return S_OK;
         }
         HRESULT STDMETHODCALLTYPE GetDetailsOf(PCUITEMID_CHILD item, UINT column, SHELLDETAILS* details) override
@@ -4241,6 +4275,11 @@ namespace
                 if (column == 1 && !g_syntheticSizeMetricsObservation)
                     ED_PROBE_METRIC_INCREMENT(g_syntheticSizeDetailsOfItemCount);
             }
+#if defined(EXPLORERDIRS_SIZE_TRACE_EXPERIMENT)
+            const auto* traceChild = SyntheticData(item);
+            ED_SIZE_TRACE("details-of-key", this, traceChild ? traceChild->name : nullptr, column,
+                traceChild ? traceChild->attributes : 0, traceChild ? traceChild->size : 0);
+#endif
             const bool extended = InterlockedCompareExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0, 0) != 0;
             if (details && column > (extended ? 3u : 2u))
             {
@@ -4351,6 +4390,7 @@ namespace
             }
             CopyMemory(details->str.pOleStr, text.c_str(), bytes);
             if (!item) RecordSyntheticColumnMetadata(1, column, {}, S_OK, text.c_str());
+            ED_SIZE_TRACE("details-of-text", this, text.c_str(), column, 0, text.size());
             return S_OK;
         }
         HRESULT STDMETHODCALLTYPE MapColumnToSCID(UINT column, SHCOLUMNID* key) override
@@ -4685,6 +4725,8 @@ namespace
         }
         HRESULT ScheduleRecursiveSizeSnapshot(const SyntheticChild* child) const
         {
+            ED_SIZE_TRACE("schedule-size", this, child ? child->name : nullptr, 0,
+                child ? child->attributes : 0, child ? child->size : 0);
             const auto providerGeneration = InterlockedCompareExchange(&g_folderSizeGeneration, 0, 0);
             if (!InterlockedCompareExchange(&g_folderSizeEnabled, 0, 0)) return S_OK;
             if (!child || !(child->attributes & FILE_ATTRIBUTE_DIRECTORY) ||
