@@ -2351,7 +2351,18 @@ public partial class MainWindow : Window
                 IsEnabled = false, Padding = new Thickness(5, 2, 5, 2), Margin = new Thickness(1, 0, 1, 0)
             };
             AutomationProperties.SetName(button, info.Label);
-            button.Click += (_, _) => InvokeFileCommand(info.Command);
+            PaneControl? pointerTarget = null;
+            // Snapshot native focus before the toolbar button takes keyboard focus.
+            // A later focus notification must not retarget this click to another pane.
+            button.PreviewMouseLeftButtonDown += (_, _) =>
+                pointerTarget = _panes.FirstOrDefault(pane => pane.HasFileViewFocus) ?? ActivePane;
+            button.PreviewKeyDown += (_, _) => pointerTarget = null;
+            button.Click += (_, _) =>
+            {
+                var target = pointerTarget;
+                pointerTarget = null;
+                InvokeFileCommand(info.Command, target);
+            };
             FileCommandButtons.Children.Add(button);
             _fileCommandButtons[info.Command] = button;
         }
@@ -2529,9 +2540,11 @@ public partial class MainWindow : Window
         }
     }
 
-    private void InvokeFileCommand(ShellFileCommand command)
+    private void InvokeFileCommand(ShellFileCommand command, PaneControl? clickTarget = null)
     {
-        var pane = ActivePane;
+        var pane = clickTarget ?? _panes.FirstOrDefault(candidate => candidate.HasFileViewFocus) ?? ActivePane;
+        if (!pane.IsVisible) return;
+        SetActivePane(pane);
         _fileViewFocusDesired = true;
         pane.InvokeFileCommand(command);
         RefreshFileCommands();
