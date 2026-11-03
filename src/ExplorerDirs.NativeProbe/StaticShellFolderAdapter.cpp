@@ -3277,6 +3277,10 @@ namespace
             if (FAILED(result)) { CoTaskMemFree(backingRoot); CoTaskMemFree(copy); return result; }
             if (_root) CoTaskMemFree(_root);
             _root = copy;
+#if defined(EXPLORERDIRS_NOTIFICATION_BRIDGE_EXPERIMENT)
+            if (_profileNotificationRoot) CoTaskMemFree(_profileNotificationRoot);
+            _profileNotificationRoot = nullptr;
+#endif
             if (_backingRoot) CoTaskMemFree(_backingRoot);
             _backingRoot = backingRoot;
             if (_inner) _inner->Release();
@@ -3402,7 +3406,12 @@ namespace
 #if !defined(EXPLORERDIRS_NOTIFICATION_BRIDGE_EXPERIMENT)
             *reinterpret_cast<PIDLIST_ABSOLUTE*>(wParam) = _backingRoot;
 #else
-            *reinterpret_cast<PIDLIST_ABSOLUTE*>(wParam) = _root;
+            // A directory-marker subscription loses notifications even though a global
+            // observer receives the intact provider PIDL. Subscribe at the profile CLSID
+            // ancestor; DefView still receives the complete item identity for filtering.
+            if (!_profileNotificationRoot) _profileNotificationRoot = ILCloneFirst(_root);
+            if (!_profileNotificationRoot) return E_OUTOFMEMORY;
+            *reinterpret_cast<PIDLIST_ABSOLUTE*>(wParam) = _profileNotificationRoot;
 #endif
             *reinterpret_cast<LONG*>(lParam) = SHCNE_ALLEVENTS;
 #endif
@@ -5685,12 +5694,26 @@ namespace
             TraceSyntheticSortStage(SUCCEEDED(result) ? "synthetic-sort: deferred-selection-restored" : "synthetic-sort: deferred-selection-restore-failed");
             FinishRefreshCycle(folder);
         }
-        ~SyntheticSortFolder() { ReleaseViewHold(); if (_root) CoTaskMemFree(_root); if (_backingRoot) CoTaskMemFree(_backingRoot); if (_inner) _inner->Release(); if (_recursiveSizeStore) _recursiveSizeStore->Release(); InterlockedDecrement(&g_syntheticLiveObjects); }
+        ~SyntheticSortFolder()
+        {
+            ReleaseViewHold();
+#if defined(EXPLORERDIRS_NOTIFICATION_BRIDGE_EXPERIMENT)
+            if (_profileNotificationRoot) CoTaskMemFree(_profileNotificationRoot);
+#endif
+            if (_root) CoTaskMemFree(_root);
+            if (_backingRoot) CoTaskMemFree(_backingRoot);
+            if (_inner) _inner->Release();
+            if (_recursiveSizeStore) _recursiveSizeStore->Release();
+            InterlockedDecrement(&g_syntheticLiveObjects);
+        }
         volatile LONG _references = 1;
         CLSID _classId = g_syntheticFolderClassId;
         std::wstring _configuredBackingPath;
         volatile LONG _refreshAgain = 0;
         PIDLIST_ABSOLUTE _root = nullptr;
+#if defined(EXPLORERDIRS_NOTIFICATION_BRIDGE_EXPERIMENT)
+        PIDLIST_ABSOLUTE _profileNotificationRoot = nullptr;
+#endif
         PIDLIST_ABSOLUTE _backingRoot = nullptr;
         IShellView* _shellView = nullptr;
         std::wstring _backingPath;

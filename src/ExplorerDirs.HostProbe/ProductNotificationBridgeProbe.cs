@@ -10,7 +10,10 @@ internal static partial class FolderNavigationCallbacksProbe
         var folderId = new Guid("93f2f68c-1d1b-11d3-a30e-00c04f79abd1");
         Marshal.ThrowExceptionForHR(SHParseDisplayName(nativeRoot + @"\size-probe", 0, out var item, 0, out _));
         nint folder = 0, callback = 0;
-        uint registration = 0, physicalControl = 0;
+        nint observedRoot = 0;
+        uint registration = 0, physicalControl = 0, globalControl = 0;
+        var globalEvents = 0;
+        var fixtureGlobalEvents = new List<string>();
         var rawNotifications = 0;
         var rawTargets = new List<string?>();
         using var receiver = new HwndSource(new HwndSourceParameters("ExplorerDirs provider bridge observer")
@@ -33,7 +36,7 @@ internal static partial class FolderNavigationCallbacksProbe
                 finally { if (copy != 0) Marshal.FreeCoTaskMem(copy); }
                 handled = true; return 0;
             }
-            if (message != notificationMessage) return 0;
+            if (message != notificationMessage && message != notificationMessage + 2) return 0;
             handled = true;
             var locked = BridgeNotificationLock(wParam, unchecked((uint)lParam), out var pidls, out var kind);
             if (locked == 0) return 0;
@@ -51,7 +54,17 @@ internal static partial class FolderNavigationCallbacksProbe
             finally { BridgeNotificationUnlock(locked); }
             try
             {
-                if (received.Count < 1000)
+                if (message == notificationMessage + 2)
+                {
+                    globalEvents++;
+                    var name = ParsingName(first);
+                    if (name is not null && fixtureGlobalEvents.Count < 30 &&
+                        (name.StartsWith(nativeRoot, StringComparison.OrdinalIgnoreCase) ||
+                         name.StartsWith(physicalRoot, StringComparison.OrdinalIgnoreCase)))
+                        fixtureGlobalEvents.Add($"{kind:X}:" + (name.StartsWith(nativeRoot, StringComparison.OrdinalIgnoreCase)
+                            ? "provider:" + name[nativeRoot.Length..] : "physical:" + name[physicalRoot.Length..]));
+                }
+                else if (received.Count < 1000)
                     received.Add((kind & ~unchecked((int)0x80000000), ParsingName(first), ParsingName(second)));
             }
             finally
@@ -71,14 +84,20 @@ internal static partial class FolderNavigationCallbacksProbe
                 Marshal.ReadIntPtr(Marshal.ReadIntPtr(callback), 3 * nint.Size));
             int RefCount() { var count = Marshal.AddRef(folder); Marshal.Release(folder); return count; }
             var baseline = RefCount();
-            Marshal.ThrowExceptionForHR(SHParseDisplayName(nativeRoot, 0, out var root, 0, out _));
+            var rootOutput = Marshal.AllocCoTaskMem(nint.Size);
+            var maskOutput = Marshal.AllocCoTaskMem(4);
             try
             {
-                var entry = new BridgeNotificationEntry { Pidl = root, Recursive = 1 };
-                registration = BridgeRegister(receiver.Handle, 0x8002, 0x7fffffff, notificationMessage, 1, ref entry);
-                Ensure(registration != 0, "provider observer registration succeeds");
+                Marshal.WriteIntPtr(rootOutput, 0); Marshal.WriteInt32(maskOutput, 0);
+                Marshal.ThrowExceptionForHR(invoke(callback, 49, rootOutput, maskOutput));
+                observedRoot = BridgeClonePidl(Marshal.ReadIntPtr(rootOutput));
             }
-            finally { Marshal.FreeCoTaskMem(root); }
+            finally { Marshal.FreeCoTaskMem(rootOutput); Marshal.FreeCoTaskMem(maskOutput); }
+            Ensure(observedRoot != 0 && string.Equals(ParsingName(observedRoot), nativeRoot[..nativeRoot.IndexOf('\\')],
+                StringComparison.OrdinalIgnoreCase), "actual view callback subscribes at the profile ancestor");
+            var entry = new BridgeNotificationEntry { Pidl = observedRoot, Recursive = 1 };
+            registration = BridgeRegister(receiver.Handle, 0x8002, 0x7fffffff, notificationMessage, 1, ref entry);
+            Ensure(registration != 0, "provider observer registration succeeds");
 
             Marshal.ThrowExceptionForHR(SHParseDisplayName(physicalRoot, 0, out var physicalRootPidl, 0, out _));
             try
@@ -88,6 +107,23 @@ internal static partial class FolderNavigationCallbacksProbe
                 Ensure(physicalControl != 0, "physical control observer registration succeeds");
             }
             finally { Marshal.FreeCoTaskMem(physicalRootPidl); }
+            var globalEntry = new BridgeNotificationEntry { Pidl = 0, Recursive = 1 };
+            globalControl = BridgeRegister(receiver.Handle, 0x8002, 0x7fffffff, notificationMessage + 2, 1, ref globalEntry);
+            Ensure(globalControl != 0, "global diagnostic observer registration succeeds");
+            if (!lifetimeOnly)
+            {
+                // Separate Shell's provider delivery from the physical-to-provider bridge.
+                // A direct signal must arrive before forwarding can be meaningfully tested.
+                var before = received.Count;
+                BridgeNotify(0x800, 0x2000, item, 0); // SHCNE_ATTRIBUTES + SHCNF_FLUSH
+                try { PumpUntil(() => received.Skip(before).Any(entry => entry.Event == 0x800 &&
+                    string.Equals(entry.First, nativeRoot + "\\size-probe", StringComparison.OrdinalIgnoreCase))); }
+                catch (Exception error)
+                {
+                    throw new InvalidOperationException($"Direct provider notification was not delivered; global-events={globalEvents}; fixture-global={string.Join(";", fixtureGlobalEvents)}; physical-events={rawNotifications}; provider-events={received.Count}", error);
+                }
+                Console.WriteLine("Direct provider notification signal: PASS (attributes, actual callback profile scope).");
+            }
             using (var physicalSink = new HwndSource(new HwndSourceParameters("ExplorerDirs backing bridge fixture")
                 { ParentWindow = (nint)(-3), WindowStyle = 0, Width = 0, Height = 0 }))
             {
@@ -149,8 +185,10 @@ internal static partial class FolderNavigationCallbacksProbe
         }
         finally
         {
+            if (globalControl != 0) BridgeDeregister(globalControl);
             if (physicalControl != 0) BridgeDeregister(physicalControl);
             if (registration != 0) BridgeDeregister(registration);
+            if (observedRoot != 0) Marshal.FreeCoTaskMem(observedRoot);
             if (callback != 0) Marshal.Release(callback);
             if (folder != 0) Marshal.Release(folder);
             Marshal.FreeCoTaskMem(item);
@@ -172,7 +210,7 @@ internal static partial class FolderNavigationCallbacksProbe
         timer.Start();
         try { Dispatcher.PushFrame(frame); }
         finally { timer.Stop(); }
-        Ensure(condition(), "physical event is forwarded with the corresponding provider item identity");
+        Ensure(condition(), "notification delivery criterion was not satisfied before timeout");
     }
     [StructLayout(LayoutKind.Sequential)] private struct BridgeNotificationEntry { internal nint Pidl; internal int Recursive; }
     [DllImport("shell32.dll", EntryPoint = "SHChangeNotifyRegister")] private static extern uint BridgeRegister(nint hwnd, int sources, int events, uint message, int count, ref BridgeNotificationEntry entry);
