@@ -48,7 +48,14 @@
                 <TextBlock Grid.Row="13" Text="信息版本"/><TextBlock x:Name="InformationalVersionText" Grid.Row="13" Grid.Column="1" TextWrapping="Wrap"/>
             </Grid>
         </ScrollViewer>
-        <Button Grid.Row="2" Content="关闭" IsCancel="True" MinWidth="84" Margin="0,14,0,0"
-                HorizontalAlignment="Right"/>
+        <DockPanel Grid.Row="2" Margin="0,14,0,0" LastChildFill="True">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <Button x:Name="CopyVersionButton" Content="复制版本信息" MinWidth="110" Margin="0,0,8,0"
+                        Click="CopyVersion_Click"/>
+                <Button Content="关闭" IsCancel="True" MinWidth="84"/>
+            </StackPanel>
+            <TextBlock x:Name="CopyStatusText" VerticalAlignment="Center" TextWrapping="Wrap"
+                       Foreground="{DynamicResource ExplorerDirs.MutedTextBrush}"/>
+        </DockPanel>
     </Grid>
 </Window>

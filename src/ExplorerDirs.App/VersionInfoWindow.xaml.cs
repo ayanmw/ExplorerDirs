@@ -1,12 +1,17 @@
+using System.Runtime.InteropServices;
 using System.Windows;
 
 namespace ExplorerDirs.App;
 
 public partial class VersionInfoWindow : Window
 {
+    private readonly string _feedbackVersion;
+
     internal VersionInfoWindow(BuildIdentity identity, ApplicationThemeController? themeController)
     {
         InitializeComponent();
+        _feedbackVersion = $"{identity.ProductVersion} · {identity.ShortCommit}";
+        CopyVersionButton.ToolTip = _feedbackVersion;
         ApplicationThemeWindowBinding.Attach(this, themeController);
         VersionText.Text = $"版本 {identity.ProductVersion}";
         GitCommitText.Text = identity.GitCommit;
@@ -23,5 +28,18 @@ public partial class VersionInfoWindow : Window
         ReadyToRunText.Text = identity.PublishReadyToRun;
         BuildTagsText.Text = identity.BuildTags;
         InformationalVersionText.Text = identity.InformationalVersion;
+    }
+
+    private void CopyVersion_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Clipboard.SetText(_feedbackVersion, TextDataFormat.UnicodeText);
+            CopyStatusText.Text = "已复制版本信息。";
+        }
+        catch (Exception error) when (error is ExternalException or InvalidOperationException)
+        {
+            CopyStatusText.Text = $"复制失败，请重试：{error.Message}";
+        }
     }
 }
