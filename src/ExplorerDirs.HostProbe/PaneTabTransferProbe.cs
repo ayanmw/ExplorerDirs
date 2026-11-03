@@ -522,13 +522,13 @@ internal static class PaneTabTransferProbe
         var type = pane.GetType();
         var tabs = (TabControl)type.GetField("Tabs", InstanceMembers)!.GetValue(pane)!;
         var edit = (Button)type.GetField("GoButton", InstanceMembers)!.GetValue(pane)!;
-        var add = (Button)type.GetField("NewTabButton", InstanceMembers)!.GetValue(pane)!;
-        var close = (Button)type.GetField("CloseTabButton", InstanceMembers)!.GetValue(pane)!;
-        var row = (FrameworkElement)System.Windows.Media.VisualTreeHelper.GetParent(
-            System.Windows.Media.VisualTreeHelper.GetParent(add));
+        Ensure(type.GetField("NewTabButton", InstanceMembers) is null &&
+            type.GetField("CloseTabButton", InstanceMembers) is null,
+            "tab strip does not retain redundant New/Close buttons");
+        var row = (FrameworkElement)type.GetField("TabStripRow", InstanceMembers)!.GetValue(pane)!;
         Ensure(edit.Visibility == Visibility.Collapsed && !edit.IsTabStop,
             "removed address editor has no visible button or keyboard stop");
-        Ensure(row.IsAncestorOf(tabs) && row.IsAncestorOf(close), "tab actions share the tab-header row");
+        Ensure(row.IsAncestorOf(tabs), "tab header row contains the strip without a separate actions panel");
         var setMode = type.GetMethod("SetTabStripVisibilityMode", InstanceMembers)!;
         var modeType = setMode.GetParameters()[0].ParameterType;
         try
@@ -574,6 +574,14 @@ internal static class PaneTabTransferProbe
             Layout(160);
             Ensure(left.Visibility == Visibility.Visible && right.Visibility == Visibility.Visible && left.Width >= 28 && right.Width >= 28,
                 $"overflow exposes both comfortably sized tab-scroll targets: left={left.Visibility}/{left.ActualWidth}; right={right.Visibility}/{right.ActualWidth}; extent={scroll.ExtentWidth}; viewport={scroll.ViewportWidth}; tabs={tabs.ActualWidth}; headers={string.Join(',', originals.Select(item => item.Tab.DesiredSize.Width))}");
+            var scrollOrigin = scroll.TranslatePoint(new Point(0, 0), tabs);
+            var leftOrigin = left.TranslatePoint(new Point(0, 0), tabs);
+            var rightOrigin = right.TranslatePoint(new Point(0, 0), tabs);
+            Ensure(leftOrigin.X >= scrollOrigin.X + scroll.ActualWidth - 0.5 &&
+                rightOrigin.X >= leftOrigin.X + left.ActualWidth - 0.5,
+                "both tab-scroll buttons sit together after the header viewport at the far right");
+            Ensure(tabs.Items.OfType<TabItem>().All(tab => tab.BorderThickness == new Thickness(0, 3, 0, 0)),
+                "selected tab accent reserves a three-pixel top edge without selection-dependent resizing");
             scroll.ScrollToHorizontalOffset(0); Layout(160);
             Ensure(!left.IsEnabled && right.IsEnabled, "tab-scroll controls reflect the start boundary");
             scroll.ScrollToHorizontalOffset(scroll.ScrollableWidth); Layout(160);

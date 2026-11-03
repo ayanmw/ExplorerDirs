@@ -219,8 +219,6 @@ public partial class PaneControl : UserControl
         UpButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Up), 14);
         RefreshButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Refresh), 14);
         TreeButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Tree));
-        NewTabButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.NewTab), 14);
-        CloseTabButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Close), 14);
         ToolbarViewStyleButton.Content = ViewStyleMenu.CreateToolbarIcon();
         ViewStyleButton.Content = ViewStyleMenu.CreateToolbarIcon();
         AddressMenuButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.AddressDropDown), 12);
@@ -1149,7 +1147,7 @@ public partial class PaneControl : UserControl
         addressComputerButtonVisible: true,
         tabHeaderVisible: Tabs.Visibility == Visibility.Visible,
         statusBarVisible: StatusBarRow.Visibility == Visibility.Visible, goButtonVisible: false,
-        tabActionsVisible: Tabs.Visibility == Visibility.Visible);
+        tabActionsVisible: false);
     internal int FocusStopCount => FocusMap.Count;
     internal IReadOnlyList<int> MajorFocusStops => FocusMap.MajorStops;
     private TreeFocusTarget CurrentTreeFocusTarget =>
@@ -1168,9 +1166,9 @@ public partial class PaneControl : UserControl
         var focus = FocusMap;
         UIElement[] controls = focus.TreeButton >= 0
             ? [BackButton, ForwardButton, UpButton, RefreshButton, TreeButton, ToolbarViewStyleButton,
-                Address, AddressMenuButton, AddressComputerButton, AddressHistoryButton, NewTabButton, CloseTabButton]
+                Address, AddressMenuButton, AddressComputerButton, AddressHistoryButton]
             : [BackButton, ForwardButton, UpButton, RefreshButton, ToolbarViewStyleButton,
-                Address, AddressMenuButton, AddressComputerButton, AddressHistoryButton, NewTabButton, CloseTabButton];
+                Address, AddressMenuButton, AddressComputerButton, AddressHistoryButton];
         for (var index = 0; index < controls.Length; index++)
             if (controls[index].IsKeyboardFocusWithin) return index;
         if (focus.SearchCount == 3)
@@ -1216,8 +1214,6 @@ public partial class PaneControl : UserControl
         if (stop == focus.AddressComputer) target = AddressComputerButton;
         if (stop == focus.AddressHistory) target = AddressHistoryButton;
         if (stop == focus.Go) target = GoButton;
-        if (stop == focus.NewTab) target = NewTabButton;
-        if (stop == focus.CloseTab) target = CloseTabButton;
         if (target is not null) return target.Focus();
         if (focus.SearchCount == 3)
         {
@@ -1771,12 +1767,8 @@ public partial class PaneControl : UserControl
         AddressMenuColumn.Width = new GridLength(compact ? 20 : 24);
         AddressComputerColumn.Width = new GridLength(compact ? 20 : 24);
         AddressHistoryColumn.Width = new GridLength(0);
-        NewTabButton.Width = navigationWidth;
-        CloseTabButton.Width = navigationWidth;
         GoButton.Padding = compact ? new Thickness(4, 0, 4, 0) : new Thickness(8, 2, 8, 2);
         GoButton.Margin = new Thickness(compact ? 2 : 4, 0, 0, 0);
-        NewTabButton.Margin = new Thickness(compact ? 4 : 8, 0, 0, 0);
-        CloseTabButton.Margin = new Thickness(compact ? 2 : 4, 0, 0, 0);
         foreach (var tab in _tabOrder)
         {
             if (compact) tab.Padding = new Thickness(4, 1, 4, 1);
@@ -3020,6 +3012,4 @@ public partial class PaneControl : UserControl
         Address.Text = AddressTextPath;
         ShowBreadcrumb();
     }
-    private void NewTab_Click(object sender, RoutedEventArgs e) => NewTab();
-    private void CloseTab_Click(object sender, RoutedEventArgs e) => CloseCurrentTab();
 }

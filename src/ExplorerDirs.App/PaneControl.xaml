@@ -138,12 +138,6 @@
             </DockPanel>
             <DockPanel>
                 <DockPanel x:Name="TabStripRow" DockPanel.Dock="Top" LastChildFill="True">
-                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                    <Button x:Name="NewTabButton" ToolTip="新建标签页" AutomationProperties.Name="新建标签页"
-                            Click="NewTab_Click" Margin="8,0,0,0" Width="28"/>
-                    <Button x:Name="CloseTabButton" ToolTip="关闭标签页" AutomationProperties.Name="关闭标签页"
-                            Click="CloseTab_Click" Margin="4,0,0,0" Width="28"/>
-                    </StackPanel>
                 <TabControl x:Name="Tabs" SelectionChanged="Tabs_SelectionChanged"
                             PreviewKeyDown="Tabs_PreviewKeyDown"
                             PreviewMouseMove="Tabs_PreviewMouseMove"
@@ -167,7 +161,7 @@
                                 </ControlTemplate>
                             </Setter.Value></Setter>
                             <Setter Property="BorderBrush" Value="Transparent"/>
-                            <Setter Property="BorderThickness" Value="0,0,0,2"/>
+                            <Setter Property="BorderThickness" Value="0,3,0,0"/>
                             <Style.Triggers>
                                 <Trigger Property="IsSelected" Value="True">
                                     <Setter Property="BorderBrush" Value="{DynamicResource ExplorerDirs.AccentBrush}"/>
@@ -179,14 +173,14 @@
                         <ControlTemplate TargetType="{x:Type TabControl}">
                             <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
-                                <Button x:Name="ScrollTabsLeft" Grid.Column="0" Width="28" FontSize="18" Visibility="Collapsed" Content="‹"
+                                <Button x:Name="ScrollTabsLeft" Grid.Column="1" Width="28" FontSize="18" Visibility="Collapsed" Content="‹"
                                         ToolTip="向左滚动标签" AutomationProperties.Name="向左滚动标签"
                                         Focusable="False" IsTabStop="False" Click="ScrollTabsLeft_Click"/>
-                                <ScrollViewer x:Name="TabHeaderScroll" Grid.Column="1"
+                                <ScrollViewer x:Name="TabHeaderScroll" Grid.Column="0"
                                               HorizontalScrollBarVisibility="Hidden"
                                               VerticalScrollBarVisibility="Disabled"
                                               CanContentScroll="False" Focusable="False" AllowDrop="True"

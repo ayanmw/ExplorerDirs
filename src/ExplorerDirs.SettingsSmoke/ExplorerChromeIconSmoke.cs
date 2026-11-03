@@ -69,11 +69,9 @@ internal static class ExplorerChromeIconSmoke
               paneMarkup.Contains("AutomationProperties.Name=\"前进\"", StringComparison.Ordinal) &&
               paneMarkup.Contains("AutomationProperties.Name=\"上级目录\"", StringComparison.Ordinal),
             "pane navigation icons preserve their original handlers and explicit accessible names");
-        Check(paneCode.Contains("NewTabButton.Content = ExplorerChromeIcons.CreatePath", StringComparison.Ordinal) &&
-              paneCode.Contains("CloseTabButton.Content = ExplorerChromeIcons.CreatePath", StringComparison.Ordinal) &&
-              paneMarkup.Contains("AutomationProperties.Name=\"新建标签页\"", StringComparison.Ordinal) &&
-              paneMarkup.Contains("AutomationProperties.Name=\"关闭标签页\"", StringComparison.Ordinal),
-            "pane tab controls use the shared vector icons and preserve accessible names");
+        Check(!paneMarkup.Contains("x:Name=\"NewTabButton\"", StringComparison.Ordinal) &&
+              !paneMarkup.Contains("x:Name=\"CloseTabButton\"", StringComparison.Ordinal),
+            "tab strip omits redundant New/Close buttons while main toolbar commands remain");
         Check(mainCode.Contains("NewTabToolbarButton.Content = ExplorerChromeIcons.CreatePath", StringComparison.Ordinal) &&
               mainCode.Contains("NewWindowToolbarButton.Content = ExplorerChromeIcons.CreatePath", StringComparison.Ordinal) &&
               mainCode.Contains("DuplicateTabToolbarButton.Content = ExplorerChromeIcons.CreatePath", StringComparison.Ordinal) &&
