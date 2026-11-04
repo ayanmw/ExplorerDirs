@@ -748,13 +748,38 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 foreach (var mixed in new[] { true, false })
                 foreach (var direction in new[] { 1, -1 })
                 {
-                    var state = hostType.GetField("_viewState", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)!;
-                    state.GetType().GetProperty("MixedSizeSort")!.SetValue(state, mixed);
-                    var requestedSort = Array.CreateInstance(sort.GetType(), 1);
-                    requestedSort.SetValue(Activator.CreateInstance(sort.GetType(), [sortKey, direction]), 0);
-                    hostType.GetMethod("UpdateFolderSizeSortPolicy", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(host, [requestedSort]);
-                    var expectedPolicy = (mixed ? 1u : 0u) | (direction < 0 ? 2u : 0u);
-                    if (verifyPolicy is not null) Marshal.ThrowExceptionForHR(verifyPolicy(sortPolicyRoot, expectedPolicy));
+                    WaitUntil(() => (bool)hostType.GetProperty("CanSetMixedSizeSort", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)!,
+                        TimeSpan.FromSeconds(5), "Mixed-sort setting was not ready.");
+                    selectItem.Invoke(null, [hostType, host, Path.Combine(folders[0], "folder-small")]);
+                    var beforeSetting = hostType.GetMethod("CaptureViewState")!.Invoke(host, null)!;
+                    var beforeSort = ((System.Collections.IEnumerable)beforeSetting.GetType().GetProperty("SortColumns")!.GetValue(beforeSetting)!).Cast<object>().Single();
+                    var beforeDirection = (int)beforeSort.GetType().GetProperty("Direction")!.GetValue(beforeSort)!;
+                    var setMixed = hostType.GetMethod("SetMixedSizeSort", BindingFlags.Instance | BindingFlags.NonPublic)
+                        ?? throw new InvalidOperationException("Product mixed-sort setting entry point is missing.");
+                    if (!(bool)setMixed.Invoke(host, [mixed])!)
+                        throw new InvalidOperationException("Product rejected the mixed-sort setting.");
+                    string[] settingNames = mixed
+                        ? beforeDirection > 0 ? ["folder-small", "file-middle.bin", "folder-large"] : ["folder-large", "file-middle.bin", "folder-small"]
+                        : beforeDirection > 0 ? ["folder-small", "folder-large", "file-middle.bin"] : ["folder-large", "folder-small", "file-middle.bin"];
+                    WaitUntil(() =>
+                    {
+                        var rows = readNativeRows.Invoke(null, [window])!;
+                        var settingTrace = (string)hostType.GetProperty("InitialSortRecoveryStatus", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)!;
+                        return ((string[])rows.GetType().GetField("Item2")!.GetValue(rows)!).SequenceEqual(settingNames) &&
+                            settingTrace.LastIndexOf(":finish", StringComparison.Ordinal) > settingTrace.LastIndexOf(":scheduled", StringComparison.Ordinal) &&
+                            !(bool)hostType.GetProperty("ViewCaptureFailed")!.GetValue(host)! &&
+                            (bool)hostType.GetProperty("MixedSizeSort", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)! == mixed;
+                    }, TimeSpan.FromSeconds(8), "Mixed-sort setting alone did not apply the native order.");
+                    var settingSelection = readSelection.Invoke(null, [window])!;
+                    if (!((string[])settingSelection.GetType().GetField("Item1")!.GetValue(settingSelection)!).SequenceEqual(["folder-small"]))
+                        throw new InvalidOperationException("Changing the mixed-sort setting lost the selected folder.");
+                    var serialField = hostType.GetField("_initialSortRecoverySerial", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    var beforeNoop = (long)serialField.GetValue(host)!;
+                    if (!(bool)setMixed.Invoke(host, [mixed])! || (long)serialField.GetValue(host)! != beforeNoop)
+                        throw new InvalidOperationException("Same-value policy update unnecessarily started sorting.");
+                    var confirmedSetting = hostType.GetMethod("CaptureViewState")!.Invoke(host, null)!;
+                    VerifyMixedPolicyReload(appAssembly, Path.Combine(profile, $"mixed-{mixed}-{direction}.ini"), folders[0], confirmedSetting, mixed);
+                    Console.WriteLine($"product-mixed-option: mixed={mixed}; setting-alone-order=True; selection-preserved=True; same-value-noop=True; ini-copy-default=True");
                     var nextMenu = hostType.GetMethod("OpenFileCommandMenu", BindingFlags.Instance | BindingFlags.NonPublic, null, [typeof(bool), typeof(bool)], null)!.Invoke(host, [true, true])!;
                     try
                     {
@@ -762,6 +787,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                         if (code is not int result || result < 0) throw new InvalidOperationException("Policy switch sort verb failed.");
                     }
                     finally { ((IDisposable)nextMenu).Dispose(); }
+                    var expectedPolicy = (mixed ? 1u : 0u) | (direction < 0 ? 2u : 0u);
                     string[] expectedNames = mixed
                         ? direction > 0 ? ["folder-small", "file-middle.bin", "folder-large"] : ["folder-large", "file-middle.bin", "folder-small"]
                         : direction > 0 ? ["folder-small", "folder-large", "file-middle.bin"] : ["folder-large", "folder-small", "file-middle.bin"];
@@ -926,6 +952,41 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             if (File.Exists(path)) return path;
         }
         throw new FileNotFoundException("Build the diagnostic-only product Shell namespace adapter before this probe.");
+    }
+
+    private static void VerifyMixedPolicyReload(Assembly appAssembly, string profilePath, string path, object view, bool mixed)
+    {
+        var tabType = appAssembly.GetType("ExplorerDirs.App.TabSettings", true)!;
+        var stateType = appAssembly.GetType("ExplorerDirs.App.SessionState", true)!;
+        var storeType = appAssembly.GetType("ExplorerDirs.App.SessionStore", true)!;
+        var tabsType = typeof(List<>).MakeGenericType(tabType);
+        var panes = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(tabsType))!;
+        for (var pane = 0; pane < 4; pane++)
+        {
+            var tabs = (System.Collections.IList)Activator.CreateInstance(tabsType)!;
+            if (pane == 0)
+            {
+                var copy = view.GetType().GetMethod("Copy")!.Invoke(view, null)!;
+                var defaultView = view.GetType().GetMethod("Default", BindingFlags.Static | BindingFlags.Public)!.Invoke(null, [4u, -1])!;
+                foreach (var tabView in new[] { view, copy, defaultView })
+                    tabs.Add(Activator.CreateInstance(tabType, [path, tabView, null, false, false]));
+            }
+            panes.Add(tabs);
+        }
+        var constructor = stateType.GetConstructors().Single(value => value.GetParameters().Length == 11);
+        var session = constructor.Invoke([4, 4u, panes, 0, new int[4], 16, new bool[4], null, null, null, null]);
+        var writer = Activator.CreateInstance(storeType, [profilePath, profilePath + ".legacy"])!;
+        storeType.GetMethod("Save")!.Invoke(writer, [session]);
+        var reader = Activator.CreateInstance(storeType, [profilePath, profilePath + ".legacy"])!;
+        var restored = storeType.GetMethod("Load")!.Invoke(reader, null)!;
+        var firstPane = ((System.Collections.IEnumerable)restored.GetType().GetProperty("Panes")!.GetValue(restored)!).Cast<object>().First();
+        var flags = ((System.Collections.IEnumerable)firstPane).Cast<object>().Select(tab =>
+        {
+            var restoredView = tab.GetType().GetProperty("View")!.GetValue(tab)!;
+            return (bool)restoredView.GetType().GetProperty("MixedSizeSort")!.GetValue(restoredView)!;
+        }).ToArray();
+        if (!flags.SequenceEqual([mixed, mixed, false]))
+            throw new InvalidOperationException("Actual host settings did not preserve copy/default policies through INI reload.");
     }
 
     private static bool ExpireSortReadinessClockForProbe()

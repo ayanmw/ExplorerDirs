@@ -63,6 +63,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private int _shellSortCommandDispatchDepth;
     private List<string>? _initialSortRecoveryTrace;
     private long _initialSortRecoverySerial;
+    private long _initialSortRecoveryActiveSerial;
     private long _initialSortTransientOwner;
     private long _initialSortStateVersion;
     private (long Owner, Action<long> Complete)? _initialSortInputCompletion;
@@ -286,6 +287,54 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var direction = sorts.FirstOrDefault(sort => sort.Key == FolderSizeLocationPolicy.SizeColumn)?.Direction ?? 1;
         _folderSizeSortContext?.Update(_viewState.MixedSizeSort, direction);
         _folderSizeSortDirection = direction;
+    }
+
+    internal bool MixedSizeSort => _viewState.MixedSizeSort;
+    internal bool CanSetMixedSizeSort => _folderSizesEnabled && _folderSizeSortContext is not null &&
+        _browser is not null && IsFolderSizeProvider && IsVisible && !_viewReadiness.Pending &&
+        !_viewRestoreFailed && _initialSortRecoveryActiveSerial == 0 && _nativeSortReconciliation is null;
+
+    internal bool SetMixedSizeSort(bool enabled)
+    {
+        if (_viewState.MixedSizeSort == enabled) return true;
+        if (!CanSetMixedSizeSort) return false;
+        var browser = _browser;
+        var context = _folderSizeSortContext!;
+        var generation = _viewReadiness.Generation;
+        bool Current() => ReferenceEquals(browser, _browser) && generation == _viewReadiness.Generation &&
+            ReferenceEquals(context, _folderSizeSortContext);
+        var saved = CaptureViewState();
+        if (!Current() || ViewCaptureFailed) return false;
+        var sizeSort = saved.SortColumns.Count == 1 && saved.SortColumns[0].Key == FolderSizeLocationPolicy.SizeColumn
+            ? saved.SortColumns[0] : null;
+        ShellViewSelectionSnapshot? selection = null;
+        try
+        {
+            if (sizeSort is not null && saved.GroupKey is null)
+            {
+                var view = GetFolderView2Pointer();
+                try
+                {
+                    if (view == 0 || !Current()) return false;
+                    selection = ShellViewSelectionSnapshot.Capture(view);
+                }
+                finally { if (view != 0) Marshal.Release(view); }
+            }
+            if (!Current()) return false;
+            var direction = sizeSort?.Direction ?? 1;
+            context.Update(enabled, direction);
+            if (!Current()) return false;
+            _folderSizeSortDirection = direction;
+            _viewState = saved with { MixedSizeSort = enabled };
+            if (sizeSort is not null && saved.GroupKey is null)
+            {
+                var ownedSelection = selection;
+                selection = null;
+                ScheduleInitialVirtualSort(sizeSort, Current, ownedSelection);
+            }
+            return Current();
+        }
+        finally { selection?.Dispose(); }
     }
 
     private void ClearNativeSortCommandSelection()
@@ -3000,6 +3049,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var traceSerial = ++_initialSortRecoverySerial;
         ReleaseInitialVirtualSortRedrawLease();
         EndInitialSortTransient(_initialSortTransientOwner);
+        _initialSortRecoveryActiveSerial = traceSerial;
         var oppositeApplied = false;
         var savedApplied = false;
         ShellViewSelectionSnapshot? initialSortSelection = selectionToPreserve;
@@ -3051,7 +3101,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 initialSortSelection?.Dispose();
                 initialSortSelection = null;
                 EndInitialSortTransient(traceSerial);
-                if (traceSerial == _initialSortRecoverySerial) ReleaseInitialVirtualSortRedrawLease();
+                if (traceSerial == _initialSortRecoverySerial)
+                {
+                    _initialSortRecoveryActiveSerial = 0;
+                    ReleaseInitialVirtualSortRedrawLease();
+                }
             }
         }
         var timer = new DispatcherTimer(DispatcherPriority.Background)
@@ -3192,7 +3246,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             ShellFileViewExportCapture.ReadinessSession? readinessSession = null;
             try
             {
-                if (!IsCurrent()) return;
+                if (!IsCurrent()) { FinishSortRecovery(); return; }
                 readinessSession = ShellFileViewExportCapture.CreateReadinessSession(
                     view, _viewWindow, sort.Key, out var capturedItemCount,
                     // The provider's standard Size column is named, but its folder
@@ -3253,7 +3307,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 Marshal.Release(view);
             }
 
-            if (!IsCurrent() || readinessWait.Elapsed >= TimeSpan.FromSeconds(30)) return;
+            if (!IsCurrent() || readinessWait.Elapsed >= TimeSpan.FromSeconds(30))
+            {
+                FinishSortRecovery();
+                return;
+            }
             if (readinessFoundPendingValue)
             {
                 readinessItemCount = null;
@@ -3334,12 +3392,15 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                         Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
                         {
                             if (!IsCurrent()) { FinishSortRecovery(); return; }
+                            if (inputVersion != Interlocked.Read(ref _nativeUserInputVersion)) return;
                             var inputView = GetFolderView2Pointer();
                             if (inputView == 0) { FinishSortRecovery(); return; }
                             try
                             {
                                 var latest = ShellViewSelectionSnapshot.Capture(inputView);
-                                if (!IsCurrent()) { latest?.Dispose(); return; }
+                                if (!IsCurrent()) { latest?.Dispose(); FinishSortRecovery(); return; }
+                                // A getter can pump a newer gesture/capture; never replace its snapshot with this older one.
+                                if (inputVersion != Interlocked.Read(ref _nativeUserInputVersion)) { latest?.Dispose(); return; }
                                 if (latest is not null)
                                 {
                                     initialSortSelection?.Dispose();
@@ -5663,6 +5724,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     {
         ReleaseInitialVirtualSortRedrawLease(requestRedraw: false);
         _initialSortRecoverySerial++;
+        _initialSortRecoveryActiveSerial = 0;
         EndInitialSortTransient(_initialSortTransientOwner);
         _viewStyleCaptureOperation?.Abort();
         _viewStyleCaptureOperation = null;

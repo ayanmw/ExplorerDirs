@@ -2826,6 +2826,21 @@ public partial class MainWindow : Window
         FolderSizeBuiltInMenu.IsChecked = _folderSizeOptions.Source == FolderSizeSource.BuiltIn;
     }
 
+    private void UpdateMixedSizeSortMenu()
+    {
+        MixedSizeSortMenu.IsChecked = ActivePane?.MixedSizeSort == true;
+        MixedSizeSortMenu.IsEnabled = ActivePane?.CanSetMixedSizeSort == true;
+    }
+
+    private void FolderOptionsMenu_SubmenuOpened(object sender, RoutedEventArgs e) => UpdateMixedSizeSortMenu();
+
+    private void MixedSizeSort_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ActivePane.SetMixedSizeSort(MixedSizeSortMenu.IsChecked))
+            EnvironmentStatus.Text = "混合排序未更改；请等待当前文件视图就绪后重试。";
+        UpdateMixedSizeSortMenu();
+    }
+
     private void ShowFolderSizes_Click(object sender, RoutedEventArgs e)
     {
         if (ShowFolderSizesMenu.IsChecked == _folderSizeOptions.Enabled) return;

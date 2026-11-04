@@ -280,3 +280,18 @@ sort-mode-details-ready.log整项通过：详细信息原生菜单四种策略/�
 product-context-four-hosts.log常规DLL真实四宿主历史/排序/数值/选区焦点/上下文关闭整项通过；最终product-context-final-input.log常规四宿主连续选择、后续用户排序及整个回归/隔离守卫通过。最终30项后台整轮通过：src/.state/background-checks/20261105-032331-2f33a59d21d34671be0e7278771fad63/summary.json。后补的定向入口/快照门槛不扩大为可见UI验收。
 
 范围：现在只启用src常规开发构建能力，不覆盖releases。文件夹组的混合选项菜单、实际点击/复制/重启链路及集中可见验收仍待完成。最早的“常规DLL故意不含ABI”阶段说明由本节更新，不再作为当前事实。
+
+
+### 2026-11-05 文件夹组选项接入
+
+工具→选项→文件夹新增正向“混合排序（文件夹与文件）”，默认不勾选；展开时读取当前活动标签。显示文件夹大小和来源保持同组，tooltip明确此项仅影响当前标签的大小排序。未启用大小provider或视图尚未就绪时禁用，不增加全局默认项/注册表偏好。
+
+MainWindow事件→PaneControl→ExplorerBrowserHost.SetMixedSizeSort链路已接，成功发StateChanged沿用Session.ini保存。宿主先捕获完整视图和选区，再更新自己的native context；当前为未分组大小排序时即请求重排，不重建浏览器/布局/列。重复设置相同值不启动新排序。切换不修改同路径其他标签，复制仍沿用ViewState.Copy，新建ViewState.Default仍false。
+
+先失败证据：mixed-option-red.log缺少菜单接线断言失败；mixed-setting-host-red.log真实宿主缺设置入口失败。修正后mixed-option-green.log包含菜单结构及v15/legacy/复制/新Store重读通过。实际设置方法新增mixed-option-mode-1/2/3/4/6/8.log全部整项通过：仅调用设置入口即可得到新分类/混合顺序、选区保留、同值serial不变，然后再测原生升降序；实际采集ViewState写入INI，再创建新SessionStore读取，当前/复制/默认标签策略为[mixed,mixed,false]。这些不是物理菜单点击或实际App进程重启。
+
+mixed-setting-alone.log暴露早期CanSet仅检查暂时反向guard不足：方向已提交但恢复尚未完成时仍可进入设置。新增完整恢复active serial，从安排到finish始终保护入口；旧任务不能清新任务标记。视图退休/截止和Dispose均清理，审查顺带补齐两个getter退休分支的finish；旧输入捕获不得覆盖更新输入版本的快照。mixed-setting-ready.log修正后通过设置独立重排和INI合同。
+
+30项后台整轮通过：src/.state/background-checks/20261105-033940-0fb3bef604a1472391ce8d76434d5ddc/summary.json。mixed-option-four-input.log及mixed-option-four-retry.log常规DLL四宿主输入/受控重试整项通过；最后退休分支/input版本防护后，重建0警告错误，并以mixed-option-reviewed-input.log、mixed-option-reviewed-setting.log重新通过四宿主输入与设置整项。未把此前总检报告冒充最后几行审查修改的再次整轮。
+
+Ruling：设置反映每标签策略，在支持的provider就绪时才允许更改；停用大小显示或虚拟位置仍保留已存策略，返回支持位置继续使用。代价是忙碌时需稍后重新展开菜单，不用过期快照强行写入。隐藏大小列/分组等非默认列配置及集中UI点击/焦点/真实重启验收继续补齐；releases未覆盖，不以这个子功能完成宣布temp.86可发布。

@@ -946,6 +946,26 @@ public partial class PaneControl : UserControl
         var style = state?.Browser.ReadViewStyle();
         return Current == state ? style : null;
     }
+    internal bool MixedSizeSort => Current?.Browser.MixedSizeSort == true;
+    internal bool CanSetMixedSizeSort => Current?.Browser.CanSetMixedSizeSort == true;
+    internal bool SetMixedSizeSort(bool enabled)
+    {
+        var state = Current;
+        if (state is null) return false;
+        if (state.Browser.MixedSizeSort == enabled) return true;
+        try
+        {
+            if (!state.Browser.SetMixedSizeSort(enabled) || Current != state) return false;
+        }
+        catch (Exception error)
+        {
+            if (Current == state) Status.Text = $"混合排序设置失败：{error.Message}";
+            return false;
+        }
+        StateChanged?.Invoke(this, EventArgs.Empty);
+        FocusCurrentView();
+        return true;
+    }
     internal bool PreviewPaneVisible => Current?.Browser.PreviewPaneVisible == true;
     internal bool DetailsPaneVisible => Current?.Browser.DetailsPaneVisible == true;
     internal bool SetPreviewPaneVisible(bool visible)

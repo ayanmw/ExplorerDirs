@@ -11,6 +11,14 @@ internal static class MixedSizeSortSessionSmoke
         Directory.CreateDirectory(root);
         try
         {
+            var xamlPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "ExplorerDirs.App", "MainWindow.xaml"));
+            var xaml = System.Xml.Linq.XDocument.Load(xamlPath);
+            var folderOptions = xaml.Descendants().Single(element => (string?)element.Attribute("Header") == "文件夹");
+            var mixedOption = folderOptions.Elements().SingleOrDefault(element =>
+                (string?)element.Attribute(System.Xml.Linq.XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml")) == "MixedSizeSortMenu");
+            Require(mixedOption is not null && (string?)mixedOption.Attribute("IsCheckable") == "True" &&
+                (string?)mixedOption.Attribute("Click") == "MixedSizeSort_Click" && (string?)mixedOption.Attribute("IsChecked") != "True",
+                "positive default-off setting is wired under folder options");
             var normal = ViewState.Default();
             var mixed = normal with { MixedSizeSort = true };
             Require(!normal.MixedSizeSort && mixed.Copy().MixedSizeSort, "default off and copy inheritance");

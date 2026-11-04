@@ -163,7 +163,7 @@
                         </MenuItem>
                     </MenuItem>
                     <MenuItem x:Name="DefaultViewMenu" Header="新建标签默认查看"/>
-                    <MenuItem Header="文件夹">
+                    <MenuItem x:Name="FolderOptionsMenu" Header="文件夹" SubmenuOpened="FolderOptionsMenu_SubmenuOpened">
                         <MenuItem x:Name="ShowFolderSizesMenu" Header="显示文件夹大小" IsCheckable="True"
                                   ToolTip="异步显示文件夹汇总大小。" Click="ShowFolderSizes_Click"/>
                         <MenuItem Header="文件夹大小来源">
@@ -171,6 +171,10 @@
                             <MenuItem x:Name="FolderSizeEverythingMenu" Header="Everything（不可用时不扫描）" IsCheckable="True" Tag="Everything" Click="FolderSizeSource_Click"/>
                             <MenuItem x:Name="FolderSizeBuiltInMenu" Header="内置后台扫描" IsCheckable="True" Tag="BuiltIn" Click="FolderSizeSource_Click"/>
                         </MenuItem>
+                        <Separator/>
+                        <MenuItem x:Name="MixedSizeSortMenu" Header="混合排序（文件夹与文件）" IsCheckable="True" IsEnabled="False"
+                                  ToolTip="仅影响当前标签的大小排序。关闭时文件夹在前、文件在后，各自排序；开启时统一按大小排序。需启用文件夹大小并等待视图就绪。"
+                                  Click="MixedSizeSort_Click"/>
                     </MenuItem>
                     <MenuItem Header="地址栏样式">
                         <MenuItem x:Name="ClassicAddressBarMenu" Header="经典（完整路径）"
