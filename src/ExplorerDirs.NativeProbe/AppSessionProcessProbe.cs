@@ -246,6 +246,7 @@ internal static class AppSessionProcessProbe
                 }
                 throw;
             }
+            Mark("settled-" + stage);
             Console.WriteLine($"app-external-change: pass={pass + 1}; stage={stage}; rows-per-pane={count}; ms={elapsed.ElapsedMilliseconds}; transient-empty-samples={transientEmptySamples}; grouped-pane-preserved=True");
         }
         void AwaitFileRow(string name, ulong bytes, string stage, string? forbiddenName = null)
@@ -285,7 +286,7 @@ internal static class AppSessionProcessProbe
         }
         void Mark(string stage)
         {
-            if (tracePath is not null) File.AppendAllText(tracePath, $"{Environment.TickCount64} probe-phase={stage} pass={pass + 1}\n");
+            if (tracePath is not null) File.AppendAllText(tracePath + ".phases.log", $"{Environment.TickCount64} probe-phase={stage} pass={pass + 1}\n");
         }
         // Mutate only fresh test roots created above, without commands or input to the App.
         Mark("before-create");
@@ -305,8 +306,10 @@ internal static class AppSessionProcessProbe
         Mark("delete-completed");
 
         var files = additions.Select(directory => Path.Combine(Path.GetDirectoryName(directory)!, "external-file.txt")).ToArray();
+        Mark("before-file-create");
         foreach (var file in files) File.WriteAllBytes(file, new byte[37]);
         AwaitRows(3, "file-create");
+        Mark("file-create-completed");
         foreach (var file in files) File.Delete(file);
         AwaitRows(2, "file-delete");
         var burstFiles = files.SelectMany(file => Enumerable.Range(0, 3).Select(index => file + $".burst-{index}")).ToArray();

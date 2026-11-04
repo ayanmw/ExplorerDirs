@@ -143,3 +143,10 @@ NativeProbe在断言超时之后才读取最多2048行名称，打印非filler�
 单变量原生枚举标志对照：只让实际NOENUMREFRESH保持关闭，应用软刷新策略仍开启。`src/.state/app-native-reconcile-control-1025.log` 先记录目录删除恢复1027项，随后文件创建等待1028项失败；失败行清单显示新external-file.txt已存在，多出的却是前一步已移除的external-notification-fixture（两窗格1029项）。因此“文件创建没同步”的计数表象实际包含旧目录重新加入。再撤销缺失目录的SFGAO_FOLDER回退，`app-native-reconcile-missing-1025.log` 仍重复该表象，不能把标志或类型回退当作已证实的完整根因。
 
 两项原生/标志控制均已撤回；正常产品保持此前已验证源码。下一步追踪迟到的枚举输出和大小更新通知，与删除/重新出现阶段对齐。标准CompareIDs文档核对及诊断只观察到CANONICALONLY/name比较，未据此修改比较器。现阶段不再把“发出RMDIR”当成行最终移除完成证据，不发布预览。
+
+
+## 大目录已删除条目复现的通知身份证据（2026-11-05）
+
+`src/.state/app-notification-identity-run.log` 完整 App 四窗格×1,025 filler 失败于 file-create；隔离及输入保护通过。专用诊断 trace 位于 `.state/app-session-process/6927ac257bef4a258f9aa276c9dc6259/app/ExplorerDirs.ShellNamespace.dll.size-trace.log`。tick381371453 四窗格转发已删除目录的 RMDIR；tick381374046/381374062 又转发同名不存在条目的 UPDATEITEM，构造属性变成 FILE_ATTRIBUTE_NORMAL。随后旧目录行复现。该证据支持调查延迟更新通知，不等同修复已验证。
+
+Windows SDK 常量核实：SHCNE_UPDATEDIR=0x1000，SHCNE_UPDATEITEM=0x2000；此前调查中将原始 0x2000 称作 UPDATEDIR 的描述有误，应按本次更正解释。此次仅诊断编译增加叶名称/存在状态，普通产品行为未修改。下一步对照不存在条目的更新通知处理，保留删除/重命名旧身份语义，禁止自动完整刷新回退。

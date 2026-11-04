@@ -108,6 +108,10 @@ namespace
         // log full browsing paths; normal product builds compile this body out.
 #if defined(EXPLORERDIRS_NOTIFICATION_TRACE_EXPERIMENT)
         if (strcmp(stage, "physical-view-event") && strcmp(stage, "provider-view-forwarded") &&
+            strcmp(stage, "provider-identity-live") && strcmp(stage, "provider-identity-missing") &&
+            strcmp(stage, "view-enumeration") && strcmp(stage, "view-enumerator") &&
+            strcmp(stage, "enum-next-external") && strcmp(stage, "size-publish-external") &&
+            strcmp(stage, "size-publish-directory") &&
             (strcmp(stage, "view-callback") || code != SFVM_FSNOTIFY)) return;
 #endif
         static volatile LONG entries = 0;
@@ -3178,6 +3182,11 @@ namespace
             ULONG made = 0;
             while (made < count && _index < _children.size())
             {
+#if defined(EXPLORERDIRS_NOTIFICATION_TRACE_EXPERIMENT)
+                if (wcsncmp(_children[_index].name, L"external-", 9) == 0)
+                    ED_SIZE_TRACE("enum-next-external", this, _children[_index].name, _index,
+                        _children[_index].attributes, _children[_index].size);
+#endif
                 items[made] = CloneSyntheticChild(_children[_index]);
                 if (!items[made])
                 {
@@ -3858,6 +3867,7 @@ namespace
                 }
             }
             *value = new (std::nothrow) SyntheticChildEnumerator(std::move(children));
+            ED_SIZE_TRACE("view-enumerator", this, nullptr, flags, 0, reinterpret_cast<ULONGLONG>(*value));
             return *value ? S_OK : E_OUTOFMEMORY;
         }
         HRESULT STDMETHODCALLTYPE BindToObject(PCUIDLIST_RELATIVE item, IBindCtx* bind, REFIID iid, void** value) override
@@ -4850,6 +4860,9 @@ namespace
                 child.size = (static_cast<ULONGLONG>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
                 if (child.attributes & FILE_ATTRIBUTE_DIRECTORY) TryGetSyntheticFileIdentity(path, &child.identity);
             }
+            // Diagnostic builds distinguish late item updates from notifications for live children.
+            ED_SIZE_TRACE(search != INVALID_HANDLE_VALUE ? "provider-identity-live" : "provider-identity-missing",
+                this, child.name, kind, child.attributes, child.size);
             CoTaskMemFree(path);
             // Deleted items have no filesystem metadata, but their name still identifies the row.
             if (FAILED(copied) || !*child.name) return nullptr;
@@ -5710,6 +5723,7 @@ namespace
 #endif
                         if (notifyDirectory)
                         {
+                            ED_SIZE_TRACE("size-publish-directory", self, nullptr, SHCNE_UPDATEDIR, 0, 0);
                             ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeNotificationsSentForProbe);
                             ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeDirectoryNotificationsSentForProbe);
 #if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
@@ -5749,6 +5763,12 @@ namespace
                                 if (delay > 0) Sleep(static_cast<DWORD>(delay));
                                 // Keep the diagnostic counter aligned with entry to SHChangeNotify for time-correlated sampling.
                                 InterlockedIncrement(&g_productAsyncItemNotificationAttempts);
+#endif
+#if defined(EXPLORERDIRS_NOTIFICATION_TRACE_EXPERIMENT)
+                                const auto* publishedChild = SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(ILFindLastID(notification.second)));
+                                if (publishedChild && wcsncmp(publishedChild->name, L"external-", 9) == 0)
+                                    ED_SIZE_TRACE("size-publish-external", self, publishedChild->name, SHCNE_UPDATEITEM,
+                                        publishedChild->attributes, publishedChild->size);
 #endif
                                 SHChangeNotify(SHCNE_UPDATEITEM, notifyFlags, notification.second, nullptr);
                                 CoTaskMemFree(notification.second);
