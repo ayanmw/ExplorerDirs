@@ -6,7 +6,8 @@ using ExplorerDirs.NativeProbe;
 public static partial class SyntheticShellSortProbe
 {
     private static readonly List<StreamViewHost> ProductDisplayProcessLifetimeHosts = [];
-    internal static int RunProductSizeDisplay(string adapterPath, bool explorerBrowser = false, bool rootControl = false)
+    internal static int RunProductSizeDisplay(string adapterPath, bool explorerBrowser = false, bool rootControl = false,
+        FolderSizeSource source = FolderSizeSource.BuiltIn)
     {
         var fixture = Path.Combine(Path.GetTempPath(), "ExplorerDirs-ProductSizeDisplay-" + Guid.NewGuid().ToString("N"));
         nint root = 0, folder = 0, view = 0, parent = 0, browserPointer = 0, folderView = 0;
@@ -31,12 +32,16 @@ public static partial class SyntheticShellSortProbe
             }
             File.WriteAllBytes(Path.Combine(fixture, "file-2048.bin"), new byte[2048]);
             Directory.CreateDirectory(Path.Combine(fixture, "folder-empty"));
+            if (source == FolderSizeSource.Everything)
+                WaitForIndex(fixture, new Dictionary<string, ulong>
+                    { ["folder-12288"] = 12 * 1024, ["folder-25600"] = 25 * 1024, ["folder-empty"] = 0 });
             var classId = Guid.NewGuid();
             owner = ProfileShellNamespaceOwner.Start(classId, fixture, Path.GetFullPath(adapterPath));
             diagnosticModule = NativeLibrary.Load(Path.GetFullPath(adapterPath));
             if (NativeLibrary.TryGetExport(diagnosticModule, "GetProductSyntheticEnumStarted", out var counter))
                 enumCounter = Marshal.GetDelegateForFunctionPointer<GetCounter>(counter);
-            owner.SetFolderSizeSource(FolderSizeSource.BuiltIn, true);
+            owner.SetFolderSizeSource(source, true);
+            Console.WriteLine($"product-size-display-source: {source}");
             var mainIdentity = rootControl ? $"::{{{classId:D}}}" : CreatePathIdentityParsingName(classId, fixture);
             Console.WriteLine($"product-size-display-identity: encoded-root={!rootControl}");
             Check(SHParseDisplayName(mainIdentity, 0, out root, 0, out _));
@@ -70,6 +75,8 @@ public static partial class SyntheticShellSortProbe
                 var childPath = Path.Combine(sibling, "folder-12288");
                 Directory.CreateDirectory(childPath);
                 File.WriteAllBytes(Path.Combine(childPath, "data.bin"), new byte[(30 + index) * 1024]);
+                if (source == FolderSizeSource.Everything)
+                    WaitForIndex(sibling, new Dictionary<string, ulong> { ["folder-12288"] = (ulong)(30 + index) * 1024 });
                 Check(SHParseDisplayName(CreatePathIdentityParsingName(classId, sibling), 0, out var siblingRoot, 0, out _));
                 Check(BindProductDisplayFolder(0, siblingRoot, 0, in ShellFolder2Id, out var siblingFolder));
                 nint siblingView;
@@ -91,6 +98,8 @@ public static partial class SyntheticShellSortProbe
             var fileIndex = Array.IndexOf(ReadColumnTextsForRows(listView, 0, 4), "file-2048.bin");
             SetListViewState(listView, fileIndex, LvisSelected | LvisFocused, LvisSelected | LvisFocused);
             File.WriteAllBytes(Path.Combine(fixture, "folder-12288", "data.bin"), new byte[40 * 1024]);
+            if (source == FolderSizeSource.Everything)
+                WaitForIndex(fixture, new Dictionary<string, ulong> { ["folder-12288"] = 40 * 1024 });
             owner.InvalidateFolderSizes(fixture);
             smallPrefix = "40";
             Check(SHParseDisplayName(mainIdentity + "\\folder-12288", 0,
@@ -123,11 +132,11 @@ public static partial class SyntheticShellSortProbe
             sortedNames = ReadColumnTextsForRows(listView, 0, 4);
             if (Array.IndexOf(sortedNames, "folder-12288") >= Array.IndexOf(sortedNames, "folder-25600"))
                 throw new InvalidOperationException("The displayed folder totals did not retain numeric descending sorting.");
-            owner.SetFolderSizeSource(FolderSizeSource.BuiltIn, false);
+            owner.SetFolderSizeSource(source, false);
             sizeEnabled = false;
             Check(At<RefreshView>(view, 8)(view));
             WaitForSizes("disabled-ordinary-file-preserved");
-            owner.SetFolderSizeSource(FolderSizeSource.BuiltIn, true);
+            owner.SetFolderSizeSource(source, true);
             sizeEnabled = true;
             Check(At<RefreshView>(view, 8)(view));
             WaitForSizes("reenabled");
@@ -180,6 +189,12 @@ public static partial class SyntheticShellSortProbe
                 Console.WriteLine($"product-size-display-automatic-enumerations: delta={delta}");
                 if (delta != 0) throw new InvalidOperationException("Soft notifications re-enumerated a complete directory.");
             }
+            Check(target.SetGrouping(new PropertyKeyState(SizeFormatId, 12), true));
+            Pump(150);
+            WaitForSizes("grouped-size");
+            Check(target.SetGrouping(null, true));
+            Pump(150);
+            WaitForSizes("ungrouped-size");
             Console.WriteLine($"Product size display: PASS (ExplorerBrowser={explorerBrowser}; four real Shell views with one profile, independent same-name folders, 12/25 KB and zero, invalidated 40 KB update, selected/focused file preserved, F5, column reorder and numeric sorting; private Desktop).");
             return 0;
 
@@ -206,6 +221,29 @@ public static partial class SyntheticShellSortProbe
                     }
                 }
                 throw new TimeoutException("ExplorerBrowser did not create a Shell view.");
+            }
+
+            void WaitForIndex(string parentPath, IReadOnlyDictionary<string, ulong> expected)
+            {
+                // Everything indexes filesystem changes asynchronously. This case
+                // verifies native consumption of indexed values, not index latency.
+                // Unindexed/unknown results must remain distinct from a measured zero.
+                var timer = Stopwatch.StartNew();
+                IndexedSizePage? page = null;
+                while (timer.Elapsed < TimeSpan.FromSeconds(5))
+                {
+                    page = EverythingSizeClient.QueryChildrenAsync(parentPath, 0, CancellationToken.None).GetAwaiter().GetResult();
+                    if (page.Status != EverythingSizeStatus.Available)
+                        throw new InvalidOperationException($"Everything source prerequisite failed: {page.Status}.");
+                    if (expected.All(pair => page.Items.Any(item => item.IsDirectory &&
+                        Path.GetFileName(item.Path) == pair.Key && item.Bytes == pair.Value)))
+                    {
+                        Console.WriteLine($"product-size-display-index-ready: expected-folders={expected.Count}; elapsed-ms={timer.ElapsedMilliseconds}");
+                        return;
+                    }
+                    Pump(50);
+                }
+                throw new TimeoutException($"Everything did not index the fixture values in time; rows={page?.Items.Count}.");
             }
 
             void CheckSiblingSizes()

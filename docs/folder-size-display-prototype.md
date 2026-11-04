@@ -80,4 +80,24 @@ dotnet run --project src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.cspro
 
 整合当前目录订阅、产品构建及标准列保存排序恢复后，25 项后台回归全部通过，最终报告为 `src/.state/background-checks/20261104-114924-d486be03beaf46148855d0f34fc90b57/summary.json`。其中 App、SettingsSmoke、HostProbe、NativeProbe 构建及数据源、Everything 协议、会话/列配置、异步扫描等检查与真实列表探针分别记录，不能替代可见验收。
 
-后续继续覆盖筛选/分组、Everything 实际服务及规模压力，再集中进行菜单、文件操作、重命名、拖放和可见体验验收；不覆盖现有 temp.86 预览。
+## 后续批次：分组、筛选、真实 Everything 与 4,100 目录
+
+2026-11-04 延续验证，本批没有增加产品功能入口或修改 Everything 设置。
+
+- `product-four-pane-host-group-filter.log`：实际四个 WPF 产品宿主整项 exit 0，前台/输入保护通过。在第一个窗格按标准大小列分组，应用包含目录的名称筛选后，唯一可见目录仍显示 5 B；清除筛选后，5/29 B、排序及大小分组恢复。随后四窗格独立选择与焦点检查通过。
+- `product-size-display-grouping-qualified.log`：原生四视图启用/取消大小分组后单元格保持正确，自动更新完整枚举增量仍为 0，整项隔离保护通过。
+- `product-four-pane-host-1025-integrated.log`：复现原先四根各 1,025 目录、8,192 缓存容量、通知身份观察开启的负载，4,100 个值及四窗格各自保存的升降序、选区、焦点全部通过，整项隔离保护通过。缓存 4,100 条、载荷 1,508,800 B、0 淘汰；这只是摘要载荷，不代表应用总内存。
+- 大目录就绪仍有明显等待：各窗格值就绪等待约 7.8/8.2/11.1/0.9 秒，之后排序等待约 1.3/1.3/29.3/9.3 秒。探针按窗格顺序观察、宿主同时工作，不能把这组数字视为四个独立冷启动耗时或直接归因扫描。正确性通过，性能尚未达标；下一步比较诊断观察开销与产品构建、采集排序/值查询成本。
+- 诊断记录修正：`GetSyntheticOnDemandSizeScanCount` 等仅由 NATIVEPROBE 宏递增，产品诊断 DLL 的零值不代表没有磁盘扫描；探针不再将其打印为实测 0，而标记为不可用。
+- `everything-live-empty-fixture.log`：真实 Everything 只读查询返回空目录 0 B、两个目录 5/37 B，约 867 ms，前台保持不变。没有打开搜索窗口或改索引配置。
+- `product-size-display-everything-indexed.log`：Everything 专用来源经真实 native bridge 和四个原生视图，显示、40 KB 更新、F5、排序、来源开关、分组、自动更新与 0 次额外完整枚举子检查通过。该轮检测到用户输入变化，整项保护不记通过。
+
+Everything 新增夹具的索引有延迟：第一次未等待索引就绪的原生检查中，非空目录有值而新空目录显示“—”；随后直接 SDK 协议查询确认可以得到真实 0。专用来源的集成检查现在明确等待夹具索引就绪，再验证消费结果和显式失效后的补值。它不证明尚未索引的目录会自动从未知变为已知，也不以后台扫描伪造专用来源结果；应用已有 F5 清理大小缓存接线，可见恢复行为仍留集中验收。
+
+新增大目录入口：
+
+```powershell
+dotnet run --project src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj -c Release -- --product-four-pane-host-large-private-desktop src/ExplorerDirs.HostProbe/bin/Release/net10.0-windows10.0.19041.0/ExplorerDirs.HostProbe.dll
+```
+
+后续重点为大目录延迟及未索引/不可用场景，再集中进行菜单、文件操作、重命名、拖放和可见体验验收；不覆盖现有 temp.86 预览。

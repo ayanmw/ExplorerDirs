@@ -256,6 +256,41 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                         $"Product pane {index + 1} has size properties but blank/incorrect displayed folder cells.");
                 }
                 Console.WriteLine("profile-owner-multi-root-shell-host: actual-folder-size-cells=PASS (all four product HwndHosts).");
+
+                var filterType = appAssembly.GetType("ExplorerDirs.App.QuickFilterSettings", true)!;
+                var keyType = appAssembly.GetType("ExplorerDirs.App.PropertyKeyState", true)!;
+                var sizeGroup = Activator.CreateInstance(keyType,
+                    [new Guid("b725f130-47ef-101a-a5f1-02608c9eebac"), 12u]);
+                var setGroup = hostType.GetMethod("TrySetGroup", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                var setFilter = hostType.GetMethod("SetQuickFilter", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                var captureView = hostType.GetMethod("CaptureViewState", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!;
+                var firstHost = hosts[0];
+                var firstWindow = (nint)hostViewWindow.GetValue(firstHost)!;
+                Func<bool> current = () => hosts.Contains(firstHost);
+                if (!(bool)setGroup.Invoke(firstHost, [sizeGroup, true, current])!)
+                    throw new InvalidOperationException("Could not enable native size grouping before filtering.");
+                var filter = Activator.CreateInstance(filterType, ["folder-small", false, true, null]);
+                if (!(bool)setFilter.Invoke(firstHost, [filter])!)
+                    throw new InvalidOperationException("Grouped provider quick filter was rejected.");
+                WaitUntil(() =>
+                {
+                    var cells = (string[][])readCells.Invoke(null, [firstWindow, 3])!;
+                    return cells.Length == 1 && cells[0][0] == "folder-small" && cells[0][1] == "5 B";
+                }, TimeSpan.FromSeconds(10), "Grouped folder filter did not retain the visible folder's size.");
+                var emptyFilter = Activator.CreateInstance(filterType, ["", false, false, null]);
+                if (!(bool)setFilter.Invoke(firstHost, [emptyFilter])!)
+                    throw new InvalidOperationException("Clearing grouped provider quick filter was rejected.");
+                WaitUntil(() =>
+                {
+                    var cells = (string[][])readCells.Invoke(null, [firstWindow, 3])!;
+                    var state = captureView.Invoke(firstHost, null)!;
+                    var group = state.GetType().GetProperty("GroupKey")!.GetValue(state);
+                    return cells.Select(row => row[1]).SequenceEqual(new[] { "5 B", "29 B" }) &&
+                        Equals(group, sizeGroup);
+                }, TimeSpan.FromSeconds(10), "Clearing filter lost folder totals, saved size order or size grouping.");
+                if (!(bool)setGroup.Invoke(firstHost, [null, true, current])!)
+                    throw new InvalidOperationException("Could not restore ungrouped provider view.");
+                Console.WriteLine("profile-owner-multi-root-shell-host: grouped-size-filter-roundtrip=PASS (real folder cells, group restored).");
             }
 
             // The production initial-sort timers run concurrently; inject selections only after every
@@ -395,11 +430,9 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             NativeLibrary.GetExport(module, "GetSyntheticRecursiveSizeCacheLookupMissesForProbe"))();
         var evictions = Marshal.GetDelegateForFunctionPointer<GetCounter64>(
             NativeLibrary.GetExport(module, "GetSyntheticRecursiveSizeCacheEvictionsForProbe"))();
-        var scans = Marshal.GetDelegateForFunctionPointer<GetCounter32>(
-            NativeLibrary.GetExport(module, "GetSyntheticOnDemandSizeScanCount"))();
-        var metricsCalls = Marshal.GetDelegateForFunctionPointer<GetCounter32>(
-            NativeLibrary.GetExport(module, "GetSyntheticDirectoryMetricsCallCount"))();
-        return $"entries={snapshots};payload={payload};hits={hits};misses={misses};evictions={evictions};scans={scans};metric-calls={metricsCalls}";
+        // Those scan counters increment only in NATIVEPROBE builds. Their zero
+        // exports in the product diagnostic DLL are not measured absence of IO.
+        return $"entries={snapshots};payload={payload};hits={hits};misses={misses};evictions={evictions};scan-counters=unavailable-in-product-diagnostics";
     }
 
     private static void WaitUntil(Func<bool> condition, TimeSpan timeout, string message, int pollMilliseconds = 20)

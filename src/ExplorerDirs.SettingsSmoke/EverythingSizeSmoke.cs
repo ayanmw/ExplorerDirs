@@ -49,6 +49,7 @@ internal static class EverythingSizeSmoke
         var fixture = Path.Combine(AppContext.BaseDirectory, "everything-live-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Path.Combine(fixture, "small"));
         Directory.CreateDirectory(Path.Combine(fixture, "large"));
+        Directory.CreateDirectory(Path.Combine(fixture, "empty"));
         try
         {
             File.WriteAllBytes(Path.Combine(fixture, "small", "data.bin"), new byte[5]);
@@ -61,13 +62,14 @@ internal static class EverythingSizeSmoke
                 if (GetForegroundWindow() != before) throw new Exception("Everything fixture changed foreground.");
                 if (page.Status != EverythingSizeStatus.Available)
                     throw new Exception($"Everything fixture unavailable: {page.Status}.");
-                if (page.Items.Count == 2 && page.Items.SingleOrDefault(item => Path.GetFileName(item.Path) == "small")?.Bytes == 5 &&
-                    page.Items.SingleOrDefault(item => Path.GetFileName(item.Path) == "large")?.Bytes == 37)
+                if (page.Items.Count == 3 && page.Items.SingleOrDefault(item => Path.GetFileName(item.Path) == "small")?.Bytes == 5 &&
+                    page.Items.SingleOrDefault(item => Path.GetFileName(item.Path) == "large")?.Bytes == 37 &&
+                    page.Items.SingleOrDefault(item => Path.GetFileName(item.Path) == "empty")?.Bytes == 0)
                 {
                     var exact = EverythingSizeClient.QueryDirectoryAsync(Path.Combine(fixture, "small"), CancellationToken.None).GetAwaiter().GetResult();
                     if (exact.Status != EverythingSizeStatus.Available || exact.Items.Count != 1 || exact.Items[0].Bytes != 5)
                         throw new Exception("Everything exact-identity query failed.");
-                    Console.WriteLine($"Everything live fixture: PASS; directories=2; sizes=5/37; elapsed-ms={clock.ElapsedMilliseconds}; foreground-unchanged=True");
+                    Console.WriteLine($"Everything live fixture: PASS; directories=3; sizes=0/5/37; elapsed-ms={clock.ElapsedMilliseconds}; foreground-unchanged=True");
                     return;
                 }
                 Thread.Sleep(100);
