@@ -318,3 +318,14 @@ The complete 30-check background gate passed: src/.state/background-checks/20261
 Extended the targeted actual host fixture from grouped settings preservation to regroup / set mixed policy / native direction verb / clear grouping / assert actual native row order for both policies and directions. The first folder-first descending-only check passed (ungroup-policy.log). The expanded matrix failed mixed=True/direction=1 twice (ungroup-matrix.log, ungroup-diagnostic.log): group was null but rows remained folder-small|folder-large|file-middle.bin rather than folder-small|file-middle.bin|folder-large. Both failed runs cleaned up with unchanged foreground/input guards.
 
 This is an open counterexample, not a completed repair. It uses the production private TrySetGroup method for grouping and the native canonical direction command; it does not yet prove the same outcome through the visible Shell group-none menu. Next distinguish native command settlement from group-transition reordering before changing the host. The final fixture reports one bounded last observed state on timeout; no repeated polling trace retained. No production change or release in this batch.
+
+
+### 2026-11-05 Deferred ungroup recovery
+
+Waiting for the native sort direction and pending reconciliation to settle changed the failure from the mixed case to separated ascending: group=null, rows=file-middle.bin|folder-small|folder-large. Thus the original fixture had a command-settlement race, but waiting did not eliminate the product failure (ungroup-settled.log).
+
+The host now remembers that a policy/direction update occurred while grouped. It preserves grouping and defers order correction until an ungrouped command reconciliation, including the app's TrySetGroup path. Recovery reuses the existing native opposite/saved transition with selection/input/retirement protection, without full refresh or forced ungrouping. Browser disposal clears the transient pending flag. Ordinary same-direction commands with no pending transition remain no-ops.
+
+ungroup-final.log completed with exit 0 for actual mixed/separated asc/desc row order after ungrouping. Each subsequent case waits for the preceding recovery to finish, matching the product setting's busy guard. ungroup-four-input.log and ungroup-hidden-regression.log both exited 0 with foreground/input/cleanup guards passing. No visible native group-none menu click or true application restart is claimed. Grouped within-group policy application remains a separate boundary; this change corrects the deferred ungrouped order.
+
+Final 30-check background gate Passed: src/.state/background-checks/20261105-041246-8a941b2dc0b84d71b8749fb48b3a4c56/summary.json (source 458e81f plus current host/probe edits). No real release or visible GUI.

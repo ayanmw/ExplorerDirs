@@ -289,6 +289,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         _folderSizeSortDirection = direction;
     }
 
+    // Grouped DefView can retain its previous category order after policy/direction changes.
+    // Defer native row-order recovery until grouping is removed; never ungroup the user view.
+    private bool _sizeSortPendingUngroup;
+
     internal bool MixedSizeSort => _viewState.MixedSizeSort;
     internal bool CanSetMixedSizeSort => _folderSizesEnabled && _folderSizeSortContext is not null &&
         _browser is not null && IsFolderSizeProvider && IsVisible && !_viewReadiness.Pending &&
@@ -326,6 +330,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             if (!Current()) return false;
             _folderSizeSortDirection = direction;
             _viewState = saved with { MixedSizeSort = enabled };
+            _sizeSortPendingUngroup = sizeSort is not null && saved.GroupKey is not null;
             if (sizeSort is not null && saved.GroupKey is null)
             {
                 var ownedSelection = selection;
@@ -404,12 +409,21 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 var source = new NativeViewStateSource(view);
                 if (source.GetSortColumnCount(out var count) < 0 || !Current() || count != 1 ||
                     source.GetSortColumns(count, out var sorts) < 0 || !Current() ||
-                    sorts[0].Key != FolderSizeLocationPolicy.SizeColumn ||
-                    sorts[0].Direction == _folderSizeSortDirection) return;
+                    sorts[0].Key != FolderSizeLocationPolicy.SizeColumn) return;
+                var directionChanged = sorts[0].Direction != _folderSizeSortDirection;
+                if (!directionChanged && !_sizeSortPendingUngroup) return;
                 var saved = CaptureViewState();
                 if (!Current() || ViewCaptureFailed || !saved.SortColumns.SequenceEqual(sorts)) return;
                 UpdateFolderSizeSortPolicy(sorts);
-                if (!Current() || saved.MixedSizeSort || saved.GroupKey is not null) return;
+                if (!Current()) return;
+                if (saved.GroupKey is not null)
+                {
+                    _sizeSortPendingUngroup = true;
+                    return;
+                }
+                var reconcileUngroup = _sizeSortPendingUngroup;
+                _sizeSortPendingUngroup = false;
+                if (saved.MixedSizeSort && !reconcileUngroup) return;
                 // The original Shell sort used the previous direction's category compensation.
                 // Reuse the bounded native recovery, with its selection and input protections.
                 ShellViewSelectionSnapshot? preserved = null;
@@ -3899,6 +3913,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             var result = GetMethod<SetGroupByDelegate>(view, 17)(view, ref key, ascending ? 1 : 0);
             if (!isCurrent()) return false;
             if (result < 0) MenuError?.Invoke(this, $"调整筛选分组顺序失败：0x{result:X8}");
+            if (result >= 0 && group is null && _sizeSortPendingUngroup) QueueNativeSortReconciliation();
             return result >= 0;
         }
         finally { Marshal.Release(view); }
@@ -5737,6 +5752,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     {
         ReleaseInitialVirtualSortRedrawLease(requestRedraw: false);
         _initialSortRecoverySerial++;
+        _sizeSortPendingUngroup = false;
         _initialSortRecoveryActiveSerial = 0;
         EndInitialSortTransient(_initialSortTransientOwner);
         _viewStyleCaptureOperation?.Abort();

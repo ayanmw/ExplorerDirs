@@ -878,6 +878,8 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                     foreach (var mixed in new[] { true, false })
                     foreach (var direction in new[] { 1, -1 })
                     {
+                        WaitUntil(() => (bool)hostType.GetProperty("CanSetMixedSizeSort", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)!,
+                            TimeSpan.FromSeconds(8), "Previous ungroup recovery did not finish.");
                         if (!(bool)setGroup.Invoke(host, [sortKey, true, new Func<bool>(() => true)])!)
                             throw new InvalidOperationException("Could not regroup for policy transition.");
                         WaitUntil(() =>
@@ -894,6 +896,14 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                             Marshal.ThrowExceptionForHR(result);
                         }
                         finally { ((IDisposable)groupedMenu).Dispose(); }
+                        WaitUntil(() =>
+                        {
+                            var state = hostType.GetMethod("CaptureViewState")!.Invoke(host, null)!;
+                            var sorts = ((System.Collections.IEnumerable)state.GetType().GetProperty("SortColumns")!.GetValue(state)!).Cast<object>().ToArray();
+                            return sorts.Length == 1 && Equals(sorts[0].GetType().GetProperty("Key")!.GetValue(sorts[0]), sortKey) &&
+                                Equals(sorts[0].GetType().GetProperty("Direction")!.GetValue(sorts[0]), direction) &&
+                                hostType.GetField("_nativeSortReconciliation", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host) is null;
+                        }, TimeSpan.FromSeconds(5), "Grouped sort direction did not settle before ungrouping.");
                         if (!(bool)setGroup.Invoke(host, [null, true, new Func<bool>(() => true)])!)
                             throw new InvalidOperationException("Could not clear native grouping after policy changes.");
                         string[] expected = mixed
@@ -903,13 +913,13 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                         try
                         {
                             WaitUntil(() =>
-                        {
-                            var state = hostType.GetMethod("CaptureViewState")!.Invoke(host, null)!;
-                            var rows = readNativeRows.Invoke(null, [window])!;
-                            var names = (string[])rows.GetType().GetField("Item2")!.GetValue(rows)!;
-                            transitionState = $"group={state.GetType().GetProperty("GroupKey")!.GetValue(state)}; names={string.Join('|', names)}";
-                            return state.GetType().GetProperty("GroupKey")!.GetValue(state) is null && names.SequenceEqual(expected);
-                        }, TimeSpan.FromSeconds(8), $"Ungroup transition failed: mixed={mixed}; direction={direction}.");
+                            {
+                                var state = hostType.GetMethod("CaptureViewState")!.Invoke(host, null)!;
+                                var rows = readNativeRows.Invoke(null, [window])!;
+                                var names = (string[])rows.GetType().GetField("Item2")!.GetValue(rows)!;
+                                transitionState = $"group={state.GetType().GetProperty("GroupKey")!.GetValue(state)}; names={string.Join('|', names)}";
+                                return state.GetType().GetProperty("GroupKey")!.GetValue(state) is null && names.SequenceEqual(expected);
+                            }, TimeSpan.FromSeconds(8), $"Ungroup transition failed: mixed={mixed}; direction={direction}.");
                         }
                         catch (TimeoutException error)
                         {
