@@ -295,3 +295,12 @@ mixed-setting-alone.log暴露早期CanSet仅检查暂时反向guard不足：方�
 30项后台整轮通过：src/.state/background-checks/20261105-033940-0fb3bef604a1472391ce8d76434d5ddc/summary.json。mixed-option-four-input.log及mixed-option-four-retry.log常规DLL四宿主输入/受控重试整项通过；最后退休分支/input版本防护后，重建0警告错误，并以mixed-option-reviewed-input.log、mixed-option-reviewed-setting.log重新通过四宿主输入与设置整项。未把此前总检报告冒充最后几行审查修改的再次整轮。
 
 Ruling：设置反映每标签策略，在支持的provider就绪时才允许更改；停用大小显示或虚拟位置仍保留已存策略，返回支持位置继续使用。代价是忙碌时需稍后重新展开菜单，不用过期快照强行写入。隐藏大小列/分组等非默认列配置及集中UI点击/焦点/真实重启验收继续补齐；releases未覆盖，不以这个子功能完成宣布temp.86可发布。
+
+
+### 2026-11-05 Hidden Size sort readiness
+
+The hidden-column fixture initially failed because reflection requested a non-public Apply method; ShellColumnManager.Apply is public. After correcting the fixture, hidden-size-baseline.log failed with Mixed-sort setting was not ready. Removing Size while retaining its sort key exposed a readiness path tied to visible column headers.
+
+The product now uses raw PKEY_Size readiness only when the provider Size column is not visible. It visits every row to queue pending folder values, yields between batches, distinguishes unknown from zero, and retains retirement/count checks. Visible-column readiness remains unchanged. Saved provider Size sorting is scheduled even when its display column is hidden.
+
+Final evidence: hidden-size-final2.log exit 0 covers actual production setter, mixed/separated asc/desc native row order, selection, no-op and INI copy/default checks. hidden-size-final-four.log exit 0 covers the full four-host input regression. Both private Desktop foreground/input guards passed. Intermediate broad raw-readiness/input and shared-verifier attempts failed; the final implementation scopes raw readiness to hidden Size and retains the order verifier's early-return behavior. No visible desktop test, true process restart, grouped hidden-column closure or full 30-stage rerun is claimed. No release payload changed.

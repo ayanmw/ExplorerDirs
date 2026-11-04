@@ -8,6 +8,13 @@ namespace ExplorerDirs.App;
 internal static class ShellSizeSortOrder
 {
     internal static async Task<bool?> IsOrderedAsync(nint view, int expectedCount, int direction, bool mixed, Func<bool> isCurrent)
+        => await ReadRowsAsync(view, expectedCount, direction, mixed, isCurrent, true);
+
+    internal static Task<bool?> AreValuesReadyAsync(nint view, int expectedCount, Func<bool> isCurrent)
+        => ReadRowsAsync(view, expectedCount, 1, false, isCurrent, false);
+
+    private static async Task<bool?> ReadRowsAsync(nint view, int expectedCount, int direction, bool mixed,
+        Func<bool> isCurrent, bool checkOrder)
     {
         if (!isCurrent()) return null;
         var folderId = new Guid("93f2f68c-1d1b-11d3-a30e-00c04f79abd1");
@@ -17,6 +24,7 @@ internal static class ShellSizeSortOrder
         {
             if (result < 0 || !isCurrent() || At<GetCount>(view, 7)(view, 2, out var count) < 0 ||
                 !isCurrent() || count != expectedCount) return null;
+            var pending = false;
             ulong previous = 0;
             var previousFolder = true;
             for (var index = 0; index < count; index++)
@@ -32,22 +40,30 @@ internal static class ShellSizeSortOrder
                     ulong bytes;
                     try
                     {
-                        if (result < 0 || value.Type != 21 || !isCurrent()) return null; // VT_UI8
+                        if (!isCurrent()) return null;
+                        if (result < 0 || value.Type != 21)
+                        {
+                            if (checkOrder) return null;
+                            pending = true;
+                        } // VT_UI8; keep reading to queue every folder.
                         bytes = value.Bytes;
                     }
                     finally { VariantClear(ref value); }
-                    uint attributes = 0x20000000; // SFGAO_FOLDER
-                    if (!isCurrent() || At<GetAttributes>(folder, 9)(folder, 1, ref item, ref attributes) < 0 ||
-                        !isCurrent()) return null;
-                    var isFolder = (attributes & 0x20000000) != 0;
-                    if (index > 0)
+                    if (checkOrder)
                     {
-                        if (!mixed && !previousFolder && isFolder) return false;
-                        if ((mixed || previousFolder == isFolder) &&
-                            (direction > 0 ? previous > bytes : previous < bytes)) return false;
+                        uint attributes = 0x20000000; // SFGAO_FOLDER
+                        if (!isCurrent() || At<GetAttributes>(folder, 9)(folder, 1, ref item, ref attributes) < 0 ||
+                            !isCurrent()) return null;
+                        var isFolder = (attributes & 0x20000000) != 0;
+                        if (index > 0)
+                        {
+                            if (!mixed && !previousFolder && isFolder) return false;
+                            if ((mixed || previousFolder == isFolder) &&
+                                (direction > 0 ? previous > bytes : previous < bytes)) return false;
+                        }
+                        previous = bytes;
+                        previousFolder = isFolder;
                     }
-                    previous = bytes;
-                    previousFolder = isFolder;
                 }
                 finally { Marshal.FreeCoTaskMem(item); }
                 // Large directories must leave time for navigation and input between native reads.
@@ -55,7 +71,7 @@ internal static class ShellSizeSortOrder
                     await Dispatcher.Yield(DispatcherPriority.Background);
             }
             return isCurrent() && At<GetCount>(view, 7)(view, 2, out var afterCount) >= 0 &&
-                isCurrent() && afterCount == expectedCount ? true : null;
+                isCurrent() && afterCount == expectedCount && !pending ? true : null;
         }
         finally { Marshal.Release(folder); }
     }

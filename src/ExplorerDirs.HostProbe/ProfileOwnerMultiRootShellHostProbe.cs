@@ -36,12 +36,14 @@ internal static class ProfileOwnerMultiRootShellHostProbe
     private delegate int ReadProbeComparison(int index, StringBuilder text, uint capacity);
     private static bool _reconcileUserSort;
     private static uint _userSortMode = 3;
-    internal static int RunUserSortReconciliationForProbe(string adapterPath, uint mode)
+    private static bool _hideSortSizeColumn;
+    internal static int RunUserSortReconciliationForProbe(string adapterPath, uint mode, bool hideSizeColumn)
     {
         _reconcileUserSort = true;
         _userSortMode = mode;
+        _hideSortSizeColumn = hideSizeColumn;
         try { return RunWithSortContextForProbe(adapterPath); }
-        finally { _reconcileUserSort = false; _userSortMode = 3; }
+        finally { _reconcileUserSort = false; _userSortMode = 3; _hideSortSizeColumn = false; }
     }
 
     private static bool _renameDuringSort;
@@ -742,6 +744,27 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                     if (activeView != 0) Marshal.Release(activeView);
                 }
 
+                if (_hideSortSizeColumn)
+                {
+                    var columns = ((System.Collections.IEnumerable)captured.GetType().GetProperty("DisplayColumns")!.GetValue(captured)!).Cast<object>()
+                        .Where(column => !Equals(column.GetType().GetProperty("Key")!.GetValue(column), sortKey)).ToArray();
+                    var nativeColumns = Array.CreateInstance(columns[0].GetType(), columns.Length);
+                    for (var index = 0; index < columns.Length; index++) nativeColumns.SetValue(columns[index], index);
+                    var hiddenView = (nint)hostType.GetMethod("GetFolderView2Pointer", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(host, null)!;
+                    try
+                    {
+                        var columnManager = appAssembly.GetType("ExplorerDirs.App.ShellColumnManager", true)!;
+                        var result = (int)columnManager.GetMethod("Apply", BindingFlags.Static | BindingFlags.Public)!
+                            .Invoke(null, [hiddenView, nativeColumns, new Func<bool>(() => true)])!;
+                        Marshal.ThrowExceptionForHR(result);
+                    }
+                    finally { if (hiddenView != 0) Marshal.Release(hiddenView); }
+                    var hiddenState = hostType.GetMethod("CaptureViewState")!.Invoke(host, null)!;
+                    var remaining = ((System.Collections.IEnumerable)hiddenState.GetType().GetProperty("DisplayColumns")!.GetValue(hiddenState)!).Cast<object>();
+                    if (remaining.Any(column => Equals(column.GetType().GetProperty("Key")!.GetValue(column), sortKey)))
+                        throw new InvalidOperationException("Size column was not actually hidden.");
+                    Console.WriteLine("product-hidden-size-column: hidden=True; size-sort-retained=True");
+                }
                 sortPolicyModule = NativeLibrary.Load(_sortContextAdapter!);
                 VerifyProbePolicy? verifyPolicy = NativeLibrary.TryGetExport(sortPolicyModule, "VerifySizeSortContextValueForProbe", out var verifyAddress)
                     ? Marshal.GetDelegateForFunctionPointer<VerifyProbePolicy>(verifyAddress) : null;

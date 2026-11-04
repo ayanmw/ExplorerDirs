@@ -3035,8 +3035,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     RecordInitialSortRecovery($"restore;generation={generation};restored={restored};provider={IsFolderSizeProvider};sorts={saved.SortColumns.Count};group={saved.GroupKey}");
                 if (restored && (!_location.IsFileSystemLocation || IsFolderSizeProvider) && saved.GroupKey is null &&
                     saved.SortColumns.Count == 1 &&
-                    ShellFileViewExportCapture.HasVisibleUnresolvedColumn(view, saved.SortColumns[0].Key,
-                        includeResolved: IsFolderSizeProvider && saved.SortColumns[0].Key == FolderSizeLocationPolicy.SizeColumn) && Current())
+                    ((IsFolderSizeProvider && saved.SortColumns[0].Key == FolderSizeLocationPolicy.SizeColumn) ||
+                     ShellFileViewExportCapture.HasVisibleUnresolvedColumn(view, saved.SortColumns[0].Key)) && Current())
                     ScheduleInitialVirtualSort(saved.SortColumns[0], Current);
             }
         }
@@ -3247,51 +3247,64 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             try
             {
                 if (!IsCurrent()) { FinishSortRecovery(); return; }
-                readinessSession = ShellFileViewExportCapture.CreateReadinessSession(
-                    view, _viewWindow, sort.Key, out var capturedItemCount,
-                    // The provider's standard Size column is named, but its folder
-                    // values are still asynchronous after restoring the saved sort.
-                    includeResolved: IsFolderSizeProvider && sort.Key == FolderSizeLocationPolicy.SizeColumn);
-                if (capturedItemCount < 0)
+                if (IsFolderSizeProvider && sort.Key == FolderSizeLocationPolicy.SizeColumn &&
+                    !ShellFileViewExportCapture.HasVisibleUnresolvedColumn(view, sort.Key, includeResolved: true))
                 {
-                    timer.Start();
-                    return;
+                    // A saved Size sort remains valid when the display column is hidden.
+                    var count = ReadDirectoryMonitorItemCount();
+                    if (count is null or < 0) { timer.Start(); return; }
+                    var ready = await ShellSizeSortOrder.AreValuesReadyAsync(view, count.Value, IsCurrent);
+                    readinessItemCount = count;
+                    readinessFoundPendingValue = ready != true;
                 }
-                if (readinessSession is null) { Trace("no-readiness-session"); timer.Start(); return; }
-
-                while (IsCurrent() && readinessWait.Elapsed < TimeSpan.FromSeconds(30))
+                else
                 {
-                    bool batchPending;
-                    int shellItemCount;
-                    try
+                    readinessSession = ShellFileViewExportCapture.CreateReadinessSession(
+                        view, _viewWindow, sort.Key, out var capturedItemCount,
+                        // The provider's standard Size column is named, but its folder
+                        // values are still asynchronous after restoring the saved sort.
+                        includeResolved: IsFolderSizeProvider && sort.Key == FolderSizeLocationPolicy.SizeColumn);
+                    if (capturedItemCount < 0)
                     {
-                        batchPending = readinessSession.HasPendingUnresolvedValues(readinessRow,
-                            ShellFileViewExportCapture.ReadinessBatchSize, out shellItemCount);
-                    }
-                    // DefView may replace row PIDLs during a concurrent sort; Shell reports that short read as E_INVALIDARG.
-                    catch (Exception exception) when (exception is COMException or InvalidDataException ||
-                        exception is ArgumentException { HResult: unchecked((int)0x80070057) })
-                    {
-                        batchPending = true;
-                        shellItemCount = -1;
-                    }
-
-                    if (shellItemCount < 0 || readinessItemCount is not null && readinessItemCount.Value != shellItemCount ||
-                        shellItemCount != capturedItemCount)
-                    {
-                        // A changing Shell row count invalidates the current scan; retry from row zero next timer turn.
-                        readinessItemCount = null;
-                        readinessRow = 0;
-                        readinessFoundPendingValue = false;
                         timer.Start();
                         return;
                     }
-                    readinessItemCount ??= shellItemCount;
-                    readinessFoundPendingValue |= batchPending;
-                    readinessRow = Math.Min(readinessItemCount.Value,
-                        readinessRow + ShellFileViewExportCapture.ReadinessBatchSize);
-                    if (readinessRow >= readinessItemCount.Value) break;
-                    await Dispatcher.Yield(DispatcherPriority.Background);
+                    if (readinessSession is null) { Trace("no-readiness-session"); timer.Start(); return; }
+
+                    while (IsCurrent() && readinessWait.Elapsed < TimeSpan.FromSeconds(30))
+                    {
+                        bool batchPending;
+                        int shellItemCount;
+                        try
+                        {
+                            batchPending = readinessSession.HasPendingUnresolvedValues(readinessRow,
+                                ShellFileViewExportCapture.ReadinessBatchSize, out shellItemCount);
+                        }
+                        // DefView may replace row PIDLs during a concurrent sort; Shell reports that short read as E_INVALIDARG.
+                        catch (Exception exception) when (exception is COMException or InvalidDataException ||
+                            exception is ArgumentException { HResult: unchecked((int)0x80070057) })
+                        {
+                            batchPending = true;
+                            shellItemCount = -1;
+                        }
+
+                        if (shellItemCount < 0 || readinessItemCount is not null && readinessItemCount.Value != shellItemCount ||
+                            shellItemCount != capturedItemCount)
+                        {
+                            // A changing Shell row count invalidates the current scan; retry from row zero next timer turn.
+                            readinessItemCount = null;
+                            readinessRow = 0;
+                            readinessFoundPendingValue = false;
+                            timer.Start();
+                            return;
+                        }
+                        readinessItemCount ??= shellItemCount;
+                        readinessFoundPendingValue |= batchPending;
+                        readinessRow = Math.Min(readinessItemCount.Value,
+                            readinessRow + ShellFileViewExportCapture.ReadinessBatchSize);
+                        if (readinessRow >= readinessItemCount.Value) break;
+                        await Dispatcher.Yield(DispatcherPriority.Background);
+                    }
                 }
             }
             catch (Exception exception) when (exception is COMException or InvalidDataException ||

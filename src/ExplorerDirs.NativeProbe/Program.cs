@@ -74,6 +74,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunProductFourPaneHost(deadlineHostProbe, forceSortDeadline: true);
         if (args is ["--product-sort-retry-host-private-desktop", var retryHostProbe, var retryHostAdapter])
             return PrivateDesktopShellProbe.RunProductSortRetryHost(retryHostProbe, retryHostAdapter);
+        if (args is ["--product-hidden-size-sort-host-private-desktop", var hiddenSizeHost, var hiddenSizeAdapter])
+            return PrivateDesktopShellProbe.RunProductUserSortHost(hiddenSizeHost, hiddenSizeAdapter, hideSizeColumn: true);
         if (args is ["--product-user-sort-host-private-desktop", var modeHostProbe, var modeHostAdapter, var requestedSortMode] &&
             uint.TryParse(requestedSortMode, out var sortMode) && sortMode is 1 or 2 or 3 or 4 or 6 or 8)
             return PrivateDesktopShellProbe.RunProductUserSortHost(modeHostProbe, modeHostAdapter, sortMode);
