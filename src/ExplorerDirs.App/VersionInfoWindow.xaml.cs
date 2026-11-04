@@ -26,6 +26,7 @@ public partial class VersionInfoWindow : Window
         SingleFileText.Text = identity.PublishSingleFile;
         TrimmedText.Text = identity.PublishTrimmed;
         ReadyToRunText.Text = identity.PublishReadyToRun;
+        NativeBuildText.Text = identity.NativeBuildParameters;
         BuildTagsText.Text = identity.BuildTags;
         InformationalVersionText.Text = identity.InformationalVersion;
     }

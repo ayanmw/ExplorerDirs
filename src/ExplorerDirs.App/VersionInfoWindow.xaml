@@ -45,6 +45,7 @@
                 <TextBlock Grid.Row="10" Text="裁剪发布"/><TextBlock x:Name="TrimmedText" Grid.Row="10" Grid.Column="1"/>
                 <TextBlock Grid.Row="11" Text="ReadyToRun"/><TextBlock x:Name="ReadyToRunText" Grid.Row="11" Grid.Column="1"/>
                 <TextBlock Grid.Row="12" Text="构建标签"/><TextBlock x:Name="BuildTagsText" Grid.Row="12" Grid.Column="1" TextWrapping="Wrap"/>
+                <TextBlock Grid.Row="14" Text="原生 Shell 构建"/><TextBlock x:Name="NativeBuildText" Grid.Row="14" Grid.Column="1" TextWrapping="Wrap"/>
                 <TextBlock Grid.Row="13" Text="信息版本"/><TextBlock x:Name="InformationalVersionText" Grid.Row="13" Grid.Column="1" TextWrapping="Wrap"/>
             </Grid>
         </ScrollViewer>

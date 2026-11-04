@@ -8,6 +8,9 @@
     <UseWPF>true</UseWPF>
     <Version>0.6.0-preview.temp.3</Version>
     <BuildTags Condition="'$(BuildTags)' == ''">none</BuildTags>
+    <_NativeOutputSuffix Condition="'$(Configuration)' == 'Debug'">-debug</_NativeOutputSuffix>
+    <_NativeCompilerFlags Condition="'$(Configuration)' == 'Debug'">/Od /D_DEBUG /MDd</_NativeCompilerFlags>
+    <_NativeCompilerFlags Condition="'$(Configuration)' != 'Debug'">/O2 /DNDEBUG /MD</_NativeCompilerFlags>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
   <Target Name="GenerateExplorerDirsBuildIdentity" BeforeTargets="GetAssemblyAttributes">
@@ -49,19 +52,20 @@
       <AssemblyMetadata Include="BuildPublishSingleFile" Value="$(PublishSingleFile)" />
       <AssemblyMetadata Include="BuildPublishTrimmed" Value="$(PublishTrimmed)" />
       <AssemblyMetadata Include="BuildPublishReadyToRun" Value="$(PublishReadyToRun)" />
+      <AssemblyMetadata Include="NativeBuildParameters" Value="MSVC x64 $(Configuration): $(_NativeCompilerFlags); /EHsc /W4 /WX; link /Brepro; EXPLORERDIRS_PROVIDER_VIEW_NOTIFICATIONS, EXPLORERDIRS_FOLDER_SIZE_DISPLAY" />
       <AssemblyMetadata Include="BuildTags" Value="$(BuildTags)" />
     </ItemGroup>
   </Target>
   <ItemGroup>
     <PackageReference Include="OfficeIMO.Excel" Version="3.5.1" />
-    <None Include="..\ExplorerDirs.NativeProbe\bin\native-product-x64\ExplorerDirs.ShellNamespace.dll"
+    <None Include="..\ExplorerDirs.NativeProbe\bin\native-product-x64$(_NativeOutputSuffix)\ExplorerDirs.ShellNamespace.dll"
           Link="ExplorerDirs.ShellNamespace.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <Target Name="BuildExplorerDirsShellNamespaceAdapter" BeforeTargets="PrepareForBuild"
           Inputs="$(MSBuildProjectDirectory)\..\ExplorerDirs.NativeProbe\StaticShellFolderAdapter.cpp;$(MSBuildProjectDirectory)\..\ExplorerDirs.NativeProbe\ProductShellFolderAdapter.def;$(MSBuildProjectDirectory)\..\ExplorerDirs.NativeProbe\build-product-shell-folder-adapter.ps1"
-          Outputs="$(MSBuildProjectDirectory)\..\ExplorerDirs.NativeProbe\bin\native-product-x64\ExplorerDirs.ShellNamespace.dll">
-    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\ExplorerDirs.NativeProbe\build-product-shell-folder-adapter.ps1&quot;" />
+          Outputs="$(MSBuildProjectDirectory)\..\ExplorerDirs.NativeProbe\bin\native-product-x64$(_NativeOutputSuffix)\ExplorerDirs.ShellNamespace.dll">
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\ExplorerDirs.NativeProbe\build-product-shell-folder-adapter.ps1&quot; -Configuration &quot;$(Configuration)&quot;" />
   </Target>
 
 </Project>

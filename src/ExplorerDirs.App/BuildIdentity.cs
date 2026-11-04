@@ -17,7 +17,8 @@ internal sealed record BuildIdentity(
     string PublishSingleFile,
     string PublishTrimmed,
     string PublishReadyToRun,
-    string BuildTags)
+    string BuildTags,
+    string NativeBuildParameters)
 {
     public string ShortCommit => GitCommit.Length >= 8 ? GitCommit[..8] : GitCommit;
 
@@ -37,6 +38,6 @@ internal sealed record BuildIdentity(
             Get("BuildConfiguration"), Get("BuildTargetFramework"), Get("BuildRuntimeIdentifier"),
             Get("BuildSelfContained"), Get("BuildDefineConstants"), Get("BuildPublishAot"),
             Get("BuildPublishSingleFile"), Get("BuildPublishTrimmed"), Get("BuildPublishReadyToRun"),
-            Get("BuildTags"));
+            Get("BuildTags"), Get("NativeBuildParameters"));
     }
 }

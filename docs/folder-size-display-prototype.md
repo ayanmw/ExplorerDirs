@@ -130,3 +130,16 @@ dotnet run --project src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.cspro
 ```
 
 后续重点为原生 Release 参数、诊断记录开销、冷值/首次排序与未索引场景，再集中进行菜单、文件操作、重命名、拖放和可见体验验收；不覆盖现有 temp.86 预览。
+
+
+## 原生 Release 构建对齐
+
+2026-11-04 后续独立批次：产品原生脚本现接收 Debug/Release（默认 Release），分别使用 `/Od /D_DEBUG /MDd` 与 `/O2 /DNDEBUG /MD`；Debug 输出独立为 `native-product-x64-debug`，保留现有 Release 路径。诊断 DLL 同样使用 Release 参数，避免将未优化诊断库与优化产品库直接比较。版本信息嵌入并显示原生参数与功能宏，构建身份后台检查验证实际程序集元数据。
+
+Debug、Release 构建均 0 警告/0 错误；先 Release、再 Debug、再后台门槛中的 Release，两个应用输出的 DLL SHA-256 均与各自原生产物相同，且两种配置不同。链接启用 `/Brepro` 后，同一路径同环境同参数连续两次原生 Release 编译 SHA-256 相同（`native-repeat-hash.log`）。这只验证本机原生 DLL 的重复构建，不宣称整个发布包或跨路径/工具链产物已字节一致。
+
+25 项后台门槛全部通过：`src/.state/background-checks/20261104-143114-3424c20edbff454597f766f2886db70b/summary.json`。构建与检查在本批次未提交工作快照上执行，报告保留源码状态。
+
+相同 4×1,025 无通知身份记录负载，热读取 `[1.95, 1.89, 1.92, 2.18]` ms，值就绪 `[1568,821,623,598]` ms，保存排序等待 `[2173,1040,823,319]` ms。缓存仍为 4,100 条、1,508,800 B、0 淘汰。所有数值/排序/选区/焦点子检查完成，但运行期间用户输入和前台变化令整轮隔离守卫失败（exit 1）；日志 `product-four-pane-1025-optimized-release.log`。与上一批优化前编译参数的测量相比，没有足够证据宣布冷扫描/排序显著提速。
+
+优化后的实际产品 DLL 另通过内置源和真实 Everything 专用源的原生单元格、0 B、12/25 KB、失效后 40 KB、F5、列调整、数字排序、分组/取消分组、物理新增/重命名/删除及四视图销毁子检查。两轮均无前台变化，但检测到用户输入，整轮隔离保护仍记失败；日志 `product-size-display-optimized-release.log`、`product-size-everything-optimized-release.log`。不以功能子检查替代守卫或可见桌面验收，不更新发布包。

@@ -39,6 +39,10 @@ internal static class BuildIdentitySmoke
         Require(metadata.ContainsKey("BuildRuntimeIdentifier") && metadata.ContainsKey("BuildSelfContained") &&
                 metadata.ContainsKey("BuildDefineConstants") && metadata.ContainsKey("BuildTags"),
             "binary records the runtime, self-contained, compiler-constant and build-tag parameters");
+        Require(metadata.GetValueOrDefault("NativeBuildParameters") is { } nativeParameters &&
+                nativeParameters.Contains("Release: /O2 /DNDEBUG /MD", StringComparison.Ordinal) &&
+                nativeParameters.Contains("/Brepro", StringComparison.Ordinal),
+            "binary records the optimized native Shell build parameters");
         Require(informationVersion.Contains("+" + commit, StringComparison.Ordinal),
             "informational version identifies the same source commit");
         Require(!metadata.Keys.Any(key => key.Contains("BuildTime", StringComparison.Ordinal)),
