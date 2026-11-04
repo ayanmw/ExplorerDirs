@@ -2318,6 +2318,9 @@ namespace
         }
         ~SyntheticCompareCallbackScope() { g_syntheticCompareCallbackActive = previous; }
     };
+    // Internal readiness only; never exposed as a visible/persisted Shell column.
+    constexpr PROPERTYKEY kFolderSizeReadinessKey =
+    { { 0x8C5EDFF0, 0x4438, 0x4C0C, { 0xAF, 0x50, 0xA2, 0xF6, 0x97, 0xF1, 0x68, 0x90 } }, 1 };
     constexpr PROPERTYKEY kSyntheticRecursiveSizeKey =
     { { 0x7E1F84B7, 0xC052, 0x4E51, { 0x8A, 0x3C, 0x86, 0x92, 0x54, 0xA6, 0xB9, 0x10 } }, 1 };
     constexpr PROPERTYKEY kSyntheticRelativeSizeKey =
@@ -4439,7 +4442,28 @@ namespace
             if (!child) return E_INVALIDARG;
             VariantInit(value);
             ED_SIZE_TRACE("details-ex-key", this, child->name, key->pid, key->fmtid.Data1, child->size);
-            if (*key == kSyntheticRelativeSizeKey &&
+            if (*key == kFolderSizeReadinessKey)
+            {
+                // 0=pending, 1=available, 2=terminal unavailable. Read only cached
+                // identity-matched results; the preceding Size read schedules work.
+                value->vt = VT_UI4;
+                value->ulVal = 0;
+                if (!(child->attributes & FILE_ATTRIBUTE_DIRECTORY)) value->ulVal = 1;
+                else if (!InterlockedCompareExchange(&g_folderSizeEnabled, 0, 0) ||
+                    (child->attributes & FILE_ATTRIBUTE_REPARSE_POINT)) value->ulVal = 2;
+                else if (_recursiveSizeStore)
+                {
+                    ULONGLONG bytes = 0;
+                    bool available = false;
+                    std::wstring path;
+                    bool cached = TryGetLocalRecursiveSize(child, &bytes, nullptr, &available);
+                    if (!cached) cached = SUCCEEDED(GetAbsoluteParsingName(child, &path)) &&
+                        _recursiveSizeStore->TryGet(path, child->identity, &bytes, nullptr, nullptr, nullptr, &available);
+                    if (cached) value->ulVal = available ? 1U : 2U;
+                }
+                return S_OK;
+            }
+            else if (*key == kSyntheticRelativeSizeKey &&
                 InterlockedCompareExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0, 0))
             {
                 value->vt = VT_R8;

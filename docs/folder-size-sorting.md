@@ -374,3 +374,15 @@ Current grouped recovery now materializes native grouping on its existing deadli
 Limitation: terminal unknown is not distinguishable from pending through this Shell value contract, so materialization can wait the existing 30-second bound. This fixes permanent missing grouping, not prompt unavailable-state startup. Real Everything IPC failure and visible timing remain separate acceptance boundaries. No release.
 
 Final background gate: 30/30 passed, src/.state/background-checks/20261105-044326-e5c3efab3fa544d79fa14455163f098e/summary.json. No visible UI or real publication.
+
+
+### 2026-11-05 Terminal unknown readiness without the 30-second wait
+
+Added an internal provider-only GetDetailsEx key {8c5edff0-4438-4c0c-af50-a2f697f16890}:1, VT_UI4: 0=pending, 1=available, 2=terminal unavailable. It reads existing identity-matched local/shared snapshots and never schedules scans itself. The preceding standard Size query retains scheduling. It is not a visible column, persisted option or new DLL export. Standard PKEY_Size still returns VT_EMPTY for unknown. Disabled totals/reparse folders expose terminal unavailable; files expose available. Older adapters that do not understand the private key retain the bounded deadline fallback.
+
+Grouped raw readiness accepts status 2 after standard Size is empty, without accepting it as a numeric value. Other sort/readiness paths retain previous behavior. The VARIANT reader checks VT_UI4 and the low 32 bits only, not undefined upper union bytes.
+
+Tightened read-unknown to require native group materialization within 5 seconds. unknown-prompt-red.log failed on the previous 30-second implementation. unknown-prompt-final.log passed: 473 ms from post-navigation wait through group/rows/readiness assertions, enabled=1/count=1, both Size cells em dash, terminal-unknown accepted for grouped preparation while numeric readiness remains null. This is a local two-folder injected-provider result, not a general performance guarantee or real Everything IPC test. unknown-status-known-regression.log passed actual four-host persisted settings/initial row order and cleanup guards. No visible UI or publication.
+
+
+Background evidence: 20261105-044915-4f3da3c8a1774a6391a70afbc6c62e0c had 29 successful checks and failed the final publish-isolation fixture at Directory.Move with access denied on its temporary staging directory. No real releases were touched. An unchanged targeted scripts/publish-smoke.ps1 rerun exited 0 (size-status-publish-recheck.log). Cause of the initial denial remains unproven; this is not recorded as a single all-green 30-check run. No source change was made to bypass the publishing check.

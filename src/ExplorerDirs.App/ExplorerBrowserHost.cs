@@ -3275,7 +3275,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     // A saved Size sort remains valid when the display column is hidden.
                     var count = ReadDirectoryMonitorItemCount();
                     if (count is null or < 0) { timer.Start(); return; }
-                    var ready = await ShellSizeSortOrder.AreValuesReadyAsync(view, count.Value, IsCurrent);
+                    var ready = await ShellSizeSortOrder.AreValuesReadyAsync(view, count.Value, IsCurrent, allowUnavailable: grouped);
                     readinessItemCount = count;
                     readinessFoundPendingValue = ready != true;
                 }

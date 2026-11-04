@@ -10,11 +10,11 @@ internal static class ShellSizeSortOrder
     internal static async Task<bool?> IsOrderedAsync(nint view, int expectedCount, int direction, bool mixed, Func<bool> isCurrent)
         => await ReadRowsAsync(view, expectedCount, direction, mixed, isCurrent, true);
 
-    internal static Task<bool?> AreValuesReadyAsync(nint view, int expectedCount, Func<bool> isCurrent)
-        => ReadRowsAsync(view, expectedCount, 1, false, isCurrent, false);
+    internal static Task<bool?> AreValuesReadyAsync(nint view, int expectedCount, Func<bool> isCurrent, bool allowUnavailable = false)
+        => ReadRowsAsync(view, expectedCount, 1, false, isCurrent, false, allowUnavailable);
 
     private static async Task<bool?> ReadRowsAsync(nint view, int expectedCount, int direction, bool mixed,
-        Func<bool> isCurrent, bool checkOrder)
+        Func<bool> isCurrent, bool checkOrder, bool allowUnavailable = false)
     {
         if (!isCurrent()) return null;
         var folderId = new Guid("93f2f68c-1d1b-11d3-a30e-00c04f79abd1");
@@ -44,7 +44,16 @@ internal static class ShellSizeSortOrder
                         if (result < 0 || value.Type != 21)
                         {
                             if (checkOrder) return null;
-                            pending = true;
+                            var terminalUnavailable = false;
+                            if (allowUnavailable)
+                            {
+                                var statusKey = new NativeKey { FormatId = new Guid("8c5edff0-4438-4c0c-af50-a2f697f16890"), Id = 1 };
+                                var statusResult = At<GetDetails>(folder, 17)(folder, item, in statusKey, out var status);
+                                try { terminalUnavailable = statusResult >= 0 && status.Type == 19 && unchecked((uint)status.Bytes) == 2; } // VT_UI4
+                                finally { VariantClear(ref status); }
+                                if (!isCurrent()) return null;
+                            }
+                            pending |= !terminalUnavailable;
                         } // VT_UI8; keep reading to queue every folder.
                         bytes = value.Bytes;
                     }

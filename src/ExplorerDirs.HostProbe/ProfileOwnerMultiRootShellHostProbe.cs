@@ -451,8 +451,9 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             if (_unavailableSizes)
             {
                 var firstWindow = (nint)hostViewWindow.GetValue(hosts[0])!;
+                var unknownGroupWait = Stopwatch.StartNew();
                 WaitUntil(() => ShellProviderLocationProbe.IsNativeGroupingEnabled(firstWindow),
-                    TimeSpan.FromSeconds(36), "Unavailable size values left saved grouping unmaterialized after its bounded recovery.");
+                    TimeSpan.FromSeconds(5), "Confirmed unavailable size values did not materialize grouping promptly.");
                 var state = hostType.GetMethod("CaptureViewState")!.Invoke(hosts[0], null)!;
                 if (!Equals(state.GetType().GetProperty("GroupKey")!.GetValue(state), replayViews[0].GetType().GetProperty("GroupKey")!.GetValue(replayViews[0])))
                     throw new InvalidOperationException("Unknown size grouping lost the saved group key.");
@@ -464,7 +465,22 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 }, TimeSpan.FromSeconds(10), "Unknown-size native refresh did not restore its rows.");
                 if (unknownCells.Length != 2 || unknownCells.Any(row => !string.IsNullOrWhiteSpace(row[1]) && row[1] != "—"))
                     throw new InvalidOperationException($"Unavailable size cells: {string.Join("/", unknownCells.Select(row => string.Join("|", row)))}.");
-                Console.WriteLine($"product-unavailable-size-grouping: preserved=True; {ShellProviderLocationProbe.ReadNativeGroupingState(firstWindow)}");
+                var readinessType = appAssembly.GetType("ExplorerDirs.App.ShellSizeSortOrder", true)!;
+                var view = (nint)hostType.GetMethod("GetFolderView2Pointer", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(hosts[0], null)!;
+                try
+                {
+                    bool? ReadReady(bool allowUnknown)
+                    {
+                        var task = (System.Threading.Tasks.Task<bool?>)readinessType.GetMethod("AreValuesReadyAsync", BindingFlags.Static | BindingFlags.NonPublic)!
+                            .Invoke(null, [view, 2, new Func<bool>(() => true), allowUnknown])!;
+                        WaitUntil(() => task.IsCompleted, TimeSpan.FromSeconds(5), "Raw readiness query did not complete.");
+                        return task.GetAwaiter().GetResult();
+                    }
+                    WaitUntil(() => ReadReady(true) == true, TimeSpan.FromSeconds(5), "Completed unknown state was treated as pending.");
+                    if (ReadReady(false) is not null) throw new InvalidOperationException("Unknown values were accepted as numeric Size values.");
+                }
+                finally { if (view != 0) Marshal.Release(view); }
+                Console.WriteLine($"product-unavailable-size-grouping: elapsed-ms={unknownGroupWait.ElapsedMilliseconds}; terminal-unknown-readiness=True; numeric-unknown-rejected=True; preserved=True; {ShellProviderLocationProbe.ReadNativeGroupingState(firstWindow)}");
                 return 0;
             }
 
