@@ -6,7 +6,7 @@ using System.Runtime.Loader;
 // Loading HostProbe here keeps its WPF/App types out of the desktop-monitor thread.
 internal static class ProductFourPaneHostProbe
 {
-    internal static int Run(string hostProbePath, bool large = false, bool observeNotifications = true, bool forceSortDeadline = false, string? sortContextAdapter = null, bool inputDuringSort = false, bool commandDuringSort = false, bool renameDuringSort = false, bool reconcileUserSort = false, bool retrySort = false)
+    internal static int Run(string hostProbePath, bool large = false, bool observeNotifications = true, bool forceSortDeadline = false, string? sortContextAdapter = null, bool inputDuringSort = false, bool commandDuringSort = false, bool renameDuringSort = false, bool reconcileUserSort = false, bool retrySort = false, uint userSortMode = 3)
     {
         hostProbePath = Path.GetFullPath(hostProbePath);
         var directory = Path.GetDirectoryName(hostProbePath)!;
@@ -23,7 +23,7 @@ internal static class ProductFourPaneHostProbe
             // workload, including notification identity observation and saved sorts.
             return (int)run.Invoke(null, sortContextAdapter is null
                 ? [false, large ? 1025 : 0, large, 8192, large && observeNotifications, forceSortDeadline]
-                : [sortContextAdapter])!;
+                : reconcileUserSort ? [sortContextAdapter, userSortMode] : [sortContextAdapter])!;
         }
         catch (TargetInvocationException error) when (error.InnerException is not null)
         {

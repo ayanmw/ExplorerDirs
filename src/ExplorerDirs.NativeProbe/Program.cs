@@ -72,6 +72,9 @@ internal static class Program
             return PrivateDesktopShellProbe.RunProductFourPaneHost(deadlineHostProbe, forceSortDeadline: true);
         if (args is ["--product-sort-retry-host-private-desktop", var retryHostProbe, var retryHostAdapter])
             return PrivateDesktopShellProbe.RunProductSortRetryHost(retryHostProbe, retryHostAdapter);
+        if (args is ["--product-user-sort-host-private-desktop", var modeHostProbe, var modeHostAdapter, var requestedSortMode] &&
+            uint.TryParse(requestedSortMode, out var sortMode) && sortMode is 1 or 3 or 4)
+            return PrivateDesktopShellProbe.RunProductUserSortHost(modeHostProbe, modeHostAdapter, sortMode);
         if (args is ["--product-user-sort-host-private-desktop", var userSortHostProbe, var userSortHostAdapter])
             return PrivateDesktopShellProbe.RunProductUserSortHost(userSortHostProbe, userSortHostAdapter);
         if (args is ["--product-sort-rename-host-private-desktop", var renameHostProbe, var renameHostAdapter])

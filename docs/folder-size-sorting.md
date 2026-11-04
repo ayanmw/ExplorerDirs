@@ -254,3 +254,14 @@ initial-sort-stability-1.log重现原问题且隔离守卫通过：第三窗格�
 sort-retry-injection.log、恢复源码后的sort-retry-restored.log均整项exit0：两次injected-wrong-row-order，出现原生命令retry-incorrect-row-order，重试后finish，连续选择和后续用户方向保持，私有计数归零。App/HostProbe/NativeProbe Release构建0警告0错误，diff检查通过。
 
 负对照sort-retry-disabled.log只临时将触发阈值改为int.MaxValue；两次注入仍发生但无retry，探针因未观察到重试后完成而超时退出1，前台/输入守卫干净。源码及二进制已恢复原阈值2，未留下禁用分支。该对照证明探针能区分重试被禁用，不等价于可稳定控制Windows自身产生错误行序；自然偶发机制及最终可见稳定性仍保留边界。本批不重跑或扩大宣称30项后台门槛，不发布。
+
+
+### 2026-11-05 图标及详细信息列头入口
+
+用户排序探针增加可选第四参数1/3/4（图标/列表/详细信息），省略仍为列表；先读回真实原生模式再执行分类/混合升降序断言。sort-mode-large-icons.log整项通过，实际FVM_ICON/96。前两轮32像素请求读回FVM_SMALLICON/32（sort-mode-icons-readback.log），是原生模式规范化，未更改产品来强行保留Mode=1；探针改用应用既有大图标96以明确覆盖图标路径。
+
+sort-mode-details-ready.log整项通过：详细信息原生菜单四种策略/方向、真实Header左右键消息中的列头左键点击两次分别升/降，最终大小行序和folder-small选区均保持，隔离守卫干净。不使用全局输入。sort-mode-list-final.log使用无模式参数的原入口完整通过，保持向后兼容。
+
+详细信息首轮sort-mode-details-header.log在策略校验读到pending时错误地按失败处理。ReadSettledOrder现仅在该正反策略对照中等待非null；仍要求正确策略true、相反策略false，行数变化/退休专用对照仍要求立即返回null，不改变产品的三态语义。产品实现本批无变化。
+
+边界：以上为单真实宿主加跨目录历史的隔离入口，不替代可见菜单动画、物理列头/键盘、DPI与大目录成本验收。鼠标列头已验证，不扩大为所有键盘触发路径。常规DLL能力激活和混合选项入口仍待实现，temp.86不发布。本批构建/定向用例通过，不宣称重跑30项总检。

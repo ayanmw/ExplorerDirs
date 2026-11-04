@@ -35,11 +35,13 @@ internal static class ProfileOwnerMultiRootShellHostProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)]
     private delegate int ReadProbeComparison(int index, StringBuilder text, uint capacity);
     private static bool _reconcileUserSort;
-    internal static int RunUserSortReconciliationForProbe(string adapterPath)
+    private static uint _userSortMode = 3;
+    internal static int RunUserSortReconciliationForProbe(string adapterPath, uint mode)
     {
         _reconcileUserSort = true;
+        _userSortMode = mode;
         try { return RunWithSortContextForProbe(adapterPath); }
-        finally { _reconcileUserSort = false; }
+        finally { _reconcileUserSort = false; _userSortMode = 3; }
     }
 
     private static bool _renameDuringSort;
@@ -533,6 +535,16 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 if (task.IsFaulted) throw task.Exception!;
                 return task.GetType().GetProperty("Result")!.GetValue(task);
             }
+            object ReadSettledOrder(object?[] arguments)
+            {
+                object? result = null;
+                WaitUntil(() =>
+                {
+                    result = ReadVerifiedOrder(arguments);
+                    return result is not null;
+                }, TimeSpan.FromSeconds(5), "Native rows stayed unavailable during policy verification.");
+                return result!;
+            }
             for (var index = 0; index < hosts.Count; index++)
             {
                 var orderView = (nint)hostType.GetMethod("GetFolderView2Pointer", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(hosts[index], null)!;
@@ -670,9 +682,12 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 }, TimeSpan.FromSeconds(8), "Sort category fixture did not enumerate its third row.");
                 PumpDispatcher(TimeSpan.FromMilliseconds(500));
                 var styleType = appAssembly.GetType("ExplorerDirs.App.ViewStyle", true)!;
-                if (!(bool)hostType.GetMethod("SetViewStyle")!.Invoke(host, [Activator.CreateInstance(styleType, ["List", 3u, -1])])!)
-                    throw new InvalidOperationException("Could not select list mode for native command reconciliation.");
+                if (!(bool)hostType.GetMethod("SetViewStyle")!.Invoke(host, [Activator.CreateInstance(styleType, ["Probe", _userSortMode, _userSortMode == 1 ? 96 : -1])])!)
+                    throw new InvalidOperationException("Could not select requested mode for native command reconciliation.");
                 PumpDispatcher(TimeSpan.FromMilliseconds(250));
+                var actualMode = hostType.GetMethod("ReadViewStyle", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(host, null)!;
+                if ((uint)actualMode.GetType().GetField("Item1")!.GetValue(actualMode)! != _userSortMode)
+                    throw new InvalidOperationException($"The native mode did not match the requested sort fixture: requested={_userSortMode}; actual={actualMode}.");
                 // Use the actual Shell menu without the host's programmatic-sort suppression.
                 var menu = hostType.GetMethod("OpenFileCommandMenu", BindingFlags.Instance | BindingFlags.NonPublic, null, [typeof(bool), typeof(bool)], null)!
                     .Invoke(host, [true, true]) ?? throw new InvalidOperationException("No native background menu.");
@@ -702,7 +717,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                     throw new InvalidOperationException($"Menu did not retain a complete standard size sort: {sortKey}.");
                 if ((int)sort.GetType().GetProperty("Direction")!.GetValue(sort)! != -1)
                     throw new InvalidOperationException("Expected actual descending sort state after native menu command.");
-                Console.WriteLine("product-user-sort-reconciliation: mode=list; native-menu=True; folders-first=True; descending-values=29|5|17");
+                Console.WriteLine($"product-user-sort-reconciliation: mode={_userSortMode}; native-menu=True; folders-first=True; descending-values=29|5|17");
                 var contextField = hostType.GetField("_folderSizeSortContext", BindingFlags.Instance | BindingFlags.NonPublic)!;
                 var context = contextField.GetValue(host)!;
                 var activeView = (nint)hostType.GetMethod("GetFolderView2Pointer", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(host, null)!;
@@ -778,14 +793,43 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                     var policyView = (nint)hostType.GetMethod("GetFolderView2Pointer", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(host, null)!;
                     try
                     {
-                        if (!Equals(ReadVerifiedOrder([policyView, 3, direction, mixed, new Func<bool>(() => true)]), true) ||
-                            !Equals(ReadVerifiedOrder([policyView, 3, direction, !mixed, new Func<bool>(() => true)]), false))
+                        if (!Equals(ReadSettledOrder([policyView, 3, direction, mixed, new Func<bool>(() => true)]), true) ||
+                            !Equals(ReadSettledOrder([policyView, 3, direction, !mixed, new Func<bool>(() => true)]), false))
                             throw new InvalidOperationException("Native order verifier did not distinguish mixed and folder-first rows.");
                     }
                     finally { if (policyView != 0) Marshal.Release(policyView); }
                     Console.WriteLine($"product-user-sort-policy-switch: mixed={mixed}; direction={direction}; names={string.Join('|', expectedNames)}");
                 }
 
+                if (_userSortMode == 4)
+                {
+                    var header = (nint)typeof(ShellProviderLocationProbe).GetMethod("FindSortHeader", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, [window])!;
+                    var click = typeof(ShellProviderLocationProbe).GetMethod("ClickHeaderColumn", BindingFlags.Static | BindingFlags.NonPublic)!;
+                    var displayColumns = ((System.Collections.IEnumerable)captured.GetType().GetProperty("DisplayColumns")!.GetValue(captured)!).Cast<object>().ToArray();
+                    var sizeHeaderIndex = Array.FindIndex(displayColumns, column => Equals(column.GetType().GetProperty("Key")!.GetValue(column), sortKey));
+                    if (sizeHeaderIndex < 0) throw new InvalidOperationException("No size column in detailed view.");
+                    selectItem.Invoke(null, [hostType, host, Path.Combine(folders[0], "folder-small")]);
+                    foreach (var headerDirection in new[] { 1, -1 })
+                    {
+                        click.Invoke(null, [header, sizeHeaderIndex]);
+                        string[] expectedHeaderNames = headerDirection > 0
+                            ? ["folder-small", "folder-large", "file-middle.bin"]
+                            : ["folder-large", "folder-small", "file-middle.bin"];
+                        WaitUntil(() =>
+                        {
+                            var rows = readNativeRows.Invoke(null, [window])!;
+                            if (!((string[])rows.GetType().GetField("Item2")!.GetValue(rows)!).SequenceEqual(expectedHeaderNames)) return false;
+                            var headerState = hostType.GetMethod("CaptureViewState")!.Invoke(host, null)!;
+                            var headerSort = ((System.Collections.IEnumerable)headerState.GetType().GetProperty("SortColumns")!.GetValue(headerState)!).Cast<object>().Single();
+                            return (int)headerSort.GetType().GetProperty("Direction")!.GetValue(headerSort)! == headerDirection &&
+                                !(bool)hostType.GetProperty("ViewCaptureFailed")!.GetValue(host)!;
+                        }, TimeSpan.FromSeconds(8), $"Native size header click did not retain folder-first direction {headerDirection}.");
+                        var afterHeaderSelection = readSelection.Invoke(null, [window])!;
+                        if (!((string[])afterHeaderSelection.GetType().GetField("Item1")!.GetValue(afterHeaderSelection)!).SequenceEqual(["folder-small"]))
+                            throw new InvalidOperationException("Header reconciliation lost the selected file identity.");
+                        Console.WriteLine($"product-user-sort-header: direction={headerDirection}; actual-row-order=True; selected-folder-preserved=True");
+                    }
+                }
             }
             return 0;
         }

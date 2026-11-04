@@ -55,8 +55,8 @@ internal static class PrivateDesktopShellProbe
     internal static int RunProductSortRetryHost(string hostProbePath, string adapterPath) => Run("product-sort-retry-host",
         () => ProductFourPaneHostProbe.Run(hostProbePath, sortContextAdapter: adapterPath, retrySort: true), TimeSpan.FromSeconds(90), initializeOle: true);
 
-    internal static int RunProductUserSortHost(string hostProbePath, string adapterPath) => Run("product-user-sort-host",
-        () => ProductFourPaneHostProbe.Run(hostProbePath, sortContextAdapter: adapterPath, reconcileUserSort: true), TimeSpan.FromSeconds(90), initializeOle: true);
+    internal static int RunProductUserSortHost(string hostProbePath, string adapterPath, uint mode = 3) => Run("product-user-sort-host",
+        () => ProductFourPaneHostProbe.Run(hostProbePath, sortContextAdapter: adapterPath, reconcileUserSort: true, userSortMode: mode), TimeSpan.FromSeconds(90), initializeOle: true);
 
     internal static int RunProductSortRenameHost(string hostProbePath, string adapterPath) => Run("product-sort-rename-host",
         () => ProductFourPaneHostProbe.Run(hostProbePath, sortContextAdapter: adapterPath, renameDuringSort: true), TimeSpan.FromSeconds(90), initializeOle: true);
