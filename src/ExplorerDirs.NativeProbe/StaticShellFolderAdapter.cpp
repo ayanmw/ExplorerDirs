@@ -65,7 +65,7 @@ static void InvalidateManagedFolderSize(PCWSTR path)
 
 namespace
 {
-#if defined(EXPLORERDIRS_SIZE_TEXT_EXPERIMENT)
+#if defined(EXPLORERDIRS_FOLDER_SIZE_DISPLAY)
     std::atomic<ULONG_PTR> g_sizeDisplayCookie{0};
 #endif
 #if defined(EXPLORERDIRS_SIZE_TRACE_EXPERIMENT)
@@ -2027,7 +2027,7 @@ namespace
     std::mutex g_productAsyncItemNotificationIdentityMutex;
     std::vector<std::wstring> g_productAsyncItemNotificationIdentities;
     volatile LONG g_productViewItemNotificationCallbacks = 0;
-    volatile LONG g_productViewNotificationsUseSyntheticRoot = 0;
+    volatile LONG g_productViewNotificationsUseSyntheticRoot = 1;
     volatile LONG g_productViewGetNotifyCalls = 0;
     volatile LONG g_productViewGetNotifyEventMask = 0;
     std::mutex g_productViewItemNotificationIdentityMutex;
@@ -3318,9 +3318,9 @@ namespace
             if (FAILED(result)) { CoTaskMemFree(backingRoot); CoTaskMemFree(copy); return result; }
             if (_root) CoTaskMemFree(_root);
             _root = copy;
-#if defined(EXPLORERDIRS_NOTIFICATION_BRIDGE_EXPERIMENT)
-            if (_profileNotificationRoot) CoTaskMemFree(_profileNotificationRoot);
-            _profileNotificationRoot = nullptr;
+#if defined(EXPLORERDIRS_PROVIDER_VIEW_NOTIFICATIONS)
+            if (_viewNotificationRoot) CoTaskMemFree(_viewNotificationRoot);
+            _viewNotificationRoot = nullptr;
 #endif
             if (_backingRoot) CoTaskMemFree(_backingRoot);
             _backingRoot = backingRoot;
@@ -3397,6 +3397,10 @@ namespace
                     invalidate(pidls[0]);
                     if (event == SHCNE_RENAMEITEM || event == SHCNE_RENAMEFOLDER) invalidate(pidls[1]);
                 }
+#if defined(EXPLORERDIRS_NATIVEPROBE)
+                // Legacy prototype timers depend on its held-view table and can
+                // broadcast full-directory updates. Product views forward item IDs
+                // directly and must not enter this path during automatic soft updates.
                 if (InterlockedCompareExchange(&g_syntheticTranslateChildNotificationsForProbe, 0, 0) &&
                     ShouldTranslateSyntheticChildNotification(static_cast<LONG>(lParam)))
                 {
@@ -3405,6 +3409,7 @@ namespace
                     const auto scheduleResult = ScheduleBackingDirectoryUpdate();
                     if (FAILED(scheduleResult)) TraceSyntheticSortStage("synthetic-sort: child-notification-parent-update-schedule-failed");
                 }
+#endif
                 // E_NOTIMPL lets DefView continue its default filesystem update handling.
                 return E_NOTIMPL;
             }
@@ -3420,7 +3425,7 @@ namespace
                 TraceSizeViewChild(reinterpret_cast<HWND>(wParam), reinterpret_cast<LPARAM>(this));
                 EnumChildWindows(reinterpret_cast<HWND>(wParam), TraceSizeViewChild, reinterpret_cast<LPARAM>(this));
 #endif
-#if defined(EXPLORERDIRS_NOTIFICATION_BRIDGE_EXPERIMENT)
+#if defined(EXPLORERDIRS_PROVIDER_VIEW_NOTIFICATIONS)
                 return AttachBackingNotifications(reinterpret_cast<HWND>(wParam));
 #endif
             }
@@ -3449,15 +3454,17 @@ namespace
 #else
             // Completed size values use provider item identities. Physical events
             // arrive through the separate registration attached to the view window.
-#if !defined(EXPLORERDIRS_NOTIFICATION_BRIDGE_EXPERIMENT)
+#if !defined(EXPLORERDIRS_PROVIDER_VIEW_NOTIFICATIONS)
             *reinterpret_cast<PIDLIST_ABSOLUTE*>(wParam) = _backingRoot;
 #else
-            // A directory-marker subscription loses notifications even though a global
-            // observer receives the intact provider PIDL. Subscribe at the profile CLSID
-            // ancestor; DefView still receives the complete item identity for filtering.
-            if (!_profileNotificationRoot) _profileNotificationRoot = ILCloneFirst(_root);
-            if (!_profileNotificationRoot) return E_OUTOFMEMORY;
-            *reinterpret_cast<PIDLIST_ABSOLUTE*>(wParam) = _profileNotificationRoot;
+            // DefView matches direct children of its monitored folder. A broad profile
+            // observer can receive notifications while the native view fails to apply
+            // descendants of encoded directory roots. Real list probes require the
+            // current directory scope, rather than only proving observer delivery.
+            if (!_viewNotificationRoot)
+                _viewNotificationRoot = ILCloneFull(_root);
+            if (!_viewNotificationRoot) return E_OUTOFMEMORY;
+            *reinterpret_cast<PIDLIST_ABSOLUTE*>(wParam) = _viewNotificationRoot;
 #endif
             *reinterpret_cast<LONG*>(lParam) = SHCNE_ALLEVENTS;
 #endif
@@ -3635,6 +3642,7 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE EnumObjects(HWND, SHCONTF flags, IEnumIDList** value) override
         {
+            ED_SIZE_TRACE("view-enumeration", this, nullptr, flags, 0, 0);
             if (!value) return E_POINTER;
             *value = nullptr;
             if (!g_syntheticSizeMetricsObservation) ED_PROBE_METRIC_INCREMENT(g_syntheticEnumObjectsCount);
@@ -3937,7 +3945,7 @@ namespace
                 _backingPath, result);
             if (SUCCEEDED(result) && *value && !_shellView)
             {
-#if defined(EXPLORERDIRS_NOTIFICATION_BRIDGE_EXPERIMENT)
+#if defined(EXPLORERDIRS_PROVIDER_VIEW_NOTIFICATIONS)
                 // Borrow the view: it owns this callback. Keeping both alive here
                 // formed a reference cycle and exhausted the prototype's 32 slots.
                 _shellView = static_cast<IShellView*>(*value);
@@ -4447,13 +4455,13 @@ namespace
             }
             return result;
         }
-#if defined(EXPLORERDIRS_NOTIFICATION_BRIDGE_EXPERIMENT)
+#if defined(EXPLORERDIRS_PROVIDER_VIEW_NOTIFICATIONS)
         static UINT SizeDisplayMessage()
         {
             static const UINT message = RegisterWindowMessageW(L"ExplorerDirs.SizeDisplayReady.v1");
             return message;
         }
-#if defined(EXPLORERDIRS_SIZE_TEXT_EXPERIMENT)
+#if defined(EXPLORERDIRS_FOLDER_SIZE_DISPLAY)
         bool IsSizeDisplayColumn(int subItem)
         {
             if (!_shellView || subItem < 0) return false;
@@ -4556,7 +4564,7 @@ namespace
             // This reference belongs to the HWND, not to the Shell view COM object.
             AddRef();
             _notificationWindow = window;
-#if defined(EXPLORERDIRS_SIZE_TEXT_EXPERIMENT)
+#if defined(EXPLORERDIRS_FOLDER_SIZE_DISPLAY)
             _sizeDisplayWindow.store(window);
 #endif
             SHChangeNotifyEntry entry{ _backingRoot, FALSE };
@@ -4567,7 +4575,7 @@ namespace
             if (!_backingNotificationRegistration)
             {
                 _notificationWindow = nullptr;
-#if defined(EXPLORERDIRS_SIZE_TEXT_EXPERIMENT)
+#if defined(EXPLORERDIRS_FOLDER_SIZE_DISPLAY)
                 _sizeDisplayWindow.store(nullptr);
 #endif
                 RemoveWindowSubclass(window, BackingNotificationProc, reinterpret_cast<UINT_PTR>(this));
@@ -4635,7 +4643,7 @@ namespace
             auto* self = reinterpret_cast<SyntheticSortFolder*>(data);
             if (message == WM_NCDESTROY)
             {
-#if defined(EXPLORERDIRS_SIZE_TEXT_EXPERIMENT)
+#if defined(EXPLORERDIRS_FOLDER_SIZE_DISPLAY)
                 self->_sizeDisplayWindow.store(nullptr);
                 self->_sizeDisplayRows.clear();
                 self->_sizeDisplayList = nullptr;
@@ -4650,7 +4658,7 @@ namespace
                 self->Release();
                 return result;
             }
-#if defined(EXPLORERDIRS_SIZE_TEXT_EXPERIMENT)
+#if defined(EXPLORERDIRS_FOLDER_SIZE_DISPLAY)
             if (message == WM_NOTIFY && lParam)
             {
                 auto* header = reinterpret_cast<NMHDR*>(lParam);
@@ -4698,7 +4706,7 @@ namespace
                     try
                     {
                         self->ForwardBackingNotification(first, second, event);
-#if defined(EXPLORERDIRS_SIZE_TEXT_EXPERIMENT)
+#if defined(EXPLORERDIRS_FOLDER_SIZE_DISPLAY)
                         self->RefreshSizeDisplayRows(window);
 #endif
                     }
@@ -4718,7 +4726,7 @@ namespace
             InterlockedExchange(&_asyncScansCancelled, 1);
             auto* view = _shellView;
             _shellView = nullptr;
-#if !defined(EXPLORERDIRS_NOTIFICATION_BRIDGE_EXPERIMENT)
+#if !defined(EXPLORERDIRS_PROVIDER_VIEW_NOTIFICATIONS)
             if (view) view->Release();
 #else
             (void)view; // Product views are borrowed, not AddRef'd by their callback.
@@ -5433,7 +5441,7 @@ namespace
                             }
                         }
 
-#if defined(EXPLORERDIRS_SIZE_TEXT_EXPERIMENT)
+#if defined(EXPLORERDIRS_FOLDER_SIZE_DISPLAY)
                         if (const auto window = self->_sizeDisplayWindow.load())
                             PostMessageW(window, SizeDisplayMessage(), self->_sizeDisplayCookie, 0);
 #endif
@@ -5910,8 +5918,8 @@ namespace
         ~SyntheticSortFolder()
         {
             ReleaseViewHold();
-#if defined(EXPLORERDIRS_NOTIFICATION_BRIDGE_EXPERIMENT)
-            if (_profileNotificationRoot) CoTaskMemFree(_profileNotificationRoot);
+#if defined(EXPLORERDIRS_PROVIDER_VIEW_NOTIFICATIONS)
+            if (_viewNotificationRoot) CoTaskMemFree(_viewNotificationRoot);
 #endif
             if (_root) CoTaskMemFree(_root);
             if (_backingRoot) CoTaskMemFree(_backingRoot);
@@ -5924,8 +5932,8 @@ namespace
         std::wstring _configuredBackingPath;
         volatile LONG _refreshAgain = 0;
         PIDLIST_ABSOLUTE _root = nullptr;
-#if defined(EXPLORERDIRS_NOTIFICATION_BRIDGE_EXPERIMENT)
-        PIDLIST_ABSOLUTE _profileNotificationRoot = nullptr;
+#if defined(EXPLORERDIRS_PROVIDER_VIEW_NOTIFICATIONS)
+        PIDLIST_ABSOLUTE _viewNotificationRoot = nullptr;
 #endif
         PIDLIST_ABSOLUTE _backingRoot = nullptr;
         IShellView* _shellView = nullptr;
@@ -5934,10 +5942,10 @@ namespace
         SyntheticRecursiveSizeSnapshotStore* _recursiveSizeStore = nullptr;
         std::vector<SyntheticChild> _pendingSelected;
         mutable std::mutex _asyncSizeScanMutex;
-#if defined(EXPLORERDIRS_NOTIFICATION_BRIDGE_EXPERIMENT)
+#if defined(EXPLORERDIRS_PROVIDER_VIEW_NOTIFICATIONS)
         HWND _notificationWindow = nullptr;
         ULONG _backingNotificationRegistration = 0;
-#if defined(EXPLORERDIRS_SIZE_TEXT_EXPERIMENT)
+#if defined(EXPLORERDIRS_FOLDER_SIZE_DISPLAY)
         std::atomic<HWND> _sizeDisplayWindow{nullptr};
         const ULONG_PTR _sizeDisplayCookie = ++g_sizeDisplayCookie;
         HWND _sizeDisplayList = nullptr;

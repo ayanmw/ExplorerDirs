@@ -26,8 +26,8 @@ $objectFile = Join-Path $outputDirectory 'StaticShellFolderAdapter.obj'
 $importLibrary = Join-Path $outputDirectory 'ExplorerDirs.ShellNamespace.lib'
 $traceDefine = if ($TraceSizeRequests) { '/DEXPLORERDIRS_SIZE_TRACE_EXPERIMENT' } else { '' }
 if ($NamespaceAttributes) { $traceDefine += ' /DEXPLORERDIRS_NAMESPACE_ATTRIBUTES_EXPERIMENT' }
-if ($DisplayText) { $traceDefine += ' /DEXPLORERDIRS_SIZE_TEXT_EXPERIMENT' }
-$command = 'call "{0}" >nul && cl.exe /nologo /LD /EHsc /DEXPLORERDIRS_NOTIFICATION_BRIDGE_EXPERIMENT {6} /W4 /WX /Fo:"{3}" "{1}" /link /DEF:"{5}" shell32.lib ole32.lib oleaut32.lib propsys.lib user32.lib advapi32.lib shlwapi.lib comctl32.lib /IMPLIB:"{4}" /OUT:"{2}"' -f $vcvars, $source, $output, $objectFile, $importLibrary, $definition, $traceDefine
+if ($DisplayText) { $traceDefine += ' /DEXPLORERDIRS_FOLDER_SIZE_DISPLAY' }
+$command = 'call "{0}" >nul && cl.exe /nologo /LD /EHsc /DEXPLORERDIRS_PROVIDER_VIEW_NOTIFICATIONS {6} /W4 /WX /Fo:"{3}" "{1}" /link /DEF:"{5}" shell32.lib ole32.lib oleaut32.lib propsys.lib user32.lib advapi32.lib shlwapi.lib comctl32.lib /IMPLIB:"{4}" /OUT:"{2}"' -f $vcvars, $source, $output, $objectFile, $importLibrary, $definition, $traceDefine
 & $env:ComSpec /d /s /c $command
 if ($LASTEXITCODE -ne 0) { throw "Product Shell-folder adapter build failed with exit code $LASTEXITCODE." }
 Write-Output "Built: $output"

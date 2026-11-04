@@ -2,7 +2,9 @@
 
 ## 当前状态
 
-最新已发布预览版为 [temp.79](D:/projects/explorer-dirs/releases/preview-0.6.0-temp.79/app/ExplorerDirs.App.exe)，使用独立 profile。它包含保留标签的隐藏标签栏、虚拟 Shell 文件夹新标签打开、文件夹入口管理窗口，以及 Explorer 重启 PID 身份保护；后台构建和发布隔离检查通过，未启动该版本，也未启用系统入口。版本详情见[temp.79 说明](docs/releases/preview-0.6.0-temp.79.md)。
+2026-11-04 开发进展：文件夹大小主动显示和当前目录通知范围已接入源码，并修复标准 Size 列的异步保存排序恢复。原生四视图的补值、F5、自动增删改名、选区及 0 次自动完整枚举检查通过；实际四个产品 WPF 宿主的单元格文字和独立排序子检查通过，该轮前台/输入保护未通过。尚未更新发布包，不据此声明 temp.86 全目标完成。详见[文件夹大小实现与证据](docs/folder-size-display-prototype.md)。以下较早发布记录保留其当时验证范围。
+
+较早的发布记录：[temp.79](D:/projects/explorer-dirs/releases/preview-0.6.0-temp.79/app/ExplorerDirs.App.exe)，使用独立 profile。它包含保留标签的隐藏标签栏、虚拟 Shell 文件夹新标签打开、文件夹入口管理窗口，以及 Explorer 重启 PID 身份保护；当时后台构建和发布隔离检查通过，未启动该版本，也未启用系统入口。版本详情见[temp.79 说明](docs/releases/preview-0.6.0-temp.79.md)。
 
 主线在 temp.79 之后新增了“编辑 → 复制所选项目完整路径”及文件视图快捷键 `Ctrl+Shift+C`，并用隐藏生产 Shell 宿主验证单选/多选路径读取。该功能尚未发布；最新 GUI 集中验收候选基于主线 `41c1a60`，位于 `src/.state/gui-smoke/20261029-212632-525-ee20a3/`，35 项可见验收仍待运行。候选记录与哈希见[最新主线验收候选](docs/gui-acceptance-2026-10-30-main-prepared-latest.md)。
 

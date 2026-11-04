@@ -68,11 +68,11 @@ internal static class ShellFileViewExportCapture
         return new FileViewExportSnapshot(snapshot.Columns, snapshot.Rows);
     }
 
-    internal static bool HasVisibleUnresolvedColumn(nint folderView, PropertyKeyState key)
+    internal static bool HasVisibleUnresolvedColumn(nint folderView, PropertyKeyState key, bool includeResolved = false)
     {
         if (ShellColumnManager.CaptureForExport(folderView, out var columns) != 0 || columns is null) return false;
-        return columns.Any(column => column.Key == key && column.Name.StartsWith('{') &&
-            column.Name.Contains("}:", StringComparison.Ordinal));
+        return columns.Any(column => column.Key == key && (includeResolved || column.Name.StartsWith('{') &&
+            column.Name.Contains("}:", StringComparison.Ordinal)));
     }
 
     internal static bool HasPendingUnresolvedColumnValues(nint folderView, nint viewWindow, PropertyKeyState key)
@@ -97,9 +97,9 @@ internal static class ShellFileViewExportCapture
     }
 
     internal static ReadinessSession? CreateReadinessSession(nint folderView, nint viewWindow,
-        PropertyKeyState key, out int itemCount)
+        PropertyKeyState key, out int itemCount, bool includeResolved = false)
     {
-        if (!TryCaptureReadinessContext(folderView, viewWindow, key, out var folder, out var ordinal, out itemCount))
+        if (!TryCaptureReadinessContext(folderView, viewWindow, key, out var folder, out var ordinal, out itemCount, includeResolved))
             return null;
         return new ReadinessSession(folderView, folder, ordinal);
     }
@@ -138,7 +138,7 @@ internal static class ShellFileViewExportCapture
     }
 
     private static bool TryCaptureReadinessContext(nint folderView, nint viewWindow, PropertyKeyState key,
-        out nint folder, out uint detailsOrdinal, out int itemCount)
+        out nint folder, out uint detailsOrdinal, out int itemCount, bool includeResolved = false)
     {
         folder = 0;
         detailsOrdinal = 0;
@@ -151,8 +151,8 @@ internal static class ShellFileViewExportCapture
         for (var index = 0; index < visibleColumns.Count; index++)
         {
             var column = visibleColumns[index];
-            if (column.Key != key || !column.Name.StartsWith('{') ||
-                !column.Name.Contains("}:", StringComparison.Ordinal)) continue;
+            if (column.Key != key || !includeResolved && (!column.Name.StartsWith('{') ||
+                !column.Name.Contains("}:", StringComparison.Ordinal))) continue;
             columnIndex = index;
             break;
         }

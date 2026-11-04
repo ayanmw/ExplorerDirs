@@ -48,8 +48,11 @@ internal static class PrivateDesktopShellProbe
 
     internal static int RunHostFilter() => Run("host-filter", ShellViewHostFilterProbe.RunForPrivateDesktop);
 
-    internal static int RunProductSizeDisplay(string adapterPath, bool explorerBrowser = false) => Run("product-size-display",
-        () => SyntheticShellSortProbe.RunProductSizeDisplay(adapterPath, explorerBrowser), TimeSpan.FromSeconds(30), initializeOle: true);
+    internal static int RunProductSizeDisplay(string adapterPath, bool explorerBrowser = false, bool rootControl = false) => Run("product-size-display",
+        () => SyntheticShellSortProbe.RunProductSizeDisplay(adapterPath, explorerBrowser, rootControl), TimeSpan.FromSeconds(30), initializeOle: true);
+
+    internal static int RunProductFourPaneHost(string hostProbePath) => Run("product-four-pane-host",
+        () => ProductFourPaneHostProbe.Run(hostProbePath), TimeSpan.FromSeconds(60), initializeOle: true);
 
     internal static int RunHostMenuCommands() => Run("host-menu-commands", ShellViewHostFilterProbe.RunMenuCommandsForPrivateDesktop);
 

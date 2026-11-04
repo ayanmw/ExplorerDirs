@@ -30,6 +30,10 @@ internal static class Program
             return PrivateDesktopShellProbe.RunProductSizeDisplay(sizeDisplayAdapter);
         if (args is ["--product-size-display-browser-private-desktop", var sizeBrowserAdapter])
             return PrivateDesktopShellProbe.RunProductSizeDisplay(sizeBrowserAdapter, explorerBrowser: true);
+        if (args is ["--product-size-display-browser-root-control-private-desktop", var sizeRootAdapter])
+            return PrivateDesktopShellProbe.RunProductSizeDisplay(sizeRootAdapter, explorerBrowser: true, rootControl: true);
+        if (args is ["--product-four-pane-host-private-desktop", var productHostProbe])
+            return PrivateDesktopShellProbe.RunProductFourPaneHost(productHostProbe);
         if (args.Length == 1 && args[0] == "--shell-namespace-profile-owners-private-desktop")
             return PrivateDesktopShellProbe.RunShellNamespaceProfileOwners();
         if (args.Length == 1 && args[0] == "--shell-link-profile-clone-private-desktop")

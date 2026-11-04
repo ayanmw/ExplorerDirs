@@ -19,6 +19,15 @@ internal static partial class FolderNavigationCallbacksProbe
                 var result = compare(folder, flags, child, child);
                 Ensure(result == 0, $"provider root marker must compare equal to itself; flags={flags:X}; hr={result:X8}");
             }
+            System.Runtime.InteropServices.Marshal.ThrowExceptionForHR(SHParseDisplayName(identity + "\\selected.txt", 0, out var leaf, 0, out _));
+            try
+            {
+                var direct = ILIsParent(pidl, leaf, true);
+                var recursive = ILIsParent(pidl, leaf, false);
+                Console.WriteLine($"Provider encoded-root ancestry: direct={direct}; recursive={recursive}; no Shell view.");
+                Ensure(direct && recursive, "encoded root must contain its own direct child for native notification matching");
+            }
+            finally { System.Runtime.InteropServices.Marshal.FreeCoTaskMem(leaf); }
         }
         finally
         {

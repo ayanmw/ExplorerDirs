@@ -2791,7 +2791,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 if (restored) _quickFilterGroupToRestore = null;
                 if (restored && (!_location.IsFileSystemLocation || IsFolderSizeProvider) && saved.GroupKey is null &&
                     saved.SortColumns.Count == 1 &&
-                    ShellFileViewExportCapture.HasVisibleUnresolvedColumn(view, saved.SortColumns[0].Key))
+                    ShellFileViewExportCapture.HasVisibleUnresolvedColumn(view, saved.SortColumns[0].Key,
+                        includeResolved: IsFolderSizeProvider && saved.SortColumns[0].Key == FolderSizeLocationPolicy.SizeColumn))
                     ScheduleInitialVirtualSort(saved.SortColumns[0], Current);
             }
         }
@@ -2910,7 +2911,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             {
                 if (!IsCurrent()) return;
                 readinessSession = ShellFileViewExportCapture.CreateReadinessSession(
-                    view, _viewWindow, sort.Key, out var capturedItemCount);
+                    view, _viewWindow, sort.Key, out var capturedItemCount,
+                    // The provider's standard Size column is named, but its folder
+                    // values are still asynchronous after restoring the saved sort.
+                    includeResolved: IsFolderSizeProvider && sort.Key == FolderSizeLocationPolicy.SizeColumn);
                 if (capturedItemCount < 0)
                 {
                     timer.Start();

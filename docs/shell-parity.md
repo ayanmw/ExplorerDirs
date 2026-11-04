@@ -1,4 +1,6 @@
-﻿2026-10-31 自有行模型属性事件合同补充：NativeProbe 的合成 adapter 事件分类现在包含 `SHCNE_ATTRIBUTES`，以便只读/隐藏等属性变化使行模型重新枚举；仅完成 classifier smoke 与编译，未创建 Shell view 或验证真实通知/绘制。它属于隔离 IShellView 迁移原型，不是当前 ExplorerBrowser 产品功能。详见[隔离调查](folder-size-column-investigation.md#2026-10-31-隔离属性变更通知分类)。
+﻿2026-11-04 文件夹大小产品接线：保留 ExplorerBrowser/原生 DefView，通过标准 PKEY_Size 和实际行 PIDL 补充目录显示文字；订阅当前目录而非整个 profile，以让原生列表应用条目通知。原生四视图自动增删改名、选区/焦点及零完整枚举通过，隔离保护同轮通过。标准 Size 的保存排序恢复原先被 GUID 标题条件排除，现针对 provider 开放命名列就绪检查；四个实际 WPF 宿主的大小显示、独立升降序和选区子检查通过，但该轮输入保护未通过，整项不记通过。没有替换成普通列表，没有覆盖 release；菜单、拖放、主题及可见体验仍需集中验收。见 [实现与验证](folder-size-display-prototype.md)。
+
+2026-10-31 自有行模型属性事件合同补充：NativeProbe 的合成 adapter 事件分类现在包含 `SHCNE_ATTRIBUTES`，以便只读/隐藏等属性变化使行模型重新枚举；仅完成 classifier smoke 与编译，未创建 Shell view 或验证真实通知/绘制。它属于隔离 IShellView 迁移原型，不是当前 ExplorerBrowser 产品功能。详见[隔离调查](folder-size-column-investigation.md#2026-10-31-隔离属性变更通知分类)。
 
 2026-11-01 隔离自有行模型颜色绘制：NativeProbe 的 Win32 `SysListView32` 基线把现有颜色规则 evaluator 接到 `NM_CUSTOMDRAW`，文件通配规则和 `#DIR` 文件夹规则在 Icon、Details、SmallIcon、List、Tile、Content 六种样式下均生成预期的未选中行背景色；选中行交由默认绘制以保持系统选择外观。Release 构建、规则 smoke 和 Private Desktop watchdog 通过。此为自绘列表原型证据，不是 ExplorerBrowser/DefView/Q-Dir `.qdr` 导入接线，也没有可见 UI 验收。
 

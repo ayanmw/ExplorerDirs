@@ -10,7 +10,7 @@ internal static partial class FolderNavigationCallbacksProbe
         var folderId = new Guid("93f2f68c-1d1b-11d3-a30e-00c04f79abd1");
         Marshal.ThrowExceptionForHR(SHParseDisplayName(nativeRoot + @"\size-probe", 0, out var item, 0, out _));
         nint folder = 0, callback = 0;
-        nint observedRoot = 0;
+        nint observedRoot = 0, transportRoot = 0;
         uint registration = 0, physicalControl = 0, globalControl = 0;
         var globalEvents = 0;
         var fixtureGlobalEvents = new List<string>();
@@ -93,9 +93,15 @@ internal static partial class FolderNavigationCallbacksProbe
                 observedRoot = BridgeClonePidl(Marshal.ReadIntPtr(rootOutput));
             }
             finally { Marshal.FreeCoTaskMem(rootOutput); Marshal.FreeCoTaskMem(maskOutput); }
-            Ensure(observedRoot != 0 && string.Equals(ParsingName(observedRoot), nativeRoot[..nativeRoot.IndexOf('\\')],
-                StringComparison.OrdinalIgnoreCase), "actual view callback subscribes at the profile ancestor");
-            var entry = new BridgeNotificationEntry { Pidl = observedRoot, Recursive = 1 };
+            Ensure(observedRoot != 0 && string.Equals(ParsingName(observedRoot), nativeRoot,
+                StringComparison.OrdinalIgnoreCase), "actual view callback subscribes to the current encoded directory");
+            // Keep the original profile-wide transport control: a standalone
+            // message-only subscription to an encoded directory does not receive
+            // these events. Actual direct-folder application is asserted separately
+            // by ProductSizeDisplayProbe using the real DefView, not this observer.
+            transportRoot = BridgeCloneFirstPidl(observedRoot);
+            Ensure(transportRoot != 0, "profile transport observer root can be cloned");
+            var entry = new BridgeNotificationEntry { Pidl = transportRoot, Recursive = 1 };
             registration = BridgeRegister(receiver.Handle, 0x8002, 0x7fffffff, notificationMessage, 1, ref entry);
             Ensure(registration != 0, "provider observer registration succeeds");
 
@@ -122,7 +128,7 @@ internal static partial class FolderNavigationCallbacksProbe
                 {
                     throw new InvalidOperationException($"Direct provider notification was not delivered; global-events={globalEvents}; fixture-global={string.Join(";", fixtureGlobalEvents)}; physical-events={rawNotifications}; provider-events={received.Count}", error);
                 }
-                Console.WriteLine("Direct provider notification signal: PASS (attributes, actual callback profile scope).");
+                Console.WriteLine("Direct provider notification signal: PASS (attributes, profile-wide transport control; native callback directory scope checked separately).");
             }
             using (var physicalSink = new HwndSource(new HwndSourceParameters("ExplorerDirs backing bridge fixture")
                 { ParentWindow = (nint)(-3), WindowStyle = 0, Width = 0, Height = 0 }))
@@ -189,6 +195,7 @@ internal static partial class FolderNavigationCallbacksProbe
             if (physicalControl != 0) BridgeDeregister(physicalControl);
             if (registration != 0) BridgeDeregister(registration);
             if (observedRoot != 0) Marshal.FreeCoTaskMem(observedRoot);
+            if (transportRoot != 0) Marshal.FreeCoTaskMem(transportRoot);
             if (callback != 0) Marshal.Release(callback);
             if (folder != 0) Marshal.Release(folder);
             Marshal.FreeCoTaskMem(item);
@@ -218,6 +225,7 @@ internal static partial class FolderNavigationCallbacksProbe
     [DllImport("shell32.dll", EntryPoint = "SHChangeNotification_Lock")] private static extern nint BridgeNotificationLock(nint change, uint process, out nint pidls, out int events);
     [DllImport("shell32.dll", EntryPoint = "SHChangeNotification_Unlock")] private static extern bool BridgeNotificationUnlock(nint value);
     [DllImport("shell32.dll", EntryPoint = "ILClone")] private static extern nint BridgeClonePidl(nint pidl);
+    [DllImport("shell32.dll", EntryPoint = "ILCloneFirst")] private static extern nint BridgeCloneFirstPidl(nint pidl);
     [DllImport("shell32.dll", EntryPoint = "SHChangeNotify")] private static extern void BridgeNotify(int events, uint flags, nint first, nint second);
     [DllImport("user32.dll", EntryPoint = "IsWindowVisible")] private static extern bool BridgeIsWindowVisible(nint hwnd);
 }

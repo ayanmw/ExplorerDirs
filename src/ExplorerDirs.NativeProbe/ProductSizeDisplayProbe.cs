@@ -6,7 +6,7 @@ using ExplorerDirs.NativeProbe;
 public static partial class SyntheticShellSortProbe
 {
     private static readonly List<StreamViewHost> ProductDisplayProcessLifetimeHosts = [];
-    internal static int RunProductSizeDisplay(string adapterPath, bool explorerBrowser = false)
+    internal static int RunProductSizeDisplay(string adapterPath, bool explorerBrowser = false, bool rootControl = false)
     {
         var fixture = Path.Combine(Path.GetTempPath(), "ExplorerDirs-ProductSizeDisplay-" + Guid.NewGuid().ToString("N"));
         nint root = 0, folder = 0, view = 0, parent = 0, browserPointer = 0, folderView = 0;
@@ -17,6 +17,8 @@ public static partial class SyntheticShellSortProbe
         var siblingLists = new List<(nint List, string Prefix)>();
         var displayBrowsers = new List<nint>();
         var displayBrowserViews = new List<nint>();
+        nint diagnosticModule = 0;
+        GetCounter? enumCounter = null;
         ProfileShellNamespaceOwner? owner = null;
         StreamViewHost? host = null;
         try
@@ -31,8 +33,13 @@ public static partial class SyntheticShellSortProbe
             Directory.CreateDirectory(Path.Combine(fixture, "folder-empty"));
             var classId = Guid.NewGuid();
             owner = ProfileShellNamespaceOwner.Start(classId, fixture, Path.GetFullPath(adapterPath));
+            diagnosticModule = NativeLibrary.Load(Path.GetFullPath(adapterPath));
+            if (NativeLibrary.TryGetExport(diagnosticModule, "GetProductSyntheticEnumStarted", out var counter))
+                enumCounter = Marshal.GetDelegateForFunctionPointer<GetCounter>(counter);
             owner.SetFolderSizeSource(FolderSizeSource.BuiltIn, true);
-            Check(SHParseDisplayName(CreatePathIdentityParsingName(classId, fixture), 0, out root, 0, out _));
+            var mainIdentity = rootControl ? $"::{{{classId:D}}}" : CreatePathIdentityParsingName(classId, fixture);
+            Console.WriteLine($"product-size-display-identity: encoded-root={!rootControl}");
+            Check(SHParseDisplayName(mainIdentity, 0, out root, 0, out _));
             Check(BindProductDisplayFolder(0, root, 0, in ShellFolder2Id, out folder));
             var viewId = new Guid("000214E3-0000-0000-C000-000000000046");
             parent = CreateWindowExW(0, "STATIC", "ExplorerDirs product size display on private Desktop",
@@ -86,7 +93,7 @@ public static partial class SyntheticShellSortProbe
             File.WriteAllBytes(Path.Combine(fixture, "folder-12288", "data.bin"), new byte[40 * 1024]);
             owner.InvalidateFolderSizes(fixture);
             smallPrefix = "40";
-            Check(SHParseDisplayName(CreatePathIdentityParsingName(classId, fixture) + "\\folder-12288", 0,
+            Check(SHParseDisplayName(mainIdentity + "\\folder-12288", 0,
                 out var changed, 0, out _));
             try { SHChangeNotify(ShcneUpdateitem, 0x2000, changed, 0); }
             finally { Marshal.FreeCoTaskMem(changed); }
@@ -124,6 +131,13 @@ public static partial class SyntheticShellSortProbe
             sizeEnabled = true;
             Check(At<RefreshView>(view, 8)(view));
             WaitForSizes("reenabled");
+            Check(ShellFolderViewOptions.SetNoEnumRefresh(folderView, true));
+            var anchor = Array.IndexOf(ReadColumnTextsForRows(listView, 0, 4), "file-2048.bin");
+            // Establish selection through the Shell contract, not just list paint state.
+            Check(At<SelectItem>(folderView, 15)(folderView, anchor, 0x1u | 0x4u | 0x10u));
+            Pump(150);
+            TraceAnchor("before-create");
+            var enumerationsBefore = enumCounter?.Invoke();
             Console.WriteLine("product-size-display-cells: PASS (four panes, zero, update, F5, columns, numeric ascending/descending, source off/on); automatic row qualification follows.");
             var addedFile = Path.Combine(fixture, "automatic-file.bin");
             File.WriteAllBytes(addedFile, new byte[3072]);
@@ -131,16 +145,41 @@ public static partial class SyntheticShellSortProbe
             try { SHChangeNotify(ShcneCreate, 0x2000, physicalAdded, 0); }
             finally { Marshal.FreeCoTaskMem(physicalAdded); }
             WaitForRowCount(5);
+            TraceAnchor("after-create");
             var addedNames = ReadColumnTextsForRows(listView, 0, 5);
             var addedIndex = Array.IndexOf(addedNames, "automatic-file.bin");
             if (addedIndex < 0 || ReadColumnTextsForRows(listView, sizeSubItem, 5)[addedIndex] != "3 KB")
                 throw new InvalidOperationException("Physical create notification did not append the ordinary file and size.");
-            File.Delete(addedFile);
+            var renamedFile = Path.Combine(fixture, "automatic-renamed.bin");
+            Check(SHParseDisplayName(addedFile, 0, out var oldPhysical, 0, out _));
+            File.Move(addedFile, renamedFile);
+            Check(SHParseDisplayName(renamedFile, 0, out var physicalRenamed, 0, out _));
+            try { SHChangeNotify(ShcneRenameItem, 0x2000, oldPhysical, physicalRenamed); }
+            finally { Marshal.FreeCoTaskMem(oldPhysical); }
+            WaitForName("automatic-renamed.bin");
+            TraceAnchor("after-rename");
+            CheckSiblingSizes();
+            File.Delete(renamedFile);
+            try { SHChangeNotify(ShcneDelete, 0x2000, physicalRenamed, 0); }
+            finally { Marshal.FreeCoTaskMem(physicalRenamed); }
+            WaitForRowCount(4);
+            TraceAnchor("after-delete");
             Check(SHParseDisplayName(fixture, 0, out var physicalRoot, 0, out _));
             try { SHChangeNotify(ShcneUpdatedir, 0x2000, physicalRoot, 0); }
             finally { Marshal.FreeCoTaskMem(physicalRoot); }
             WaitForRowCount(4);
             WaitForSizes("physical-notifications");
+            TraceAnchor("after-directory-update");
+            anchor = Array.IndexOf(ReadColumnTextsForRows(listView, 0, 4), "file-2048.bin");
+            var anchorState = unchecked((uint)SendMessageW(listView, LvmGetItemState, anchor, (nint)(LvisSelected | LvisFocused)));
+            if ((anchorState & (LvisSelected | LvisFocused)) != (LvisSelected | LvisFocused))
+                throw new InvalidOperationException("Automatic create/rename/delete lost the unaffected selected/focused file.");
+            if (enumerationsBefore is { } before)
+            {
+                var delta = enumCounter!() - before;
+                Console.WriteLine($"product-size-display-automatic-enumerations: delta={delta}");
+                if (delta != 0) throw new InvalidOperationException("Soft notifications re-enumerated a complete directory.");
+            }
             Console.WriteLine($"Product size display: PASS (ExplorerBrowser={explorerBrowser}; four real Shell views with one profile, independent same-name folders, 12/25 KB and zero, invalidated 40 KB update, selected/focused file preserved, F5, column reorder and numeric sorting; private Desktop).");
             return 0;
 
@@ -198,6 +237,25 @@ public static partial class SyntheticShellSortProbe
                 throw new TimeoutException($"Physical notification expected {expectedCount} rows.");
             }
 
+            void WaitForName(string expectedName)
+            {
+                var timer = Stopwatch.StartNew();
+                while (timer.Elapsed < TimeSpan.FromSeconds(5))
+                {
+                    Pump(40);
+                    if (ReadColumnTextsForRows(listView, 0, 5).Contains(expectedName)) return;
+                }
+                throw new TimeoutException("Physical rename notification did not rename the existing row.");
+            }
+
+            void TraceAnchor(string stage)
+            {
+                var count = SendMessageW(listView, LvmGetItemCount, 0, 0).ToInt32();
+                var index = Array.IndexOf(ReadColumnTextsForRows(listView, 0, count), "file-2048.bin");
+                Check(At<GetDisplayFolderFlags>(folderView, 25)(folderView, out var flags));
+                Console.WriteLine($"product-size-display-anchor: stage={stage}; index={index}; flags=0x{flags:X}; state=0x{SendMessageW(listView, LvmGetItemState, index, (nint)(LvisSelected | LvisFocused)).ToInt64():X}");
+            }
+
             void WaitForSizes(string stage)
             {
                 var timer = Stopwatch.StartNew();
@@ -245,6 +303,7 @@ public static partial class SyntheticShellSortProbe
             // private HWND/COM references to process exit, as the existing harness does.
             // Registration and fixture ownership are still cleaned explicitly.
             owner?.Dispose();
+            if (diagnosticModule != 0) NativeLibrary.Free(diagnosticModule);
             if (Directory.Exists(fixture)) Directory.Delete(fixture, true);
             foreach (var sibling in siblingFixtures)
                 if (Directory.Exists(sibling)) Directory.Delete(sibling, true);
@@ -266,4 +325,6 @@ public static partial class SyntheticShellSortProbe
     private delegate int GetDisplayBrowserView(nint self, in Guid iid, out nint view);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int DestroyDisplayBrowser(nint self);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int GetDisplayFolderFlags(nint self, out uint flags);
 }

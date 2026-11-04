@@ -58,6 +58,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             }
 
             var appAssembly = Assembly.Load("ExplorerDirs.App");
+            Console.WriteLine("profile-owner-multi-root-shell-host: stage=assembly-loaded");
             var ownerType = appAssembly.GetType("ExplorerDirs.App.ProfileShellNamespaceOwner", throwOnError: true)!;
             var adapterPath = large && diagnosticAdapter ? FindProductDiagnosticAdapter() : FindProductAdapter();
             if (large && diagnosticAdapter)
@@ -76,6 +77,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             owner = ownerType.GetMethod("Start", BindingFlags.Public | BindingFlags.Static)!
                 .Invoke(null, [classId, profile, adapterPath]);
             if (owner is not IDisposable) throw new InvalidOperationException("The production profile owner is not disposable.");
+            Console.WriteLine("profile-owner-multi-root-shell-host: stage=profile-owner-created");
 
             var codec = appAssembly.GetType("ExplorerDirs.App.QdrShellPathCodec", throwOnError: true)!;
             var hostType = appAssembly.GetType("ExplorerDirs.App.ExplorerBrowserHost", throwOnError: true)!;
@@ -98,19 +100,25 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             grid.ColumnDefinitions.Add(new ColumnDefinition());
             for (var index = 0; index < folders.Length; index++)
             {
+                Console.WriteLine($"profile-owner-multi-root-shell-host: stage=create-host-{index + 1}");
                 var identity = (string)codec.GetMethod("ToProviderIdentity", BindingFlags.Static | BindingFlags.NonPublic)!
                     .Invoke(null, [folders[index], classId])!;
                 var viewState = CreateViewState(appAssembly, index % 2 == 0 ? 1 : -1);
                 var host = (HwndHost)Activator.CreateInstance(hostType, identity, viewState)!;
+                // Match PaneControl: provider identity is paired with its owning profile.
+                hostType.GetMethod("ConfigureFolderSizeLocations", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .Invoke(host, [classId, true]);
                 hosts.Add(host);
                 Grid.SetRow(host, index / 2);
                 Grid.SetColumn(host, index % 2);
                 grid.Children.Add(host);
             }
+            Console.WriteLine("profile-owner-multi-root-shell-host: stage=create-wpf-source");
             source = new HwndSource(new HwndSourceParameters("ExplorerDirs four-pane product Shell host probe")
             {
                 WindowStyle = unchecked((int)0x80000000), Width = 960, Height = 640
             });
+            Console.WriteLine("profile-owner-multi-root-shell-host: stage=attach-root-visual");
             source.RootVisual = grid;
             grid.Measure(new Size(960, 640));
             grid.Arrange(new Rect(0, 0, 960, 640));
@@ -120,10 +128,10 @@ internal static class ProfileOwnerMultiRootShellHostProbe
 
             for (var index = 0; index < hosts.Count; index++)
             {
+                Console.WriteLine($"profile-owner-multi-root-shell-host: stage=wait-navigation-{index + 1}");
                 var host = hosts[index];
                 var currentHost = host;
-                var expectedIdentity = (string)codec.GetMethod("ToProviderIdentity", BindingFlags.Static | BindingFlags.NonPublic)!
-                    .Invoke(null, [folders[index], classId])!;
+                var expectedIdentity = folders[index]; // Product chrome keeps the logical physical directory.
                 WaitUntil(() => Equals(hostNavigated.GetValue(currentHost), true) &&
                     (nint)hostViewWindow.GetValue(currentHost)! != 0,
                     TimeSpan.FromSeconds(15), $"Product pane {index + 1} did not navigate.");
@@ -144,9 +152,16 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             {
                 var host = hosts[index];
                 var valueReadyClock = Stopwatch.StartNew();
+                Console.WriteLine($"profile-owner-multi-root-shell-host: stage=wait-values-{index + 1}");
+                var firstValueRead = true;
                 WaitUntil(() =>
                 {
                     paneValues[index] = (string[])readValues.Invoke(null, [hostType, host, expectedItemCount])!;
+                    if (firstValueRead)
+                    {
+                        Console.WriteLine($"profile-owner-multi-root-shell-host: initial-values-pane-{index + 1}=[{string.Join('|', paneValues[index].Take(4))}]");
+                        firstValueRead = false;
+                    }
                     return paneValues[index].Select(value => ulong.TryParse(value, out var bytes) ? bytes : ulong.MaxValue)
                         .Order().SequenceEqual(expectedSizes[index]);
                 }, TimeSpan.FromSeconds(45), $"Product pane {index + 1} received another pane's recursive values.",
@@ -163,6 +178,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                     throw new InvalidOperationException($"Product pane {index + 1} did not retain its own recursive column state.");
 
                 var expectedOrder = index % 2 == 0 ? expectedSizes[index] : expectedSizes[index].Reverse();
+                Console.WriteLine($"profile-owner-multi-root-shell-host: stage=wait-sort-{index + 1}");
                 var expectedNames = large
                     ? (index % 2 == 0 ? Enumerable.Range(0, expectedItemCount).Reverse() : Enumerable.Range(0, expectedItemCount))
                         .Select(itemIndex => $"folder-extra-{itemIndex:D4}").ToArray()
@@ -224,6 +240,24 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 }
             }
 
+            if (!large)
+            {
+                // Property getters can be correct while DefView leaves every folder
+                // cell blank. Assert the actual displayed text in the production host.
+                var readCells = typeof(ShellProviderLocationProbe).GetMethod("ReadNativeListViewCells",
+                    BindingFlags.Static | BindingFlags.NonPublic)!;
+                for (var index = 0; index < hosts.Count; index++)
+                {
+                    var window = (nint)hostViewWindow.GetValue(hosts[index])!;
+                    var expected = (index % 2 == 0 ? expectedSizes[index] : expectedSizes[index].Reverse())
+                        .Select(bytes => bytes + " B").ToArray();
+                    WaitUntil(() => ((string[][])readCells.Invoke(null, [window, 3])!)
+                            .Select(row => row[1]).SequenceEqual(expected), TimeSpan.FromSeconds(8),
+                        $"Product pane {index + 1} has size properties but blank/incorrect displayed folder cells.");
+                }
+                Console.WriteLine("profile-owner-multi-root-shell-host: actual-folder-size-cells=PASS (all four product HwndHosts).");
+            }
+
             // The production initial-sort timers run concurrently; inject selections only after every
             // pane has settled so this probe measures per-pane sort state, not synthetic input races.
             for (var index = 0; index < hosts.Count; index++)
@@ -271,6 +305,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
         }
         finally
         {
+            Console.WriteLine("profile-owner-multi-root-shell-host: stage=cleanup");
             if (source is not null)
             {
                 source.RootVisual = null;
