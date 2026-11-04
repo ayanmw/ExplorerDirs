@@ -65,6 +65,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private long _initialSortRecoverySerial;
     private long _initialSortTransientOwner;
     private long _initialSortStateVersion;
+    private (long Owner, Action<long> Complete)? _initialSortInputCompletion;
+    private bool _completingInitialSortInput;
     internal void EnableInitialSortRecoveryTrace() => _initialSortRecoveryTrace = [];
     internal string InitialSortRecoveryStatus => _initialSortRecoveryTrace is { } trace ? string.Join('|', trace) : "disabled";
     private void RecordInitialSortRecovery(string stage)
@@ -79,9 +81,20 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     }
     private void EndInitialSortTransient(long owner)
     {
+        if (_initialSortInputCompletion is { } completion && completion.Owner == owner)
+            _initialSortInputCompletion = null;
         if (owner == 0 || _initialSortTransientOwner != owner) return;
         _initialSortTransientOwner = 0;
         _initialSortStateVersion++;
+    }
+    private void PreserveInitialSortInput(long inputVersion, nint inputHwnd = default)
+    {
+        if (_completingInitialSortInput || _initialSortInputCompletion is not { } completion ||
+            inputHwnd == 0 || IsColumnHeaderInputWindow(inputHwnd) ||
+            inputHwnd != _viewWindow && !IsChild(_viewWindow, inputHwnd)) return;
+        _completingInitialSortInput = true;
+        try { completion.Complete(inputVersion); }
+        finally { _completingInitialSortInput = false; }
     }
     private readonly ViewStyleWheelAccumulator _ctrlWheelAccumulator = new();
     private readonly Dictionary<uint, int> _nativeUserMessages = new();
@@ -2937,6 +2950,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             timer.Stop();
             traceTicks++;
             if ((traceTicks & (traceTicks - 1)) == 0) Trace("tick");
+            // Do not reorder underneath an active inline editor or a mouse selection gesture.
+            // Navigation still retires this work immediately; resume after native input settles.
+            if (IsCurrent() && oppositeApplied && (IsRenameEditorFocused() || GetKeyState(1) < 0))
+            {
+                timer.Start();
+                return;
+            }
             if (!IsCurrent() || readinessWait.Elapsed >= TimeSpan.FromSeconds(30))
             {
                 Trace("cancel-or-deadline");
@@ -3155,7 +3175,41 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     timer.Stop();
                     FinishSortRecovery();
                 }
-                else expectedInputVersion = Interlocked.Read(ref _nativeUserInputVersion);
+                else
+                {
+                    expectedInputVersion = Interlocked.Read(ref _nativeUserInputVersion);
+                    _initialSortInputCompletion = (traceSerial, inputVersion =>
+                    {
+                        if (traceSerial != _initialSortRecoverySerial || !isCurrent()) return;
+                        expectedInputVersion = inputVersion;
+                        timer.Stop();
+                        // Let Shell apply the gesture before a direction command can empty its rows.
+                        Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+                        {
+                            if (!IsCurrent()) { FinishSortRecovery(); return; }
+                            var inputView = GetFolderView2Pointer();
+                            if (inputView == 0) { FinishSortRecovery(); return; }
+                            try
+                            {
+                                var latest = ShellViewSelectionSnapshot.Capture(inputView);
+                                if (!IsCurrent()) { latest?.Dispose(); return; }
+                                if (latest is not null)
+                                {
+                                    initialSortSelection?.Dispose();
+                                    initialSortSelection = latest;
+                                    initialSortSelectionReadiness = null;
+                                }
+                            }
+                            catch (COMException)
+                            {
+                                FinishSortRecovery();
+                                return;
+                            }
+                            finally { Marshal.Release(inputView); }
+                            if (IsCurrent()) timer.Start();
+                        }));
+                    });
+                }
                 if (oppositeApplied) timer.Start();
                 return;
             }
@@ -4303,6 +4357,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         CancelNaturalUpdateSelectionVerification();
         CancelDeferredRefreshSelectionRestore(restartDirectoryMonitor: true);
         var inputVersion = Interlocked.Increment(ref _nativeUserInputVersion);
+        PreserveInitialSortInput(inputVersion, inputHwnd);
         if (_pendingFileOperationFocusRestore is { } pendingRestore)
         {
             var sameView = ReferenceEquals(pendingRestore.Browser, _browser) &&
@@ -5920,7 +5975,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 Volatile.Read(ref _shellSortCommandDispatchDepth) > 0;
             if (!childCommandNotification && !programmaticSortCommand &&
                 message is 0x0100 or 0x0104 or 0x0111 or 0x0201 or 0x0202 or 0x0203 or 0x0204 or 0x0207)
-                NoteNativeUserInput(hwnd);
+                // Explicit native commands may change sorting; they must cancel recovery,
+                // rather than being treated as a selection gesture to restore afterward.
+                NoteNativeUserInput(message == 0x0111 ? IntPtr.Zero : hwnd);
             if (message == 0x020A && (wParam.ToInt64() & 0x0008) != 0 && CtrlWheelHandler is { } wheelHandler)
             {
                 var delta = unchecked((short)(wParam.ToInt64() >> 16));

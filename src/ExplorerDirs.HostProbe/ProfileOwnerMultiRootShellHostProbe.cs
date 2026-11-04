@@ -211,14 +211,21 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                             Console.WriteLine($"sort-input-boundary: before={beforeInputRows}");
                             hostType.GetMethod("NoteNativeUserInput", BindingFlags.Instance | BindingFlags.NonPublic)!
                                 .Invoke(hosts[0], [(nint)hostViewWindow.GetValue(hosts[0])!]);
-                            object?[] afterInput = [1, null];
-                            if ((int)sourceType.GetMethod("GetSortColumns")!.Invoke(reader, afterInput)! < 0 ||
-                                afterInput[1] is not System.Collections.IEnumerable afterColumns ||
-                                (int)afterColumns.Cast<object>().Single().GetType().GetProperty("Direction")!.GetValue(afterColumns.Cast<object>().Single())! != 1)
-                                throw new InvalidOperationException("User input left the temporary descending sort active.");
                             var afterInputRows = readNativeRows.Invoke(null, [(nint)hostViewWindow.GetValue(hosts[0])!])!;
                             Console.WriteLine($"sort-input-boundary: after={afterInputRows}");
+                            // Only the latest gesture before the queued capture runs may win.
+                            selectItem.Invoke(null, [hostType, hosts[0], Path.Combine(folders[0], "folder-small")]);
+                            hostType.GetMethod("NoteNativeUserInput", BindingFlags.Instance | BindingFlags.NonPublic)!
+                                .Invoke(hosts[0], [(nint)hostViewWindow.GetValue(hosts[0])!]);
                             selectItem.Invoke(null, [hostType, hosts[0], Path.Combine(folders[0], "folder-large")]);
+                            WaitUntil(() =>
+                            {
+                                object?[] completedSort = [1, null];
+                                return (int)sourceType.GetMethod("GetSortColumns")!.Invoke(reader, completedSort)! >= 0 &&
+                                    completedSort[1] is System.Collections.IEnumerable sorts &&
+                                    (int)sorts.Cast<object>().Single().GetType().GetProperty("Direction")!.GetValue(sorts.Cast<object>().Single())! == 1 &&
+                                    !(bool)hostType.GetProperty("ViewCaptureFailed", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!.GetValue(hosts[0])!;
+                            }, TimeSpan.FromSeconds(5), "Input-preserving recovery did not settle in the saved direction.");
                             PumpDispatcher(TimeSpan.FromMilliseconds(350));
                             var selection = readSelection.Invoke(null, [(nint)hostViewWindow.GetValue(hosts[0])!])!;
                             if (!((string[])selection.GetType().GetField("Item1")!.GetValue(selection)!).SequenceEqual(["folder-large"]))
@@ -235,13 +242,18 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                             if (!(bool)invokeSort.Invoke(hosts[0], ["sortascending", new Func<bool>(() => true)])!)
                                 throw new InvalidOperationException("Could not restore the normal test baseline.");
                             hostType.GetMethod("CaptureViewState")!.Invoke(hosts[0], null);
-                            Console.WriteLine("product-initial-sort-input: completed-before-input=True; new-selection-retained=True; later-user-sort-retained=True");
+                            Console.WriteLine("product-initial-sort-input: gesture-before-recovery=True; consecutive-input-retained=True; new-selection-retained=True; later-user-sort-retained=True");
                         }
                         transientCaptureObserved = true;
                         transientCaptureTimer.Stop();
                         Console.WriteLine("product-initial-sort-transient-capture: native-descending=True; cached-ascending=True; incomplete=True");
                     }
-                    catch (Exception error) { transientCaptureFailure = error; transientCaptureTimer.Stop(); }
+                    catch (Exception error)
+                    {
+                        Console.WriteLine($"sort-input-failure-trace: {hostType.GetProperty("InitialSortRecoveryStatus", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(hosts[0])}");
+                        transientCaptureFailure = error;
+                        transientCaptureTimer.Stop();
+                    }
                     finally { if (view != 0) Marshal.Release(view); }
                 };
                 transientCaptureTimer.Start();

@@ -2331,7 +2331,9 @@ internal static class ShellProviderLocationProbe
                 var itemName = Path.GetFileName(itemPath);
                 var itemIndex = Array.FindIndex(rows, row => row[0].Equals(itemName, StringComparison.OrdinalIgnoreCase));
                 if (itemIndex < 0) throw new InvalidOperationException($"Could not find '{itemPath}' in the native view rows.");
-                Check(selectItem(view, itemIndex, itemNumber == 0 ? 0x1fu : 0x1u));
+                // The input-recovery probe exposed that 0x1f includes SVSI_EDIT (0x3).
+                // Selection setup must select/focus, without accidentally starting rename.
+                Check(selectItem(view, itemIndex, itemNumber == 0 ? 0x1du : 0x1u));
             }
         }
         finally { Marshal.Release(view); }
