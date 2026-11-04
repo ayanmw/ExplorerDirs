@@ -230,3 +230,18 @@ user-sort-final-direct.log整项通过：原生命令分类降序29/5/17；再�
 user-sort-queue-four-pane-regression.log四宿主连续输入/选区/实际大小/方向/分组筛选/关闭以及隔离守卫通过（最后仅补provider范围与延后请求清理）。最终30项后台整轮通过：src/.state/background-checks/20261105-023212-5fa9707cb566433b8a4ca20d225c53d8/summary.json。列表模式合同不是图标/详细信息列头、其他排序列或可见重绘性能验收；这些、初始并发排序反例、混合开关入口与正式ABI激活仍待完成，temp.86不发布。
 
 最终源码另通过user-sort-final-four-pane.log四宿主整轮（含最终provider范围/延后清理），隔离守卫干净；不消除之前两轮初始排序失败事实。
+
+
+### 2026-11-05 恢复结束前核实实际行序
+
+initial-sort-stability-1.log重现原问题且隔离守卫通过：第三窗格初值37/11，恢复轨迹为opposite返回1415ms、saved返回1843ms、finish1968ms；最终标准PKEY_Size/+1但行仍37/11，75秒探针失败。由此确认命令提交成功/方向标志正确/行数恢复均不能证明实际排序已完成；这不是等待大小值超时，也不是前台干扰。
+
+新增ShellSizeSortOrder以活动IFolderView2顺序读取IShellFolder2标准PKEY_Size原始VT_UI8及SFGAO_FOLDER，验证数值升降序和文件夹分类边界，不解析格式化文本。返回true=已符合、false=实际反例、null=数量变化/值未就绪/代际退休。所有PIDL、folder与view引用确定释放；每8行让出Dispatcher，避免大目录校验连续占用UI线程。
+
+初始恢复及命令后复用恢复在结束前进行该校验。未确认则等待；两次错误行序样本触发原生方向重试，仍受原30秒预算限制，保留最新选区输入处理；异步检查期间防止计时器重入，导航退休立即终止。重试分支的受控故障注入尚未完成，不能仅以正向测试关闭偶发问题。
+
+阶段证据：同步首版initial-sort-verified-1/2/3.log顺序三轮四宿主通过，但未触发retry标记，不声称覆盖重试。异步版本size-order-async-input.log实际四宿主选择、大小、分组/筛选、历史、释放及守卫通过；size-order-async-large.log 4×1025目录实际升降序、数值、选区焦点、清理与隔离守卫整项通过，进程已退出0后才启动下一轮；warm-size-read约1.97～2.19ms/窗格，仅为该探针读值指标，不是新增校验总耗时或UI性能验收。
+
+最终源码30项后台总检通过：src/.state/background-checks/20261105-025054-8fd7e4e52fea4f0d8f4ff49482350d7b/summary.json。size-order-final-policy.log确认正确/错误方向、数量变化/退休合同及含文件夹/文件的混合/分类相反策略区分均通过，隔离守卫干净。先前size-order-async-policy.log因探针直接改native策略却未同步宿主已提交方向，触发额外异步校正导致读值尚未就绪；现改用产品UpdateFolderSizeSortPolicy路径，不修改产品以迎合该夹具。
+
+边界：最终只有资源释放和回调包装整理晚于大目录轮，其后总检及策略夹具已重新执行；未重做最终源码的大目录性能比较。图标/详细信息原生入口、受控重试、长编辑/拖选及集中可见验收、选项入口和正常DLL激活仍未完成。不覆盖temp.86。

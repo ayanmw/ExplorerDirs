@@ -464,6 +464,8 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 }
                 catch (TimeoutException exception)
                 {
+                    for (var failedPane = 0; failedPane < hosts.Count; failedPane++)
+                        Console.WriteLine($"product-sort-timeout-trace: pane={failedPane + 1}; trace={hostType.GetProperty("InitialSortRecoveryStatus", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(hosts[failedPane])}");
                     paneValues[index] = (string[])readValues.Invoke(null, [hostType, host, expectedItemCount])!;
                     var nativeRows = readNativeRows.Invoke(null, [viewWindow])!;
                     var actualNames = (string[])nativeRows.GetType().GetField("Item2")!.GetValue(nativeRows)!;
@@ -499,6 +501,31 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                     throw new InvalidOperationException($"Product pane {index + 1} saved sort timed out: value-ready-ms={paneValueReadyMilliseconds[index]}; rows={totalRows}/{expectedItemCount}; actual-names={failureNameEdges}; actual-values={failureValueEdges}; name-mismatches={nameMismatches.Length}; first-mismatches=[{mismatchSamples}]; adjacent-sort-violations={sortViolations}; actual-sort=[{string.Join('|', actualSorts)}]; cache=[{failureCacheMetrics}]; expected-direction={expectedDirection}.", exception);
                 }
             }
+
+            var orderType = appAssembly.GetType("ExplorerDirs.App.ShellSizeSortOrder", throwOnError: true)!;
+            var verifyOrder = orderType.GetMethod("IsOrderedAsync", BindingFlags.Static | BindingFlags.NonPublic)!;
+            object? ReadVerifiedOrder(object?[] arguments)
+            {
+                var task = (Task)verifyOrder.Invoke(null, arguments)!;
+                WaitUntil(() => task.IsCompleted, TimeSpan.FromSeconds(10), "Native order verification did not finish.");
+                if (task.IsFaulted) throw task.Exception!;
+                return task.GetType().GetProperty("Result")!.GetValue(task);
+            }
+            for (var index = 0; index < hosts.Count; index++)
+            {
+                var orderView = (nint)hostType.GetMethod("GetFolderView2Pointer", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(hosts[index], null)!;
+                try
+                {
+                    var expectedDirection = index % 2 == 0 ? 1 : -1;
+                    if (!Equals(ReadVerifiedOrder([orderView, expectedItemCount, expectedDirection, false, new Func<bool>(() => true)]), true) ||
+                        !Equals(ReadVerifiedOrder([orderView, expectedItemCount, -expectedDirection, false, new Func<bool>(() => true)]), false) ||
+                        ReadVerifiedOrder([orderView, expectedItemCount + 1, expectedDirection, false, new Func<bool>(() => true)]) is not null ||
+                        ReadVerifiedOrder([orderView, expectedItemCount, expectedDirection, false, new Func<bool>(() => false)]) is not null)
+                        throw new InvalidOperationException("Native size-order verification did not distinguish correct, wrong, changing-count and retired states.");
+                }
+                finally { if (orderView != 0) Marshal.Release(orderView); }
+            }
+            Console.WriteLine("product-size-order-verification: correct=True; wrong-direction=False; changed-count=pending; retired=pending");
 
             // Keep this targeted case ungrouped; ordinary four-host tests retain grouping coverage.
             if (!large && !_reconcileUserSort)
@@ -656,7 +683,6 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 Console.WriteLine("product-user-sort-reconciliation: mode=list; native-menu=True; folders-first=True; descending-values=29|5|17");
                 var contextField = hostType.GetField("_folderSizeSortContext", BindingFlags.Instance | BindingFlags.NonPublic)!;
                 var context = contextField.GetValue(host)!;
-                var contextUpdate = context.GetType().GetMethod("Update", BindingFlags.Instance | BindingFlags.NonPublic)!;
                 var activeView = (nint)hostType.GetMethod("GetFolderView2Pointer", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(host, null)!;
                 nint activeFolder = 0, activeRoot = 0;
                 try
@@ -684,11 +710,13 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 foreach (var mixed in new[] { true, false })
                 foreach (var direction in new[] { 1, -1 })
                 {
-                    contextUpdate.Invoke(context, [mixed, direction]);
-                    var expectedPolicy = (mixed ? 1u : 0u) | (direction < 0 ? 2u : 0u);
-                    Marshal.ThrowExceptionForHR(verifyPolicy(sortPolicyRoot, expectedPolicy));
                     var state = hostType.GetField("_viewState", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)!;
                     state.GetType().GetProperty("MixedSizeSort")!.SetValue(state, mixed);
+                    var requestedSort = Array.CreateInstance(sort.GetType(), 1);
+                    requestedSort.SetValue(Activator.CreateInstance(sort.GetType(), [sortKey, direction]), 0);
+                    hostType.GetMethod("UpdateFolderSizeSortPolicy", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(host, [requestedSort]);
+                    var expectedPolicy = (mixed ? 1u : 0u) | (direction < 0 ? 2u : 0u);
+                    Marshal.ThrowExceptionForHR(verifyPolicy(sortPolicyRoot, expectedPolicy));
                     var nextMenu = hostType.GetMethod("OpenFileCommandMenu", BindingFlags.Instance | BindingFlags.NonPublic, null, [typeof(bool), typeof(bool)], null)!.Invoke(host, [true, true])!;
                     try
                     {
@@ -725,6 +753,14 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                         }
                         throw new InvalidOperationException($"Policy row failure: mixed={mixed}; direction={direction}; policy-verify=0x{verifyPolicy(sortPolicyRoot, expectedPolicy):X8}; actual={string.Join('|', actualPolicyNames)}; values={string.Join('|', (string[])readValues.Invoke(null, [hostType, host, 3])!)}", error);
                     }
+                    var policyView = (nint)hostType.GetMethod("GetFolderView2Pointer", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(host, null)!;
+                    try
+                    {
+                        if (!Equals(ReadVerifiedOrder([policyView, 3, direction, mixed, new Func<bool>(() => true)]), true) ||
+                            !Equals(ReadVerifiedOrder([policyView, 3, direction, !mixed, new Func<bool>(() => true)]), false))
+                            throw new InvalidOperationException("Native order verifier did not distinguish mixed and folder-first rows.");
+                    }
+                    finally { if (policyView != 0) Marshal.Release(policyView); }
                     Console.WriteLine($"product-user-sort-policy-switch: mixed={mixed}; direction={direction}; names={string.Join('|', expectedNames)}");
                 }
 

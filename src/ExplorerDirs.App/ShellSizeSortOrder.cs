@@ -1,0 +1,85 @@
+using System.Runtime.InteropServices;
+using System.Windows.Threading;
+
+namespace ExplorerDirs.App;
+
+// Verify the native row order using raw bytes, never formatted size strings.
+// A successful direction command alone does not mean DefView finished its sort.
+internal static class ShellSizeSortOrder
+{
+    internal static async Task<bool?> IsOrderedAsync(nint view, int expectedCount, int direction, bool mixed, Func<bool> isCurrent)
+    {
+        if (!isCurrent()) return null;
+        var folderId = new Guid("93f2f68c-1d1b-11d3-a30e-00c04f79abd1");
+        var result = At<GetFolder>(view, 5)(view, in folderId, out var folder);
+        if (folder == 0) return null;
+        try
+        {
+            if (result < 0 || !isCurrent() || At<GetCount>(view, 7)(view, 2, out var count) < 0 ||
+                !isCurrent() || count != expectedCount) return null;
+            ulong previous = 0;
+            var previousFolder = true;
+            for (var index = 0; index < count; index++)
+            {
+                if (!isCurrent()) return null;
+                result = At<GetItem>(view, 6)(view, index, out var item);
+                if (item == 0) return null;
+                try
+                {
+                    if (result < 0) return null;
+                    var key = new NativeKey { FormatId = new Guid("b725f130-47ef-101a-a5f1-02608c9eebac"), Id = 12 };
+                    result = At<GetDetails>(folder, 17)(folder, item, in key, out var value);
+                    ulong bytes;
+                    try
+                    {
+                        if (result < 0 || value.Type != 21 || !isCurrent()) return null; // VT_UI8
+                        bytes = value.Bytes;
+                    }
+                    finally { VariantClear(ref value); }
+                    uint attributes = 0x20000000; // SFGAO_FOLDER
+                    if (!isCurrent() || At<GetAttributes>(folder, 9)(folder, 1, ref item, ref attributes) < 0 ||
+                        !isCurrent()) return null;
+                    var isFolder = (attributes & 0x20000000) != 0;
+                    if (index > 0)
+                    {
+                        if (!mixed && !previousFolder && isFolder) return false;
+                        if ((mixed || previousFolder == isFolder) &&
+                            (direction > 0 ? previous > bytes : previous < bytes)) return false;
+                    }
+                    previous = bytes;
+                    previousFolder = isFolder;
+                }
+                finally { Marshal.FreeCoTaskMem(item); }
+                // Large directories must leave time for navigation and input between native reads.
+                if ((index + 1) % ShellFileViewExportCapture.ReadinessBatchSize == 0)
+                    await Dispatcher.Yield(DispatcherPriority.Background);
+            }
+            return isCurrent() && At<GetCount>(view, 7)(view, 2, out var afterCount) >= 0 &&
+                isCurrent() && afterCount == expectedCount ? true : null;
+        }
+        finally { Marshal.Release(folder); }
+    }
+
+    private static T At<T>(nint self, int slot) where T : Delegate =>
+        Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(self), slot * nint.Size));
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeKey { public Guid FormatId; public uint Id; }
+    [StructLayout(LayoutKind.Explicit, Size = 24)]
+    private struct NativeVariant
+    {
+        [FieldOffset(0)] public ushort Type;
+        [FieldOffset(8)] public ulong Bytes;
+    }
+    [DllImport("oleaut32.dll")] private static extern int VariantClear(ref NativeVariant value);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int GetFolder(nint self, in Guid iid, out nint folder);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int GetCount(nint self, uint flags, out int count);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int GetItem(nint self, int index, out nint item);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int GetDetails(nint self, nint item, in NativeKey key, out NativeVariant value);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int GetAttributes(nint self, uint count, ref nint item, ref uint attributes);
+}

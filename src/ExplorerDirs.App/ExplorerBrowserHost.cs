@@ -2952,6 +2952,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var readinessRow = 0;
         int? readinessItemCount = null;
         var readinessFoundPendingValue = false;
+        var incorrectOrderSamples = 0;
+        var recoveryTickRunning = false;
+        (long Owner, Action<long> Complete)? inputHandlerForRetry = null;
         var traceTicks = 0;
         bool IsCurrent() => traceSerial == _initialSortRecoverySerial && isCurrent() &&
             expectedInputVersion == Interlocked.Read(ref _nativeUserInputVersion);
@@ -2999,9 +3002,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             Interval = TimeSpan.FromMilliseconds(100)
         };
         // Four-pane recursive-value readiness can exceed the former 12-second cutoff on large folders; keep a finite 30-second bound.
-        timer.Tick += async (_, _) =>
+        async Task RunRecoveryTick()
         {
-            timer.Stop();
             traceTicks++;
             if ((traceTicks & (traceTicks - 1)) == 0) Trace("tick");
             // Do not reorder underneath an active inline editor or a mouse selection gesture.
@@ -3048,6 +3050,33 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     expectedInputVersion = Interlocked.Read(ref _nativeUserInputVersion);
                     timer.Start();
                     return;
+                }
+
+                if (IsFolderSizeProvider && sort.Key == FolderSizeLocationPolicy.SizeColumn && readinessItemCount is { } expectedRows)
+                {
+                    var orderView = GetFolderView2Pointer();
+                    if (orderView == 0) { timer.Start(); return; }
+                    bool? ordered;
+                    try { ordered = await ShellSizeSortOrder.IsOrderedAsync(orderView, expectedRows, sort.Direction, _viewState.MixedSizeSort, IsCurrent); }
+                    finally { Marshal.Release(orderView); }
+                    if (!IsCurrent()) { FinishSortRecovery(); return; }
+                    if (ordered != true)
+                    {
+                        if (ordered == false && ++incorrectOrderSamples >= 2 && IsCurrent())
+                        {
+                            incorrectOrderSamples = 0;
+                            BeginInitialSortTransient(traceSerial);
+                            _initialSortInputCompletion = inputHandlerForRetry;
+                            savedApplied = false;
+                            try { oppositeApplied = InvokeVirtualSortVerb(sort.Direction > 0 ? "sortdescending" : "sortascending", IsCurrent); }
+                            catch { FinishSortRecovery(); throw; }
+                            Trace("retry-incorrect-row-order");
+                            if (!oppositeApplied) { FinishSortRecovery(); return; }
+                        }
+                        timer.Start();
+                        return;
+                    }
+                    incorrectOrderSamples = 0;
                 }
 
                 if (initialSortSelection is not null)
@@ -3263,6 +3292,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                             if (IsCurrent()) timer.Start();
                         }));
                     });
+                    inputHandlerForRetry = _initialSortInputCompletion;
                 }
                 if (oppositeApplied) timer.Start();
                 return;
@@ -3285,6 +3315,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 FinishSortRecovery();
                 throw;
             }
+        }
+        timer.Tick += async (_, _) =>
+        {
+            timer.Stop();
+            if (recoveryTickRunning) return;
+            recoveryTickRunning = true;
+            try { await RunRecoveryTick(); }
+            finally { recoveryTickRunning = false; }
         };
         timer.Start();
     }
