@@ -46,6 +46,7 @@ struct SizeSortContext { std::atomic<DWORD> policy{0}; DWORD id = 0; };
 static std::mutex g_sizeSortContextMutex;
 static std::map<DWORD, std::weak_ptr<SizeSortContext>> g_sizeSortContexts;
 static DWORD g_nextSizeSortContext = 0;
+static volatile LONG g_sizeSortColumnClickCount = 0;
 static std::shared_ptr<SizeSortContext> FindSizeSortContext(DWORD encoded)
 {
     std::lock_guard<std::mutex> lock(g_sizeSortContextMutex);
@@ -3490,6 +3491,10 @@ namespace
         HRESULT STDMETHODCALLTYPE MessageSFVCB(UINT message, WPARAM wParam, LPARAM lParam) override
         {
             ED_SIZE_TRACE("view-callback", this, nullptr, message, static_cast<DWORD>(lParam), 0);
+#if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
+            if (message == SFVM_COLUMNCLICK) InterlockedIncrement(&g_sizeSortColumnClickCount);
+#endif
+
             if (message == SFVM_GETNOTIFY) TraceSyntheticSortStage("synthetic-sort: SFVM_GETNOTIFY");
             if (message == SFVM_FSNOTIFY)
             {
@@ -6569,6 +6574,12 @@ extern "C" __declspec(dllexport) HRESULT WINAPI CreateDynamicSizeSortPidlForProb
     }
     catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
 }
+extern "C" __declspec(dllexport) HRESULT WINAPI SetDynamicSizeSortPolicyForProbe(void* lease, DWORD policy)
+{
+    if (!lease || policy > 3) return E_INVALIDARG;
+    static_cast<std::shared_ptr<SizeSortContext>*>(lease)->get()->policy.store(policy);
+    return S_OK;
+}
 extern "C" __declspec(dllexport) void WINAPI ReleaseDynamicSizeSortLeaseForProbe(void* lease)
 {
     auto* owned = static_cast<std::shared_ptr<SizeSortContext>*>(lease);
@@ -6579,6 +6590,9 @@ extern "C" __declspec(dllexport) void WINAPI ReleaseDynamicSizeSortLeaseForProbe
     }
     delete owned;
 }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSizeSortColumnClickCountForProbe()
+{ return InterlockedCompareExchange(&g_sizeSortColumnClickCount, 0, 0); }
 
 extern "C" __declspec(dllexport) HRESULT WINAPI VerifySizeSortPolicyPidlForProbe()
 {

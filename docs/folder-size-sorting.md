@@ -102,3 +102,15 @@ ViewState 新增默认 false 的 MixedSizeSort init 属性，保留原六参数�
 新 mixed-size-sort-session-smoke 覆盖默认/复制/同路径独立/旧版本/缺失非法/未来格式/实际保存及新 store 重读/备份和采集代际保护；QdrExportSmoke 增加扩展开关及无扩展回退断言。未挂载生产 Pane 的 pane-tab-copy-order 新增新标签默认 false、复制与跨窗格复制继承 true 的实测断言，无 HWND/Shell 视图。日志 mixed-sort-session.log、mixed-sort-tab-copy.log。
 
 后台总检扩至28项，完整通过：src/.state/background-checks/20261104-234720-c02fb62cb7734e0fbb03c35585815e57/summary.json；随后新增 Pane 断言单独重建执行通过。记录的是本批提交前源码，不是已发布载荷。菜单尚未开放，原生实验尚未接入产品宿主，未覆盖 temp.86 或用户配置。
+
+## 原生排序入口与方向同步实验
+
+新增 --product-size-sort-entrypoints-private-desktop。先前动态原型总在命令前写入目标方向，无法证明用户入口同步；新实验中只先改变混合位，升序用实际 header HWND 的本地鼠标消息，降序调用原生 sortdescending 命令，不预先 SetSortColumns/写入该次目标方向。没有 SendInput 或用户桌面鼠标移动。
+
+实验确认六次列头操作改变了真实排序方向，但 IShellFolderViewCB 的 SFVM_COLUMNCLICK 计数一直为0（sort-entrypoints.log），不能依赖这个旧回调。Microsoft 默认排序回调页面也明确列出系统视图不识别 SFVM_GETSORTDEFAULTS 的限制：https://learn.microsoft.com/en-us/windows/win32/shell/sfvm-getsortdefaults 。不将旧接口存在视为现代 DefView 入口可用。
+
+新 SizeSortHeaderObserver 只在 probe 挂接原生 header，观察 HDM_SETITEMA/W 的 HDI_FORMAT / HDF_SORTUP、HDF_SORTDOWN；只对已知大小列更新原子上下文，不查询视图，不调用重排或重绘。显式原生 setter 仍在实验宏内。sort-arrow-entrypoints.log：六次模式/方向及 peer 隔离完整行序匹配，箭头策略更新计数递增至11；后续自动变化/选区/分组/清理及前台输入守卫整项通过，5宿主无残留列表 HWND。
+
+初轮原生菜单重排时临时空行导致固定四行读取前置断言失败；探针现在等待当前行数恢复到4再读取，并保持3秒截止和完整四行顺序要求，不对空列表记通过。先前无箭头同步的入口轮在后续选区断言失败仍保留。
+
+当前只验证了详细信息模式与固定列身份下的同步；列表/图标模式、列重排后的观察器重新定位、header HWND 重建及导航生命周期仍未覆盖。因此该方案没有接入产品宿主。NativeProbe Release 与显式实验 native 严格构建通过，最终diff检查通过，普通产品无新增排序行为，未发布。

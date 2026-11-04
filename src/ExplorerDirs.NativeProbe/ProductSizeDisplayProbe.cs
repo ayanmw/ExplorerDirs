@@ -8,7 +8,7 @@ public static partial class SyntheticShellSortProbe
 {
     private static readonly List<StreamViewHost> ProductDisplayProcessLifetimeHosts = [];
     internal static int RunProductSizeDisplay(string adapterPath, bool explorerBrowser = false, bool rootControl = false,
-        FolderSizeSource source = FolderSizeSource.BuiltIn, bool sortPolicyExperiment = false, bool? encodedSortPolicy = null, bool columnStateSortPolicy = false, int encodedSortDirection = 1, bool dynamicSortPolicy = false)
+        FolderSizeSource source = FolderSizeSource.BuiltIn, bool sortPolicyExperiment = false, bool? encodedSortPolicy = null, bool columnStateSortPolicy = false, int encodedSortDirection = 1, bool dynamicSortPolicy = false, bool nativeSortEntrypoints = false)
     {
         var fixture = Path.Combine(Path.GetTempPath(), "ExplorerDirs-ProductSizeDisplay-" + Guid.NewGuid().ToString("N"));
         nint root = 0, folder = 0, view = 0, parent = 0, browserPointer = 0, folderView = 0;
@@ -170,6 +170,12 @@ public static partial class SyntheticShellSortProbe
                 }
                 finally { Marshal.FreeCoTaskMem(preparedPeer); }
             }
+            var headerMixed = false;
+            var publishPolicy = nativeSortEntrypoints ? Marshal.GetDelegateForFunctionPointer<SetDynamicSizePolicy>(
+                NativeLibrary.GetExport(diagnosticModule, "SetDynamicSizeSortPolicyForProbe")) : null;
+            using var sortHeaderObserver = nativeSortEntrypoints
+                ? new SizeSortHeaderObserver(SendMessageW(listView, 0x101F, 0, 0), sizeSubItem,
+                    direction => publishPolicy!(sortContextLease, (headerMixed ? 1 : 0) | (direction < 0 ? 2 : 0))) : null;
             if (sortPolicyExperiment)
             {
                 var sortPolicyId = new Guid("37A49964-E858-4A39-A411-D552E136921B");
@@ -184,8 +190,9 @@ public static partial class SyntheticShellSortProbe
                     foreach (var direction in encodedSortPolicy.HasValue ? new[] { encodedSortDirection } : new[] { 1, -1 })
                     {
                         if (columnStateSortPolicy) Check(SetSizeSortColumnStateForProbe(folderView, mixed));
-                        else if (dynamicSortPolicy) Check(At<SetSizePolicy>(sortPolicy, 4)(sortPolicy, (mixed ? 1 : 0) | (direction < 0 ? 2 : 0)));
+                        else if (dynamicSortPolicy && !nativeSortEntrypoints) Check(At<SetSizePolicy>(sortPolicy, 4)(sortPolicy, (mixed ? 1 : 0) | (direction < 0 ? 2 : 0)));
                         else Check(At<SetSizePolicy>(sortPolicy, 3)(sortPolicy, mixed ? 1 : 0));
+                        headerMixed = mixed;
                         var beforeNames = ReadColumnTextsForRows(listView, 0, 4);
                         Check(At<GetSizePolicyItem>(folderView, 6)(folderView, Array.IndexOf(beforeNames, "folder-empty"), out var emptyItem));
                         Check(At<GetSizePolicyItem>(folderView, 6)(folderView, Array.IndexOf(beforeNames, "file-2048.bin"), out var fileItem));
@@ -202,7 +209,17 @@ public static partial class SyntheticShellSortProbe
                         GetSizePolicyCount? comparisonCount = NativeLibrary.TryGetExport(diagnosticModule, "GetProductRecursiveCompareCount", out var compareAddress)
                             ? Marshal.GetDelegateForFunctionPointer<GetSizePolicyCount>(compareAddress) : null;
                         var beforeComparisons = comparisonCount?.Invoke() ?? -1;
-                        Check(target.SetSorting([new(new PropertyKeyState(SizeFormatId, 12), direction)]));
+                        if (nativeSortEntrypoints)
+                        {
+                            if (direction > 0) ClickSortHeaderForProbe(listView, sizeSubItem);
+                            var callbackCount = Marshal.GetDelegateForFunctionPointer<GetCounter>(
+                                NativeLibrary.GetExport(diagnosticModule, "GetSizeSortColumnClickCountForProbe"))();
+                            var headerSort = CaptureNativeSortColumns(folderView);
+                            Console.WriteLine($"product-size-sort-header-entry: callbacks={callbackCount}; actual=[{FormatSortColumns(headerSort)}]; requested={direction}");
+                            if (direction > 0 && (headerSort.Length != 1 || headerSort[0].Direction != direction))
+                                throw new InvalidOperationException("Header click did not request the expected sort direction.");
+                        }
+                        else Check(target.SetSorting([new(new PropertyKeyState(SizeFormatId, 12), direction)]));
                         var contextId = new Guid("000214E4-0000-0000-C000-000000000046");
                         Check(At<GetSizePolicyMenu>(view, 15)(view, 0, in contextId, out var contextPointer));
                         object context;
@@ -214,13 +231,19 @@ public static partial class SyntheticShellSortProbe
                             if (result is null) throw new InvalidOperationException("Native size-sort direction verb is unavailable.");
                             Check(result.Value);
                         }
+                        if (nativeSortEntrypoints)
+                        {
+                            Console.WriteLine($"product-size-sort-arrow-policy: updates={sortHeaderObserver!.Updates}; hr=0x{sortHeaderObserver.LastResult:X8}");
+                            Check(sortHeaderObserver.LastResult);
+                        }
                         var expected = mixed
                             ? direction > 0 ? new[] { "folder-empty", "file-2048.bin", "folder-25600", "folder-12288" }
                                 : new[] { "folder-12288", "folder-25600", "file-2048.bin", "folder-empty" }
                             : direction > 0 ? new[] { "folder-empty", "folder-25600", "folder-12288", "file-2048.bin" }
                                 : new[] { "folder-12288", "folder-25600", "folder-empty", "file-2048.bin" };
                         var clock = System.Diagnostics.Stopwatch.StartNew();
-                        do { Pump(20); sortedNames = ReadColumnTextsForRows(listView, 0, 4); }
+                        do { Pump(20); sortedNames = SendMessageW(listView, LvmGetItemCount, 0, 0).ToInt32() == 4
+                            ? ReadColumnTextsForRows(listView, 0, 4) : []; }
                         while (!sortedNames.SequenceEqual(expected) && clock.Elapsed < TimeSpan.FromSeconds(3));
                         Console.WriteLine($"product-size-sort-policy: mixed={mixed}; direction={direction}; compare-delta={(comparisonCount?.Invoke() ?? -1) - beforeComparisons}; names=[{string.Join('|', sortedNames)}]");
                         if (!sortedNames.SequenceEqual(expected))
@@ -533,11 +556,30 @@ public static partial class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate long GetSizePolicyCount();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSizePolicyAttributes(nint self, uint count, [In, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] nint[] items, ref uint attributes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateDynamicSizePolicy(nint source, uint policy, out nint output, out nint lease);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetDynamicSizePolicy(nint lease, int policy);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ReleaseDynamicSizePolicy(nint lease);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateEncodedSizePolicy(nint source, int mixed, out nint output);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSizePolicyDiagnostic(int index, [MarshalAs(UnmanagedType.LPWStr)] StringBuilder text, uint capacity);
 
 
+
+    private static void ClickSortHeaderForProbe(nint list, int column)
+    {
+        var header = SendMessageW(list, 0x101F, 0, 0);
+        if (header == 0) throw new InvalidOperationException("No native column header.");
+        var memory = Marshal.AllocHGlobal(Marshal.SizeOf<NativeRect>());
+        try
+        {
+            if (SendMessageW(header, 0x1207, column, memory) == 0) throw new InvalidOperationException("No header rectangle.");
+            var bounds = Marshal.PtrToStructure<NativeRect>(memory);
+            var point = (nint)(((bounds.Top + bounds.Bottom) / 2 << 16) | ((bounds.Left + bounds.Right) / 2 & 0xFFFF));
+            SendMessageW(header, 0x0200, 0, point);
+            SendMessageW(header, 0x0201, 1, point);
+            SendMessageW(header, 0x0202, 0, point);
+            Pump(150);
+        }
+        finally { Marshal.FreeHGlobal(memory); }
+    }
 
     private static void VerifySortExternalIdentity(nint root, nint folder, string stableName, string physicalFolder, bool freshProcess = false)
     {
