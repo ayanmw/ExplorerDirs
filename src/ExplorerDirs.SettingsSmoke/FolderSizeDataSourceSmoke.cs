@@ -33,6 +33,7 @@ internal static class FolderSizeDataSourceSmoke
         catch (OperationCanceledException) { }
         await CheckRunningCancellation(root);
         await CheckPagedResults(root);
+        await CheckQueryFailures(root);
 
         var settingsPath = Path.Combine(AppContext.BaseDirectory, "folder-size-options-" + Guid.NewGuid().ToString("N") + ".ini");
         var store = new FolderSizeOptionsStore(settingsPath);
@@ -46,6 +47,45 @@ internal static class FolderSizeDataSourceSmoke
         store.Load();
         try { store.Save(new()); throw new Exception("Future settings overwritten."); } catch (IOException) { }
         Console.WriteLine("Folder size data source smoke: PASS (source selection, zero/unknown, restricted fallback, cancellation, portable options and write protection; no IPC/UI)");
+    }
+
+    private static async Task CheckQueryFailures(string root)
+    {
+        var empty = root + @"\empty"; var missing = root + @"\missing";
+        foreach (var partial in new[] { false, true })
+        foreach (var failure in new[] { 1, 2, 3, 4 })
+        foreach (var source in new[] { FolderSizeSource.Everything, FolderSizeSource.Auto })
+        {
+            using var cancellation = new CancellationTokenSource();
+            var scans = 0; var progress = new CountProgress();
+            var resolver = new FolderSizeDataSource((_, offset, _) =>
+            {
+                if (partial && offset == 0) return Task.FromResult(new IndexedSizePage(
+                    EverythingSizeStatus.Available, [new(empty, true, 0)], 2));
+                if (failure == 1) throw new IOException("Injected Everything setup failure.");
+                if (failure == 2) return Task.FromException<IndexedSizePage>(new IOException("Injected Everything task failure."));
+                cancellation.Cancel();
+                if (failure == 3) return Task.FromCanceled<IndexedSizePage>(cancellation.Token);
+                throw new IOException("Injected query error racing cancellation.");
+            }, (_, _) => { Interlocked.Increment(ref scans); return new(37, 1, 0, 0); });
+            var task = resolver.ResolveAsync(root, [empty, missing], source, cancellation.Token, progress);
+            if (failure >= 3)
+            {
+                await ExpectCancelled(task);
+                if (scans != 0 || progress.Count != (partial ? 1 : 0))
+                    throw new Exception("A cancelled failing query started fallback or published retired results.");
+                continue;
+            }
+            var values = await task;
+            var expectedScans = source == FolderSizeSource.Auto ? (partial ? 1 : 2) : 0;
+            if (values.Count != 2 || scans != expectedScans || progress.Count != 2 ||
+                partial && (values[empty].Bytes != 0 || values[empty].Source != FolderSizeSource.Everything))
+                throw new Exception("A failed Everything page lost prior values or scanned already-indexed directories.");
+            if (source == FolderSizeSource.Auto && (values[missing].Bytes != 37 || values[missing].Source != FolderSizeSource.BuiltIn) ||
+                source == FolderSizeSource.Everything && (values[missing].Bytes is not null ||
+                    values[missing].Detail?.Contains("Injected", StringComparison.Ordinal) != true))
+                throw new Exception("Query exceptions did not preserve explicit source/fallback/unknown semantics.");
+        }
     }
 
     private static async Task CheckRunningCancellation(string root)

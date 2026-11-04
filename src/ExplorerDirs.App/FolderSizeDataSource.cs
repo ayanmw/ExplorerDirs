@@ -39,7 +39,17 @@ internal sealed class FolderSizeDataSource
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var page = await _query(parent, offset, cancellationToken).ConfigureAwait(false);
+                IndexedSizePage page;
+                try { page = await _query(parent, offset, cancellationToken).ConfigureAwait(false); }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception error)
+                {
+                    // Preserve earlier indexed pages; only remaining directories may fall back.
+                    // A concurrent close/source change must still cancel, not start new scans.
+                    cancellationToken.ThrowIfCancellationRequested();
+                    unavailable = $"Everything 查询失败：{error.Message}";
+                    break;
+                }
                 // A completed IPC task can race closing or switching the analysis; retire before publishing its batch.
                 cancellationToken.ThrowIfCancellationRequested();
                 if (page.Status != EverythingSizeStatus.Available)

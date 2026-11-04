@@ -84,9 +84,9 @@ internal sealed class FolderSizeNativeBridge : IDisposable
         bytes = files = folders = unreadable = 0; flags = 0;
         System.Threading.Timer? nativeCancellation = null;
         CancellationTokenSource? cancellation = null;
+        var source = FolderSizeSource.Everything;
         try
         {
-            FolderSizeSource source;
             lock (_cacheGate)
             {
                 if (_disposed) return unchecked((int)0x800704C7);
@@ -126,7 +126,13 @@ internal sealed class FolderSizeNativeBridge : IDisposable
             return source == FolderSizeSource.Auto ? unchecked((int)0x80004001) : 0;
         }
         catch (OperationCanceledException) { return unchecked((int)0x800704C7); }
-        catch (Exception) { return unchecked((int)0x80004005); }
+        catch (Exception)
+        {
+            if (cancellation?.IsCancellationRequested == true) return unchecked((int)0x800704C7);
+            // IPC setup/task failures mean the same unavailability as an error reply:
+            // Auto may scan; Everything-only retains an unknown result instead of retrying on every paint.
+            return source == FolderSizeSource.Auto ? unchecked((int)0x80004001) : 0;
+        }
         finally
         {
             // Wait for timer callbacks before native may release the cancellation flag's owner.

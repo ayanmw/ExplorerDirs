@@ -36,24 +36,31 @@ internal static class FolderSizeNativeBridgeSmoke
             var invalidatePath = Marshal.GetDelegateForFunctionPointer<InvalidatePath>(NativeLibrary.GetExport(module, "InvalidateFolderSizePath"));
             var calls = 0; var unknown = false; var overflow = false; var exactCalls = 0;
             var status = EverythingSizeStatus.Available;
+            var failureMode = 0; var failExact = false; ulong smallBytes = 17;
             TaskCompletionSource<IndexedSizePage>? gate = null;
             CancellationToken batchToken = default;
             using var entered = new ManualResetEventSlim();
             Task<IndexedSizePage> FakeQuery(string parent, uint offset, CancellationToken token)
             {
                 Interlocked.Increment(ref calls);
+                if (!failExact && failureMode == 1) throw new IOException("Injected query setup failure.");
+                if (!failExact && failureMode == 2) return Task.FromException<IndexedSizePage>(new IOException("Injected query task failure."));
+                if (!failExact && failureMode == 3) return Task.FromCanceled<IndexedSizePage>(new CancellationToken(true));
                 if (gate is { } pending) { batchToken = token; entered.Set(); return pending.Task; }
                 if (status != EverythingSizeStatus.Available) return Task.FromResult(new IndexedSizePage(status, []));
                 if (overflow) return Task.FromResult(new IndexedSizePage(EverythingSizeStatus.Available,
                     [new(Path.Combine(root, "large"), true, 29)], 2049));
                 return Task.FromResult(new IndexedSizePage(EverythingSizeStatus.Available,
-                    [new(Path.Combine(root, "small"), true, unknown ? null : 17), new(Path.Combine(root, "large"), true, unknown ? null : 29)], 2));
+                    [new(Path.Combine(root, "small"), true, unknown ? null : smallBytes), new(Path.Combine(root, "large"), true, unknown ? null : 29)], 2));
             }
             Task<IndexedSizePage> FakeExact(string path, CancellationToken token)
             {
                 token.ThrowIfCancellationRequested(); Interlocked.Increment(ref exactCalls);
+                if (failExact && failureMode == 1) throw new IOException("Injected exact-query setup failure.");
+                if (failExact && failureMode == 2) return Task.FromException<IndexedSizePage>(new IOException("Injected exact-query task failure."));
+                if (failExact && failureMode == 3) return Task.FromCanceled<IndexedSizePage>(new CancellationToken(true));
                 return Task.FromResult(new IndexedSizePage(EverythingSizeStatus.Available,
-                    [new(path, true, unknown ? null : 17)], 1));
+                    [new(path, true, unknown ? null : smallBytes)], 1));
             }
             using var bridge = new FolderSizeNativeBridge(module, FolderSizeSource.Everything, FakeQuery, FakeExact);
             (int Hr, ulong Bytes, uint Flags) Read(string leaf)
@@ -84,6 +91,32 @@ internal static class FolderSizeNativeBridgeSmoke
                 bridge.SetSource(FolderSizeSource.Auto);
                 if (Read("small") != (0, 5UL, 3U)) throw new Exception($"Auto fallback failed on {status}.");
             }
+            status = EverythingSizeStatus.Available;
+            foreach (var exactFailure in new[] { false, true })
+            foreach (var failure in new[] { 1, 2, 3 })
+            foreach (var source in new[] { FolderSizeSource.Everything, FolderSizeSource.Auto })
+            {
+                overflow = failExact = exactFailure; failureMode = failure;
+                bridge.SetSource(source);
+                var expected = failure == 3 ? (unchecked((int)0x800704C7), 0UL, 0U)
+                    : source == FolderSizeSource.Auto ? (0, 5UL, 3U) : (0, 0UL, 0U);
+                var actual = Read("small");
+                if (actual != expected)
+                    throw new Exception($"Query exception routing failed: exact={exactFailure}, failure={failure}, source={source}, actual={actual}, expected={expected}.");
+            }
+            failureMode = 0; overflow = failExact = false;
+            unknown = true; bridge.SetSource(FolderSizeSource.Everything);
+            var beforeUnknown = calls;
+            if (Read("small") != (0, 0UL, 0U)) throw new Exception("Unindexed row must remain unavailable.");
+            unknown = false;
+            if (Read("small") != (0, 0UL, 0U) || calls != beforeUnknown + 1)
+                throw new Exception("Unknown batch was retried immediately instead of retaining its bounded cache.");
+            Marshal.ThrowExceptionForHR(invalidatePath(root));
+            if (Read("small") != (0, 17UL, 1U) || calls != beforeUnknown + 2)
+                throw new Exception("Explicit refresh did not recover the now-indexed row without changing source.");
+            smallBytes = 0; Marshal.ThrowExceptionForHR(invalidatePath(root));
+            if (Read("small") != (0, 0UL, 1U)) throw new Exception("Indexed zero bytes lost its availability flag.");
+            smallBytes = 17;
             status = EverythingSizeStatus.Available;
             unknown = true; bridge.SetSource(FolderSizeSource.Everything);
             if (Read("small") != (0, 0UL, 0U)) throw new Exception("Unknown Everything size became an available zero.");

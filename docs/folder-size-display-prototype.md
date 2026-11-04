@@ -174,3 +174,27 @@ Debug、Release 构建均 0 警告/0 错误；先 Release、再 Debug、再后�
 修正后的原始 4×1,025 开启通知身份记录负载，值/排序/选区/焦点子检查完成，值就绪 `[1112,1065,596,571]` ms，排序等待 `[2286,677,1119,442]` ms，热读取约 2.1～2.3 ms；4,100 条异步、2 条视图身份，5 个实际解析样本、0 丢弃。该轮输入/前台保护失败，日志 `product-four-pane-1025-sort-deadline-fix.log`。这验证该轮正确性，不宣称所有首次排序等待已经消失。
 
 最终 27 项后台门槛全部通过：`src/.state/background-checks/20261104-145628-8ea779e4c9b547aeb7e40b01d9104a0a/summary.json`。报告保留提交前源码状态；无可见桌面验收或真实发布。
+
+
+## Everything 查询异常、未知值与刷新恢复
+
+2026-11-04 后续后台批次。失败注入确认两条消费路径的遗漏：原生桥接将查询初始化/任务异常映射为 E_FAIL，导致 Auto 不进入内置后备；空间分析的数据层则直接让整个任务异常结束，即使此前已有成功索引页。正常的 NotRunning/IndexUnavailable/Timeout 等状态回复原本已正确分流，因此不能仅用状态回复测试覆盖异常路径。
+
+修正后：
+
+- 原生桥接对非取消的查询异常沿用不可用语义：Auto 返回 E_NOTIMPL 请求原生扫描；Everything 专用返回 size-available=false 的未知结果，绝不伪造 0 B 或静默扫描。取消及退役请求仍返回取消。
+- 空间分析只捕获查询调用/等待本身的异常，保留此前成功页；Auto 仅扫描剩余目录，专用模式为剩余目录保留未知和失败原因。进度消费者的异常不在此捕获范围；取消与查询错误竞态仍在开始后备或发布结果前检查。
+- 无新增配置、定时重试或逐项缓存。已缓存的未知值允许等待手动 F5；显式失效会清除共享 Everything 父页，让下一次查询取得新值。
+
+原生桥接新增父页/精确查询 × 初始化异常/任务异常/取消 × 两种来源的 12 个情形。补测同一来源未知值保持缓存、显式失效后取得 17 B、真实可用标志的 0 B 与未知值不同。空间分析新增首/后页失败 × 初始化异常/任务异常/取消/取消竞态 × 两种来源的 16 个情形，确认前页零值保留、只扫描缺失项和取消后无额外进度。两条新增测试均先在旧代码上失败，再在修正后通过：`folder-size-query-exception-red.log` / `folder-size-query-exception-green.log`，`folder-size-data-source-exception-red.log` / `folder-size-data-source-exception-green.log`，均位于 `src/.state`。这些是注入数据与实际原生回调的后台证据，不是外部 Everything 发生真实异常的实测。
+
+另运行未修改查询客户端的真实 Everything 无窗口夹具：三个新建目录取得 0/5/37 B，耗时 1,323 ms、前台未变化，日志 `everything-recovery-live-fixture.log`。该结果证明当前实际查询通路，不能代替缺失索引的可见 UI 恢复验收。源接线同时核对 PaneControl.RefreshCurrent → 解码物理路径 → InvalidateFolderSizePath → RefreshFromUser；没有以切换来源替代手动刷新失效。
+
+本批总检和补验边界：
+
+- `20261104-150150-c42c3c0c718148c4839d78d15ff8bd41` 在发布隔离夹具的 staging 目录 Move 报拒绝访问；未改脚本即单独通过，原因未查明，不擅自归因为杀毒或索引服务。
+- `20261104-150405-2be05fdff4334abb969973fabb0518f3` 的 27 项整轮通过，但早于本批空间分析异常处理的追加修改，不能冒充最终源码的整轮结果。
+- 最终源码的 `20261104-150645-1ccef7b974da44a6a78d05d8b8ae7c26` 已通过构建及两条数据源等前置检查，在第 22 项 pane-tab-copy-order 因前台句柄从 Edge 进程变为 Explorer 进程而失败，切换来源未归因。保持守卫，没有改断言。
+- 最终代码原样补跑第 22～27 项均通过：`everything-recovery-pane-recheck.log`、`everything-recovery-provider-recheck.log`（实际产品无视图 12 B→失效→25 B）、通知容量/所有权检查、`everything-recovery-tree-recheck.log`、`everything-recovery-async-recheck.log`、`everything-recovery-publish-final.log`。检查项已分段覆盖，最终单轮总检仍为失败，不记录全绿。
+
+本批未创建可见文件视图、未改 Everything 配置、未覆盖 temp.86。仍保留首次排序性能与集中可见验收要求。
