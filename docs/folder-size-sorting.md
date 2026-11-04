@@ -37,3 +37,13 @@ dotnet run --project src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.cspro
 ## 后续接线
 
 需要确定可在 Shell 重绑定/后台排序实例中恢复、且仍区分同路径不同标签的视图策略上下文，例如由瞬时视图身份/PIDL携带上下文，而非按物理路径建全局设置表。先验证模式和方向传播，再扩展 ViewState/INI/复制/QDR；不得提前发布一个仅保存勾选状态的产品开关。实际原生排序及原有选择恢复的失败保持未完成。
+
+## 后续隔离对照：身份传播与失败路径
+
+实验 DPR2 PIDL 可将独立/混合策略传给 Shell 重绑定后实际执行比较的对象；product-size-sort-context-rebind-trace.log 的 encoded-policy=0 证明传播，尚不证明最终行序正确。新增无窗口 PIDL 检查覆盖两模式、方向位、1024 字符分段边界、多段根、非法位及跨段不一致；sort-policy-safe-pidl.log 通过。所有新格式和导出只在显式排序实验宏中启用，未接入产品标签或配置。
+
+曾尝试在 GetCurFolder 中查询 IFolderView2.GetSortColumns，再序列化当前方向。encoded-root 初始化出现栈溢出（0xC00000FD，product-size-sort-context-direction.log）；未采集原生栈，不能断言完整递归链。已撤去回调中的视图反查和 HWND 属性路径，比较器只读不可变实验方向。后续必须由明确排序请求传入方向，而非在序列化或比较回调中反查视图。
+
+公开 IColumnManager 状态对照：SetColumnInfo 返回 S_OK，但请求状态 0x5 后 GetColumnInfo 仍读到 0x1。保留失败断言，日志 sort-policy-column-state-readback-final.log；该次初始大小、单项补值、F5 和列重排先通过，失败发生在混合策略写回检查。前台/输入守卫干净，四个宿主销毁后存活列表 HWND=0。故不采用仅调用 SetColumnInfo 即宣称已支持的方案。
+
+清理后后台总检 27 项通过：src/.state/background-checks/20261104-225059-b5799d51aa194301ad94d91e2c892ec2/summary.json（源码为 7796e50 加本批未提交修改）。普通产品重新构建 SHA256 为 36730EAA8DB30C3DB89ECFE015845C530D8E336FC32390B3D9C5ADC7D73EC174，不能再沿用前批哈希不变的结论；普通根解析辅助函数也有源码调整，排序策略本身仍受实验宏隔离。未进行可见 UI 验收，未覆盖预览。

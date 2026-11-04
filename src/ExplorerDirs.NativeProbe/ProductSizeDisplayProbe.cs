@@ -8,7 +8,7 @@ public static partial class SyntheticShellSortProbe
 {
     private static readonly List<StreamViewHost> ProductDisplayProcessLifetimeHosts = [];
     internal static int RunProductSizeDisplay(string adapterPath, bool explorerBrowser = false, bool rootControl = false,
-        FolderSizeSource source = FolderSizeSource.BuiltIn, bool sortPolicyExperiment = false)
+        FolderSizeSource source = FolderSizeSource.BuiltIn, bool sortPolicyExperiment = false, bool? encodedSortPolicy = null, bool columnStateSortPolicy = false)
     {
         var fixture = Path.Combine(Path.GetTempPath(), "ExplorerDirs-ProductSizeDisplay-" + Guid.NewGuid().ToString("N"));
         nint root = 0, folder = 0, view = 0, parent = 0, browserPointer = 0, folderView = 0;
@@ -46,6 +46,14 @@ public static partial class SyntheticShellSortProbe
             var mainIdentity = rootControl ? $"::{{{classId:D}}}" : CreatePathIdentityParsingName(classId, fixture);
             Console.WriteLine($"product-size-display-identity: encoded-root={!rootControl}");
             Check(SHParseDisplayName(mainIdentity, 0, out root, 0, out _));
+            if (encodedSortPolicy is { } initialPolicy)
+            {
+                var prepare = Marshal.GetDelegateForFunctionPointer<CreateEncodedSizePolicy>(
+                    NativeLibrary.GetExport(diagnosticModule, "CreateSizeSortPolicyPidlForProbe"));
+                Check(prepare(root, initialPolicy ? 1 : 0, out var prepared));
+                Marshal.FreeCoTaskMem(root); root = prepared;
+                Console.WriteLine($"product-size-sort-policy-root: encoded=True; mixed={initialPolicy}");
+            }
             Check(BindProductDisplayFolder(0, root, 0, in ShellFolder2Id, out folder));
             var viewId = new Guid("000214E3-0000-0000-C000-000000000046");
             parent = CreateWindowExW(0, "STATIC", "ExplorerDirs product size display on private Desktop",
@@ -140,16 +148,21 @@ public static partial class SyntheticShellSortProbe
                 try
                 {
                     Check(At<GetSizePolicyFolder>(folderView, 5)(folderView, in ShellFolder2Id, out policyFolder));
-                    Check(Marshal.QueryInterface(policyFolder, in sortPolicyId, out sortPolicy));
-                    foreach (var mixed in new[] { false, true, false })
+                    if (!columnStateSortPolicy) Check(Marshal.QueryInterface(policyFolder, in sortPolicyId, out sortPolicy));
+                    foreach (var mixed in encodedSortPolicy is { } encoded ? new[] { encoded } : columnStateSortPolicy ? new[] { true, false, true } : new[] { false, true, false })
                     foreach (var direction in new[] { 1, -1 })
                     {
-                        Check(At<SetSizePolicy>(sortPolicy, 3)(sortPolicy, mixed ? 1 : 0));
+                        if (columnStateSortPolicy) Check(SetSizeSortColumnStateForProbe(folderView, mixed));
+                        else Check(At<SetSizePolicy>(sortPolicy, 3)(sortPolicy, mixed ? 1 : 0));
                         var beforeNames = ReadColumnTextsForRows(listView, 0, 4);
                         Check(At<GetSizePolicyItem>(folderView, 6)(folderView, Array.IndexOf(beforeNames, "folder-empty"), out var emptyItem));
                         Check(At<GetSizePolicyItem>(folderView, 6)(folderView, Array.IndexOf(beforeNames, "file-2048.bin"), out var fileItem));
                         try
                         {
+                            uint folderAttributes = 0x20000000, fileAttributes = 0x20000000;
+                            Check(At<GetSizePolicyAttributes>(policyFolder, 9)(policyFolder, 1, [emptyItem], ref folderAttributes));
+                            Check(At<GetSizePolicyAttributes>(policyFolder, 9)(policyFolder, 1, [fileItem], ref fileAttributes));
+                            Console.WriteLine($"product-size-sort-folder-attributes: folder=0x{folderAttributes:X}; file=0x{fileAttributes:X}");
                             var direct = At<CompareSizePolicyItems>(policyFolder, 7)(policyFolder, 1, emptyItem, fileItem);
                             Console.WriteLine($"product-size-sort-policy-direct: mixed={mixed}; requested-direction={direction}; empty-vs-file={(short)direct}");
                         }
@@ -443,8 +456,63 @@ public static partial class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSizePolicyItem(nint self, int index, out nint item);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CompareSizePolicyItems(nint self, nint column, nint left, nint right);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate long GetSizePolicyCount();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSizePolicyAttributes(nint self, uint count, [In, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] nint[] items, ref uint attributes);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateEncodedSizePolicy(nint source, int mixed, out nint output);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSizePolicyDiagnostic(int index, [MarshalAs(UnmanagedType.LPWStr)] StringBuilder text, uint capacity);
 
 
+
+    private static int SetSizeSortColumnStateForProbe(IntPtr folderView, bool mixed, Func<bool>? isCurrent = null)
+    {
+        bool Current() => isCurrent?.Invoke() ?? true;
+        const int aborted = unchecked((int)0x80004004);
+        const uint stateMask = 0x10, noFolderSeparation = 0x4;
+        if (!Current()) return aborted;
+        var sizeColumnManagerId = new Guid("d8ec27bb-3f3b-4042-b10a-4acfd924d453");
+        const int InvalidData = unchecked((int)0x8007000D);
+        var result = Marshal.QueryInterface(folderView, in sizeColumnManagerId, out var manager);
+        if (result < 0) return result;
+        try
+        {
+            if (!Current()) return aborted;
+            var key = new ShellColumnManager.NativeKey { FormatId = new Guid("b725f130-47ef-101a-a5f1-02608c9eebac"), PropertyId = 12 };
+            var info = new ShellColumnManager.ColumnInfo { Size = (uint)Marshal.SizeOf<ShellColumnManager.ColumnInfo>(), Mask = stateMask, Name = string.Empty };
+            result = At<SizeSortColumnInfo>(manager, 4)(manager, ref key, ref info);
+            if (!Current()) return aborted;
+            if (result != 0) return result < 0 ? result : InvalidData;
+            if ((info.Mask & stateMask) == 0) return InvalidData;
+            var state = mixed ? info.State | noFolderSeparation : info.State & ~noFolderSeparation;
+            if (state == info.State) return 0;
+            // Change only the folder separation bit; visibility and width belong to the saved column layout.
+            info.Mask = stateMask; info.State = state;
+            result = At<SizeSortColumnInfo>(manager, 3)(manager, ref key, ref info);
+            if (!Current()) return aborted;
+            if (result < 0) return result;
+            var readback = new ShellColumnManager.ColumnInfo { Size = (uint)Marshal.SizeOf<ShellColumnManager.ColumnInfo>(), Mask = stateMask, Name = string.Empty };
+            result = At<SizeSortColumnInfo>(manager, 4)(manager, ref key, ref readback);
+            if (!Current()) return aborted;
+            Console.WriteLine($"size-sort-column-state: requested=0x{state:X}; readback=0x{readback.State:X}; hr=0x{result:X8}");
+            return result < 0 ? result : readback.State == state ? 0 : InvalidData;
+        }
+        finally { Marshal.Release(manager); }
+    }
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int SizeSortColumnInfo(nint self, ref ShellColumnManager.NativeKey key, ref ShellColumnManager.ColumnInfo info);
+
+    internal static int RunSizeSortContextPidlSmoke(string adapterPath)
+    {
+        var module = NativeLibrary.Load(Path.GetFullPath(adapterPath));
+        try
+        {
+            var verify = Marshal.GetDelegateForFunctionPointer<VerifySizeSortContext>(
+                NativeLibrary.GetExport(module, "VerifySizeSortPolicyPidlForProbe"));
+            Check(verify());
+            Console.WriteLine("Size-sort context PIDL: PASS (both modes, 1024-character boundary and multi-segment roots, invalid/mismatched policy rejected; no window or registration).");
+            return 0;
+        }
+        finally { NativeLibrary.Free(module); }
+    }
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int VerifySizeSortContext();
 
 }

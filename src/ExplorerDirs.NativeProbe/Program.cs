@@ -28,6 +28,14 @@ internal static class Program
             return RegisteredMultiRootPidlProbe.Run();
         if (args.Length == 1 && args[0] == "--registered-multi-root-pidl-volatile-smoke")
             return RegisteredMultiRootPidlProbe.Run(volatileRegistration: true);
+        if (args is ["--product-size-sort-context-pidl-smoke", var sortContextAdapter])
+            return SyntheticShellSortProbe.RunSizeSortContextPidlSmoke(sortContextAdapter);
+        if (args is ["--product-size-sort-column-state-private-desktop", var columnSortAdapter])
+            return PrivateDesktopShellProbe.RunProductSizeDisplay(columnSortAdapter, explorerBrowser: true, sortPolicyExperiment: true, columnStateSortPolicy: true);
+        if (args is ["--product-size-sort-context-separate-private-desktop", var separateSortAdapter])
+            return PrivateDesktopShellProbe.RunProductSizeDisplay(separateSortAdapter, explorerBrowser: true, sortPolicyExperiment: true, encodedSortPolicy: false);
+        if (args is ["--product-size-sort-context-mixed-private-desktop", var mixedSortAdapter])
+            return PrivateDesktopShellProbe.RunProductSizeDisplay(mixedSortAdapter, explorerBrowser: true, sortPolicyExperiment: true, encodedSortPolicy: true);
         if (args is ["--product-size-sort-policy-private-desktop", var sizeSortAdapter])
             return PrivateDesktopShellProbe.RunProductSizeDisplay(sizeSortAdapter, explorerBrowser: true, sortPolicyExperiment: true);
         if (args is ["--product-size-display-private-desktop", var sizeDisplayAdapter])

@@ -39,6 +39,10 @@
 
 extern "C" ED_PROBE_EXPORT void WINAPI ResetSyntheticSortCounters();
 
+#if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
+static HRESULT CreateSizeSortPolicyPidl(PCIDLIST_ABSOLUTE source, DWORD policy, PIDLIST_ABSOLUTE* output);
+#endif
+
 using FolderSizeProviderCallback = HRESULT(WINAPI*)(PCWSTR, volatile LONG*, ULONGLONG*, ULONGLONG*, ULONGLONG*, ULONGLONG*, DWORD*);
 using FolderSizeInvalidationCallback = void(WINAPI*)(PCWSTR);
 static PVOID volatile g_folderSizeProviderCallback = nullptr;
@@ -262,7 +266,7 @@ namespace
     }
 
     void RecordProductCompareDiagnostic(LPARAM column, PCWSTR leftName, ULONGLONG leftSize,
-        PCWSTR rightName, ULONGLONG rightSize, short comparison, bool categoryOnly = false, const void* instance = nullptr)
+        PCWSTR rightName, ULONGLONG rightSize, short comparison, bool categoryOnly = false, const void* instance = nullptr, int encodedPolicy = -1)
     {
         if (!InterlockedCompareExchange(&g_productCompareTraceEnabled, 0, 0)) return;
         std::lock_guard<std::mutex> lock(g_productCompareDiagnosticMutex);
@@ -270,7 +274,7 @@ namespace
         g_productCompareDiagnostics.push_back(L"column=" + std::to_wstring(LOWORD(column)) +
             L";left=" + (leftName ? leftName : L"<null>") + L";left-bytes=" + std::to_wstring(leftSize) +
             L";right=" + (rightName ? rightName : L"<null>") + L";right-bytes=" + std::to_wstring(rightSize) +
-            L";result=" + std::to_wstring(comparison) + L";category-only=" + std::to_wstring(categoryOnly) + L";instance=" + std::to_wstring(reinterpret_cast<UINT_PTR>(instance)));
+            L";result=" + std::to_wstring(comparison) + L";category-only=" + std::to_wstring(categoryOnly) + L";instance=" + std::to_wstring(reinterpret_cast<UINT_PTR>(instance)) + L";encoded-policy=" + std::to_wstring(encodedPolicy));
     }
 #endif
     // This adapter is loaded only by the opt-in NativeProbe. It forwards normal
@@ -2424,6 +2428,25 @@ namespace
 #pragma pack(pop)
     constexpr size_t kSyntheticRootPathPidlHeaderSize = offsetof(SyntheticRootPathPidlItem, text);
 
+    bool IsSyntheticRootPathMagic(DWORD magic)
+    {
+        return magic == kSyntheticRootPathPidlMagic
+#if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
+            || magic == 0x32525044 // DPR2: experiment-only immutable size-sort policy.
+#endif
+            ;
+    }
+
+    size_t SyntheticRootPathTextOffset(const SyntheticRootPathPidlItem* item)
+    {
+#if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
+        if (item->magic == 0x32525044) return kSyntheticRootPathPidlHeaderSize + sizeof(DWORD);
+#else
+        (void)item;
+#endif
+        return kSyntheticRootPathPidlHeaderSize;
+    }
+
     std::wstring EncodeSyntheticRootPathParsingToken(PCWSTR path)
     {
         constexpr WCHAR prefix[] = L"edpath:";
@@ -2524,7 +2547,7 @@ namespace
         {
             if (current->mkid.cb < kSyntheticRootPathPidlHeaderSize) continue;
             const auto* first = reinterpret_cast<const SyntheticRootPathPidlItem*>(current);
-            if (first->magic != kSyntheticRootPathPidlMagic) continue;
+            if (!IsSyntheticRootPathMagic(first->magic)) continue;
             if (first->segmentIndex != 0 || first->segmentCount == 0 || first->segmentCount > 64)
                 return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
             try
@@ -2535,12 +2558,24 @@ namespace
                     if (segment->mkid.cb < kSyntheticRootPathPidlHeaderSize)
                         return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
                     const auto* header = reinterpret_cast<const SyntheticRootPathPidlItem*>(segment);
-                    const auto textBytes = segment->mkid.cb - kSyntheticRootPathPidlHeaderSize;
-                    if (header->magic != kSyntheticRootPathPidlMagic || header->segmentIndex != index ||
+                    const auto textOffset = SyntheticRootPathTextOffset(header);
+                    if (segment->mkid.cb <= textOffset) return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+                    const auto textBytes = segment->mkid.cb - textOffset;
+                    if (header->magic != first->magic || header->segmentIndex != index ||
                         header->segmentCount != first->segmentCount || textBytes == 0 || textBytes % sizeof(WCHAR) != 0)
                         return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
                     const auto characters = textBytes / sizeof(WCHAR);
-                    path->append(header->text, characters);
+#if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
+                    if (header->magic == 0x32525044)
+                    {
+                        DWORD policy = 0;
+                        CopyMemory(&policy, reinterpret_cast<const BYTE*>(header) + kSyntheticRootPathPidlHeaderSize, sizeof(policy));
+                        DWORD firstPolicy = 0;
+                        CopyMemory(&firstPolicy, reinterpret_cast<const BYTE*>(first) + kSyntheticRootPathPidlHeaderSize, sizeof(firstPolicy));
+                        if (policy > 3 || policy != firstPolicy) return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+                    }
+#endif
+                    path->append(reinterpret_cast<const WCHAR*>(reinterpret_cast<const BYTE*>(header) + textOffset), characters);
                     segment = ILNext(segment);
                 }
                 if (includeChildren)
@@ -3202,18 +3237,10 @@ namespace
 
         int CurrentSizeSortDirection() const
         {
-            if (!_shellView) return 1;
-            IFolderView2* view = nullptr;
-            if (FAILED(_shellView->QueryInterface(IID_PPV_ARGS(&view)))) return 1;
-            SORTCOLUMN columns[16]{};
-            int count = 0, direction = 1;
-            if (SUCCEEDED(view->GetSortColumnCount(&count)) && count > 0 && count <= ARRAYSIZE(columns) &&
-                SUCCEEDED(view->GetSortColumns(columns, count)))
-                for (int index = 0; index < count; ++index)
-                    if (columns[index].propkey == kSizeKey || columns[index].propkey == kSyntheticRecursiveSizeKey)
-                    { direction = columns[index].direction == SORT_DESCENDING ? -1 : 1; break; }
-            view->Release();
-            return direction;
+            // Identity serialization and comparison can run during lazy view initialization.
+            // Never call back into the view here: GetSortColumns reentered GetCurFolder
+            // and overflowed the stack in the encoded-root private Desktop probe.
+            return _hasEncodedSizeSortPolicy ? _encodedSizeSortDirection : 1;
         }
 
 #endif
@@ -3369,6 +3396,21 @@ namespace
             if (!copy) return E_OUTOFMEMORY;
             std::wstring backingPath;
             auto result = ReadSyntheticRootPathFromPidl(value, &backingPath, true);
+#if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
+            _hasEncodedSizeSortPolicy = false;
+            for (auto* part = reinterpret_cast<PCUIDLIST_RELATIVE>(value); !ILIsEmpty(part); part = ILNext(part))
+            {
+                if (part->mkid.cb < kSyntheticRootPathPidlHeaderSize + sizeof(DWORD)) continue;
+                const auto* header = reinterpret_cast<const SyntheticRootPathPidlItem*>(part);
+                if (header->magic != 0x32525044) continue;
+                DWORD policy = 0;
+                CopyMemory(&policy, reinterpret_cast<const BYTE*>(header) + kSyntheticRootPathPidlHeaderSize, sizeof(policy));
+                InterlockedExchange(&_mixedSizeSort, (policy & 1) ? 1 : 0);
+                _encodedSizeSortDirection = (policy & 2) ? -1 : 1;
+                _hasEncodedSizeSortPolicy = true;
+                break;
+            }
+#endif
             if (result == S_FALSE)
             {
                 try { backingPath = _configuredBackingPath.empty() ? g_syntheticSortBackingPath : _configuredBackingPath; }
@@ -3886,7 +3928,7 @@ namespace
             const auto isPathMarker = [](PCUIDLIST_RELATIVE value)
             {
                 return value->mkid.cb >= kSyntheticRootPathPidlHeaderSize &&
-                    reinterpret_cast<const SyntheticRootPathPidlItem*>(value)->magic == kSyntheticRootPathPidlMagic;
+                    IsSyntheticRootPathMagic(reinterpret_cast<const SyntheticRootPathPidlItem*>(value)->magic);
             };
             if (isPathMarker(left) || isPathMarker(right))
             {
@@ -3978,7 +4020,12 @@ namespace
 #endif
                 comparison = leftSize < rightSize ? -1 : leftSize > rightSize ? 1 : 0;
 #if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
+#if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
+                RecordProductCompareDiagnostic(column, leftChild->name, leftSize, rightChild->name, rightSize, comparison, false, this,
+                    _hasEncodedSizeSortPolicy ? static_cast<int>(InterlockedCompareExchange(&_mixedSizeSort, 0, 0)) : -1);
+#else
                 RecordProductCompareDiagnostic(column, leftChild->name, leftSize, rightChild->name, rightSize, comparison, false, this);
+#endif
 #endif
                 break;
             }
@@ -6048,6 +6095,8 @@ namespace
         IShellView* _shellView = nullptr;
 #if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
         volatile LONG _mixedSizeSort = 1; // Legacy until the host applies its per-tab default-off setting.
+        bool _hasEncodedSizeSortPolicy = false;
+        int _encodedSizeSortDirection = 1;
 #endif
         std::wstring _backingPath;
         IShellFolder2* _inner = nullptr;
@@ -6414,6 +6463,88 @@ extern "C" ED_PROBE_EXPORT HRESULT WINAPI VerifyBackingColumnMetadataForProbe(PC
     if (SUCCEEDED(initialized)) CoUninitialize();
     return result;
 }
+
+#if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
+// Read-only policy in an opaque experimental PIDL survives Shell re-binding;
+// canonical parsing names and the physical path are deliberately unchanged.
+static HRESULT CreateSizeSortPolicyPidl(
+    PCIDLIST_ABSOLUTE source, DWORD policy, PIDLIST_ABSOLUTE* output)
+{
+    if (!source || !output || policy > 3) return E_INVALIDARG;
+    *output = nullptr;
+    std::wstring path;
+    const auto parsed = ReadSyntheticRootPathFromPidl(source, &path, true);
+    if (parsed != S_OK) return FAILED(parsed) ? parsed : E_INVALIDARG;
+    size_t bytes = ILGetSize(source);
+    for (auto* part = reinterpret_cast<PCUIDLIST_RELATIVE>(source); !ILIsEmpty(part); part = ILNext(part))
+        if (part->mkid.cb >= kSyntheticRootPathPidlHeaderSize &&
+            reinterpret_cast<const SyntheticRootPathPidlItem*>(part)->magic == kSyntheticRootPathPidlMagic)
+        {
+            if (part->mkid.cb > USHRT_MAX - sizeof(DWORD) || bytes > SIZE_MAX - sizeof(DWORD)) return E_INVALIDARG;
+            bytes += sizeof(DWORD);
+        }
+    auto* result = static_cast<BYTE*>(CoTaskMemAlloc(bytes));
+    if (!result) return E_OUTOFMEMORY;
+    auto* cursor = result;
+    for (auto* part = reinterpret_cast<PCUIDLIST_RELATIVE>(source); !ILIsEmpty(part); part = ILNext(part))
+    {
+        const auto* header = reinterpret_cast<const SyntheticRootPathPidlItem*>(part);
+        if (part->mkid.cb >= kSyntheticRootPathPidlHeaderSize && IsSyntheticRootPathMagic(header->magic))
+        {
+            const auto oldOffset = SyntheticRootPathTextOffset(header);
+            const auto newOffset = kSyntheticRootPathPidlHeaderSize + sizeof(DWORD);
+            const auto newBytes = static_cast<USHORT>(part->mkid.cb - oldOffset + newOffset);
+            CopyMemory(cursor, part, kSyntheticRootPathPidlHeaderSize);
+            auto* updated = reinterpret_cast<SyntheticRootPathPidlItem*>(cursor);
+            updated->cb = newBytes; updated->magic = 0x32525044;
+            CopyMemory(cursor + kSyntheticRootPathPidlHeaderSize, &policy, sizeof(policy));
+            CopyMemory(cursor + newOffset, reinterpret_cast<const BYTE*>(part) + oldOffset, part->mkid.cb - oldOffset);
+            cursor += newBytes;
+        }
+        else { CopyMemory(cursor, part, part->mkid.cb); cursor += part->mkid.cb; }
+    }
+    ZeroMemory(cursor, sizeof(USHORT));
+    *output = reinterpret_cast<PIDLIST_ABSOLUTE>(result);
+    return S_OK;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI CreateSizeSortPolicyPidlForProbe(
+    PCIDLIST_ABSOLUTE source, BOOL mixed, PIDLIST_ABSOLUTE* output)
+{ return CreateSizeSortPolicyPidl(source, mixed ? 1 : 0, output); }
+
+extern "C" __declspec(dllexport) HRESULT WINAPI VerifySizeSortPolicyPidlForProbe()
+{
+    for (const size_t length : { 3u, 1024u, 1025u, 4096u })
+    for (const DWORD policy : { 0u, 1u, 2u, 3u })
+    {
+        const auto path = std::wstring(L"C:\\") + std::wstring(length, L'x');
+        PIDLIST_ABSOLUTE original = nullptr, prepared = nullptr;
+        auto result = CreateSyntheticRootPathPidl(path.c_str(), &original);
+        if (SUCCEEDED(result)) result = CreateSizeSortPolicyPidl(original, policy, &prepared);
+        if (original) CoTaskMemFree(original);
+        if (FAILED(result)) return result;
+        std::wstring decoded;
+        result = ReadSyntheticRootPathFromPidl(prepared, &decoded, true);
+        bool passed = result == S_OK && decoded == path;
+        auto* header = reinterpret_cast<SyntheticRootPathPidlItem*>(prepared);
+        const DWORD invalid = 4;
+        CopyMemory(reinterpret_cast<BYTE*>(header) + kSyntheticRootPathPidlHeaderSize, &invalid, sizeof(invalid));
+        passed = passed && FAILED(ReadSyntheticRootPathFromPidl(prepared, &decoded, true));
+        if (header->segmentCount > 1)
+        {
+            const DWORD restored = policy, mismatched = policy ^ 1;
+            CopyMemory(reinterpret_cast<BYTE*>(header) + kSyntheticRootPathPidlHeaderSize, &restored, sizeof(restored));
+            auto* next = ILNext(prepared);
+            CopyMemory(reinterpret_cast<BYTE*>(const_cast<PUIDLIST_RELATIVE>(next)) + kSyntheticRootPathPidlHeaderSize, &mismatched, sizeof(mismatched));
+            passed = passed && FAILED(ReadSyntheticRootPathFromPidl(prepared, &decoded, true));
+        }
+        CoTaskMemFree(prepared);
+        if (!passed) return E_FAIL;
+    }
+    return S_OK;
+}
+
+#endif
 
 extern "C" HRESULT WINAPI ConfigureShellNamespaceRoot(
     const CLSID* classId, PCWSTR backingPath)
