@@ -43,6 +43,12 @@ internal static class ShellDeleteNotificationBatchSmoke
             "deleted-folder identity scan is skipped when the Shell view count is unknown");
         Check(!ShellDeletedItemNotification.CanScanViewForDeletedFolder(0, 10003),
             "a transient empty Shell count cannot authorize scanning a large logical view");
+        Check(ShellDeletedItemNotification.CanScanViewForDeletedFolder(3, null, softRefresh: true),
+            "soft delete can repair a retained row before startup count sampling finishes");
+        Check(ShellDeletedItemNotification.CanScanViewForDeletedFolder(1, 0, softRefresh: true),
+            "soft delete can remove the last retained folder without a positive target count");
+        Check(!ShellDeletedItemNotification.CanScanViewForDeletedFolder(513, null, softRefresh: true),
+            "soft repair retains the native identity lookup work bound");
         Check(!ShellDeletedItemNotification.CanScanViewForDeletedFolder(0, 0),
             "an empty view skips an identity scan with no candidate rows");
     }

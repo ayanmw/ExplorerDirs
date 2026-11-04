@@ -56,6 +56,19 @@ internal static class ShellDirectoryChangeBatchSmoke
         aggregated.RecordChanges(-2, forceRefresh: false);
         Check(aggregated.Complete(3010), "a merged deletion delta detects a stale Shell count");
 
+        var natural = new ShellDirectoryChangeBatch(2);
+        natural.Created();
+        Check(!natural.CompleteNaturalUpdate(2) && natural.ExpectedCountAfterChanges == 3,
+            "pending create survives an early soft-update count read");
+        Check(natural.CompleteNaturalUpdate(3), "natural create settles after the row arrives");
+        natural.Deleted();
+        Check(!natural.CompleteNaturalUpdate(3) && natural.ExpectedCountAfterChanges == 2,
+            "pending deletion remains available to delayed identity repair");
+        Check(!natural.CompleteNaturalUpdate(null) && natural.ExpectedCountAfterChanges == 2,
+            "missing count cannot consume pending deletion");
+        Check(natural.CompleteNaturalUpdate(2) && !natural.HasPendingChanges,
+            "natural delete completes when Shell actually removes its row");
+
         var drifted = new ShellDirectoryChangeBatch(3);
         drifted.RecordChanges(2997, forceRefresh: false);
         Check(drifted.Complete(3), "a missed create batch requests refresh");

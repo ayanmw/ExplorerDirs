@@ -5216,7 +5216,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                             {
                                 // Native item notifications remain active. Do not turn an automatic
                                 // count mismatch or watcher recovery into a full-view refresh; F5 reconciles it.
-                                if (actualCount is { } observed) batch.Rebase(observed);
+                                batch.CompleteNaturalUpdate(actualCount);
                                 _directoryChangeRecheckPending = false;
                                 LastShellRefreshStatus = "automatic-soft-update; full-refresh=manual";
                                 if (hasPendingDirectoryChanges) RestoreSelectionAfterNaturalDirectoryUpdate(path, navigationVersion);
@@ -5664,16 +5664,16 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                         }
                         _directoryChangeDeleteNotificationTimer = null;
                         var monitorRequest = CaptureCurrentDirectoryMonitorRequest(version);
-                        if (deletedPath is null || monitorRequest is null ||
-                            _directoryChangeBatch?.ExpectedCountAfterChanges is not { } expectedCount ||
-                            _browser is null)
+                        var expectedCount = _directoryChangeBatch?.ExpectedCountAfterChanges;
+                        if (deletedPath is null || monitorRequest is null || _browser is null ||
+                            (!_softRefresh && expectedCount is null))
                             return;
                         if (!ShellDirectoryMonitorCountRead.TryRead(ReadDirectoryMonitorItemCount,
                                 () => IsCurrentDirectoryMonitorRequest(monitorRequest), out var actualCount) ||
-                            actualCount is not { } actual || actual == expectedCount)
+                            actualCount is not { } actual || (!_softRefresh && actual == expectedCount))
                             return;
 
-                        if (!ShellDeletedItemNotification.CanScanViewForDeletedFolder(actualCount, expectedCount))
+                        if (!ShellDeletedItemNotification.CanScanViewForDeletedFolder(actualCount, expectedCount, _softRefresh))
                         {
                             _directoryChangeLastFolderDeleteNotificationResult = "SkippedLargeView";
                             return;
@@ -5691,7 +5691,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                                 result = ShellDeletedItemNotification.NotifyDeletedFolder(folderView, deletedPath,
                                     _traceNativeUserMessages
                                         ? step => TraceShellSelectionRestore("delete-identity", step)
-                                        : null);
+                                        : null, _folderSizeProfileClassId);
                             }
                             finally { _directoryDeleteNotificationTiming.Stop(notificationStartedAt); }
                             _directoryChangeLastFolderDeleteNotificationResult = result.ToString();

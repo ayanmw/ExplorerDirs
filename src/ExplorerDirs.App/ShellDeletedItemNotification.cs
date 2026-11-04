@@ -19,7 +19,7 @@ internal static class ShellDeletedItemNotification
 {
     private const int MaxPath = 260;
     private const uint ShellItemRemoved = 0x00000010;
-    private const uint PathAndFlushNoWait = 0x00002005;
+    private const uint PidlAndFlushNoWait = 0x00002000;
     private const uint FolderAttribute = 0x20000000;
     // A hidden 50k-item Shell view took about 260 ms to find one deleted path by scanning rows.
     private const int MaxIdentityScanViewItems = 512;
@@ -28,12 +28,12 @@ internal static class ShellDeletedItemNotification
     internal static bool ShouldNotifyPath(string path, bool isFolder) =>
         isFolder && Path.IsPathFullyQualified(path) && path.Length < MaxPath;
 
-    internal static bool CanScanViewForDeletedFolder(int? viewItemCount, int? expectedViewItemCount) =>
+    internal static bool CanScanViewForDeletedFolder(int? viewItemCount, int? expectedViewItemCount, bool softRefresh = false) =>
         viewItemCount is > 0 and <= MaxIdentityScanViewItems &&
-        expectedViewItemCount is > 0 and <= MaxIdentityScanViewItems;
+        (softRefresh || expectedViewItemCount is > 0 and <= MaxIdentityScanViewItems);
 
     internal static ShellDeletedItemNotificationResult NotifyDeletedFolder(nint folderView, string path,
-        Action<string>? trace = null)
+        Action<string>? trace = null, Guid? providerClassId = null)
     {
         if (folderView == 0 || !ShouldNotifyPath(path, isFolder: true)) return ShellDeletedItemNotificationResult.InvalidPath;
 
@@ -64,6 +64,13 @@ internal static class ShellDeletedItemNotification
                     nint name = 0;
                     var nameResult = Measure($"display-name index={index}", trace,
                         () => At<DisplayName>(item, 5)(item, 0x80058000, out name));
+                    if ((nameResult < 0 || name == 0) && providerClassId is not null)
+                    {
+                        if (name != 0) Marshal.FreeCoTaskMem(name);
+                        name = 0;
+                        nameResult = Measure($"provider-name index={index}", trace,
+                            () => At<DisplayName>(item, 5)(item, 0x80028000, out name));
+                    }
                     if (nameResult < 0 || name == 0)
                     {
                         if (name != 0) Marshal.FreeCoTaskMem(name);
@@ -72,6 +79,8 @@ internal static class ShellDeletedItemNotification
                     string itemPath;
                     try { itemPath = Marshal.PtrToStringUni(name) ?? string.Empty; }
                     finally { Marshal.FreeCoTaskMem(name); }
+                    if (QdrShellPathCodec.TryGetProviderPath(itemPath, providerClassId, out var physicalPath))
+                        itemPath = physicalPath;
                     if (!string.Equals(Path.GetFullPath(itemPath), path, StringComparison.OrdinalIgnoreCase)) continue;
 
                     uint attributes = 0;
@@ -80,9 +89,17 @@ internal static class ShellDeletedItemNotification
                     if (attributesResult < 0 ||
                         (attributes & FolderAttribute) == 0)
                         return ShellDeletedItemNotificationResult.NotFolder;
-                    // This is called from the ExplorerBrowser STA; do not wait there for every Shell subscriber.
-                    SHChangeNotify(ShellItemRemoved, PathAndFlushNoWait, path, IntPtr.Zero);
-                    return ShellDeletedItemNotificationResult.Notified;
+                    // Use the retained namespace identity; a deleted physical path
+                    // cannot reconstruct its per-tab provider root and item metadata.
+                    nint pidl = 0;
+                    try
+                    {
+                        if (SHGetIDListFromObject(item, out pidl) < 0 || pidl == 0)
+                            return ShellDeletedItemNotificationResult.ItemUnavailable;
+                        SHChangeNotify(ShellItemRemoved, PidlAndFlushNoWait, pidl, IntPtr.Zero);
+                        return ShellDeletedItemNotificationResult.Notified;
+                    }
+                    finally { if (pidl != 0) Marshal.FreeCoTaskMem(pidl); }
                 }
                 finally { Marshal.Release(item); }
             }
@@ -115,5 +132,6 @@ internal static class ShellDeletedItemNotification
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ItemAt(nint self, uint index, out nint item);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int DisplayName(nint self, uint nameType, out nint name);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int Attributes(nint self, uint mask, out uint attributes);
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern void SHChangeNotify(uint eventId, uint flags, string item1, IntPtr item2);
+    [DllImport("shell32.dll")] private static extern int SHGetIDListFromObject(nint item, out nint pidl);
+    [DllImport("shell32.dll")] private static extern void SHChangeNotify(uint eventId, uint flags, nint item1, nint item2);
 }

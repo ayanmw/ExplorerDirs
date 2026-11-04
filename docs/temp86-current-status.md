@@ -64,3 +64,20 @@
 `src/.state/app-delete-phase-trace.log` 仍复现删除超时；对应 `src/.state/app-session-process/e4f0ffcd69f1408896ca7d4f097588b2/app/ExplorerDirs.ShellNamespace.dll.size-trace.log`：before-create=375839375；随后四个实例均记录物理UPDATEDIR(0x2000)、provider转发及FSNOTIFY回调；before-delete=375840312，此后直到超时未记录新的物理/provider/回调事件。无逐项RMDIR。因而本次不是已经收到逐项删除后仅行身份匹配失败；需要继续观察托管watcher和补偿计时器是否启动/收到删除/执行。先前“删除通知被合并为UPDATEDIR”的推断尚不能由该日志证实：已抓到的UPDATEDIR位于创建阶段，不把其误归到删除阶段。
 
 诊断DLL SHA256=288101F17E0A284920DC6E08446E1F51B6C00F7329473EF7ECADF536CAE99A3E。该产物不是正常产品验证或发布；普通产品DLL未被诊断构建覆盖，测试隔离清理通过，默认软刷新删除目标仍未完成。
+
+## 软刷新目录删除修复与普通构建补证（2026-11-05）
+
+临时显式诊断编译直接记录真实MainWindow四窗格字段，已在最终源码移除。原始 `app-managed-monitor-run.log` 对应 `f86b907e07134aae9132c81f2e78a76f/app/profile/monitor-probe.log`：四watcher均收到delete=1，但lookup=0，旧计数被重设为baseline=3。保留未完成差量后，`app-managed-stage-run.log` 记录 lookup=1，具体失败为残留目录的 `SIGDN_FILESYSPATH` 显示名 E_INVALIDARG；provider解析名称后 `app-provider-name-run.log` 前进到 Folder 属性 ERROR_FILE_NOT_FOUND。故早期差量/PIDL单项尝试不足，不是这些环节都正确。
+
+最终修复：
+- 自然更新仅在实数等于预期时完成批次，保留待处理差量。
+- 软刷新按已知删除路径进行有界精确匹配，不依赖初始计数采样完成或正数目标；保留原512行查找上限。
+- 物理显示名不可读时，按本profile provider解析名称还原物理路径；不把其他namespace字符串当路径。
+- 原生provider仅在文件/路径不存在且请求恰为SFGAO_FOLDER时，返回保留PIDL内的已知类型。不吞访问拒绝、其他属性或VALIDATE请求。
+- 用视图残留条目的绝对PIDL发RMDIR，保留每标签root身份；及时释放PIDL和COM引用，仍无自动完整枚举。
+
+诊断构建 `app-delete-identity-run.log` 两进程通过，但首轮普通构建 `app-delete-normal-run.log` 发现分组窗格初始计数尚未完成而跳过修复，不能计为最终成功。移除该软刷新计数门槛后，正常无诊断定义、正常产品DLL的载荷 `src/.state/gui-smoke/20261104-222921-822-c088e4` 经 `src/.state/app-delete-startup-normal-run.log` 两进程全部通过（33732/13148）：四窗格创建/删除、分组、五标签会话实际写回、窗口位置恢复、清理/隔离守卫。第二进程目录删除857ms；该阶段未采样到空列表，不能代替可见黑闪验收。
+
+仍需扩展普通文件/重命名、多删除突发、同名重建、超过512行和网络目录的真实自动更新验证；当前小夹具通过不代表这些边界完成。临时托管监测定义及计时器已清除，诊断编译对照产物仅作历史证据，不发布。
+
+最终本批后台报告：`src/.state/background-checks/20261105-063021-695a33910edf42e5ad734e3c416177e6/summary.json`，整轮成功；新增测试覆盖自然更新延迟计数及软刷新初始计数未就绪/最后一项/查找上限。未把诊断构建成功代替普通构建结果。

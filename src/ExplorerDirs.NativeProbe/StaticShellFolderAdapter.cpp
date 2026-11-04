@@ -4245,6 +4245,20 @@ namespace
                         *attributes &= ~(SFGAO_FILESYSTEM | SFGAO_FILESYSANCESTOR);
                 }
             }
+            // A retained deleted row still has a known folder/file type in its PIDL.
+            // Delete notification repair asks only SFGAO_FOLDER; do not require the
+            // backing object to exist, and do not hide access errors or validate requests.
+            if ((result == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) ||
+                 result == HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND)) && requestedAttributes == SFGAO_FOLDER)
+            {
+                *attributes = SFGAO_FOLDER;
+                for (UINT index = 0; index < count; ++index)
+                {
+                    const auto* child = SyntheticData(items[index]);
+                    if (!child || !(child->attributes & FILE_ATTRIBUTE_DIRECTORY)) *attributes = 0;
+                }
+                result = S_OK;
+            }
             if (traceNestedChild) TraceSyntheticFolderAttributes(_backingPath, requestedAttributes, *attributes, result);
             ED_SIZE_TRACE("item-attributes", this, count == 1 && SyntheticData(items[0]) ? SyntheticData(items[0])->name : nullptr,
                 requestedAttributes, *attributes, static_cast<ULONG>(result));

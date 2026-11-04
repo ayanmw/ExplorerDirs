@@ -56,6 +56,15 @@ internal sealed class ShellDirectoryChangeBatch
         _transientEmptyViewRechecksRemaining = 0;
     }
 
+    internal bool CompleteNaturalUpdate(int? actualCount)
+    {
+        // Shell item notifications can lag the count check. Keep their expected
+        // delta available to delayed delete repair until the actual rows catch up.
+        if (actualCount is not { } actual || ExpectedCountAfterChanges != actual) return false;
+        Rebase(actual);
+        return true;
+    }
+
     internal bool CompleteRefresh(int? actualCount)
     {
         var expected = ExpectedCountAfterChanges;
