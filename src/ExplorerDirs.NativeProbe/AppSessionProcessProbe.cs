@@ -219,6 +219,41 @@ internal static class AppSessionProcessProbe
             }, TimeSpan.FromSeconds(15), $"External {stage} did not update all four panes while retaining grouping.");
             Console.WriteLine($"app-external-change: pass={pass + 1}; stage={stage}; rows-per-pane={count}; ms={elapsed.ElapsedMilliseconds}; transient-empty-samples={transientEmptySamples}; grouped-pane-preserved=True");
         }
+        void AwaitFileRow(string name, ulong bytes, string stage, string? forbiddenName = null)
+        {
+            var expectedSize = ByteSizeFormatter.Format(bytes, SizeDisplayOptions.Default);
+            string? lastRows = null;
+            Wait(() =>
+            {
+                EnsureRunning(child);
+                var lists = VisibleFileViews(window);
+                var found = 0;
+                var snapshots = new List<string>();
+                foreach (var list in lists)
+                {
+                    var count = Message(list, 0x1004);
+                    if (count != 3) return false;
+                    var matches = 0;
+                    for (var row = 0; row < 3; row++)
+                    {
+                        var actualName = OwnedAppListText.Read(child.Process, child.ProcessId, list, row, 0);
+                        var actualSize = OwnedAppListText.Read(child.Process, child.ProcessId, list, row, 1);
+                        snapshots.Add($"{actualName}:{actualSize}");
+                        if (actualName == forbiddenName) return false;
+                        if (actualName == name && actualSize == expectedSize) matches++;
+                    }
+                    if (matches == 1) found++;
+                }
+                var snapshot = string.Join('|', snapshots);
+                if (snapshot != lastRows)
+                {
+                    Console.WriteLine($"app-native-row-state: stage={stage}; rows={snapshot}");
+                    lastRows = snapshot;
+                }
+                return lists.Count == 4 && found == 4;
+            }, TimeSpan.FromSeconds(15), $"Actual native rows did not show {name} / {expectedSize} after {stage}.");
+            Console.WriteLine($"app-native-row: pass={pass + 1}; stage={stage}; name={name}; size={expectedSize}; four-panes=True");
+        }
         void Mark(string stage)
         {
             if (tracePath is not null) File.AppendAllText(tracePath, $"{Environment.TickCount64} probe-phase={stage} pass={pass + 1}\n");
@@ -249,19 +284,26 @@ internal static class AppSessionProcessProbe
         AwaitRows(5, "file-burst-create");
         foreach (var file in burstFiles) File.Delete(file);
         AwaitRows(2, "file-burst-delete");
-        foreach (var file in files) File.WriteAllBytes(file, new byte[37]);
+        // Ordinary file rows retain Explorer's KB display rounding. Use whole KB
+        // values so replacement metadata is distinguishable in the actual cells.
+        foreach (var file in files) File.WriteAllBytes(file, new byte[37 * 1024]);
         AwaitRows(3, "same-name-seed");
+        AwaitFileRow("external-file.txt", 37 * 1024, "same-name-seed");
         foreach (var file in files)
         {
             File.Delete(file);
-            File.WriteAllBytes(file, new byte[83]);
+            File.WriteAllBytes(file, new byte[83 * 1024]);
         }
         // Let the delayed delete quiet period expire before checking the replacement.
         Thread.Sleep(2000);
         AwaitRows(3, "same-name-recreate-settled");
-        if (files.Any(file => new FileInfo(file).Length != 83))
+        AwaitFileRow("external-file.txt", 83 * 1024, "same-name-recreate-settled");
+        if (files.Any(file => new FileInfo(file).Length != 83 * 1024))
             throw new InvalidOperationException("Same-name replacement content was unexpectedly changed.");
-        foreach (var file in files) File.Delete(file);
+        var renamed = files.Select(file => file + ".renamed").ToArray();
+        for (var index = 0; index < files.Length; index++) File.Move(files[index], renamed[index]);
+        AwaitFileRow("external-file.txt.renamed", 83 * 1024, "file-rename", forbiddenName: "external-file.txt");
+        foreach (var file in renamed) File.Delete(file);
         AwaitRows(2, "same-name-final-delete");
     }
 
