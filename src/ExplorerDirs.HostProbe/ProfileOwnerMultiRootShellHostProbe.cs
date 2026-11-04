@@ -13,6 +13,14 @@ internal static class ProfileOwnerMultiRootShellHostProbe
     private const int LargeFolderCount = 500;
 
     private static string? _sortContextAdapter;
+    private static bool _retrySortForProbe;
+    internal static int RunSortRetryForProbe(string adapterPath)
+    {
+        _retrySortForProbe = true;
+        try { return RunInputDuringSortForProbe(adapterPath); }
+        finally { _retrySortForProbe = false; }
+    }
+
     private static bool _inputDuringSort;
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int GetProbeFolder(nint self, in Guid iid, out nint folder);
@@ -174,6 +182,8 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 var viewState = CreateViewState(appAssembly, index % 2 == 0 ? 1 : -1);
                 var host = (HwndHost)Activator.CreateInstance(hostType, identity, viewState)!;
                 hostType.GetMethod("EnableInitialSortRecoveryTrace", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(host, null);
+                if (_retrySortForProbe && index == 0)
+                    hostType.GetField("_initialSortIncorrectResultsForProbe", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(host, 2);
                 // Match PaneControl: provider identity is paired with its owning profile.
                 hostType.GetMethod("ConfigureFolderSizeLocations", BindingFlags.Instance | BindingFlags.NonPublic)!
                     .Invoke(host, [classId, true]);
@@ -301,6 +311,12 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                             }
                             WaitUntil(() =>
                             {
+                                if (_retrySortForProbe)
+                                {
+                                    var retryTrace = (string)hostType.GetProperty("InitialSortRecoveryStatus", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(hosts[0])!;
+                                    var retryOffset = retryTrace.LastIndexOf(":retry-incorrect-row-order", StringComparison.Ordinal);
+                                    if (retryOffset < 0 || retryTrace.LastIndexOf(":finish", StringComparison.Ordinal) < retryOffset) return false;
+                                }
                                 object?[] completedSort = [1, null];
                                 return (int)sourceType.GetMethod("GetSortColumns")!.Invoke(reader, completedSort)! >= 0 &&
                                     completedSort[1] is System.Collections.IEnumerable sorts &&
@@ -331,6 +347,12 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                                 throw new InvalidOperationException("Could not restore the normal test baseline.");
                             hostType.GetMethod("CaptureViewState")!.Invoke(hosts[0], null);
                             Console.WriteLine($"product-initial-sort-input: scenario={(_renameDuringSort ? "rename" : _commandDuringSort ? "command" : "selection")}; settled-saved-direction=True; later-user-sort-retained=True");
+                        }
+                        if (_retrySortForProbe)
+                        {
+                            if ((int)hostType.GetField("_initialSortIncorrectResultsForProbe", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(hosts[0])! != 0)
+                                throw new InvalidOperationException("The retry did not consume both injected wrong-order samples.");
+                            Console.WriteLine("product-size-sort-retry: injected-wrong-order=2; native-retry=True; completed-after-retry=True; selection-preserved=True");
                         }
                         transientCaptureObserved = true;
                         transientCaptureTimer.Stop();

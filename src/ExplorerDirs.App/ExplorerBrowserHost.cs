@@ -67,6 +67,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private long _initialSortStateVersion;
     private (long Owner, Action<long> Complete)? _initialSortInputCompletion;
     private bool _completingInitialSortInput;
+    private int _initialSortIncorrectResultsForProbe;
     internal void EnableInitialSortRecoveryTrace() => _initialSortRecoveryTrace = [];
     internal string InitialSortRecoveryStatus => _initialSortRecoveryTrace is { } trace ? string.Join('|', trace) : "disabled";
     private void RecordInitialSortRecovery(string stage)
@@ -3060,6 +3061,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     try { ordered = await ShellSizeSortOrder.IsOrderedAsync(orderView, expectedRows, sort.Direction, _viewState.MixedSizeSort, IsCurrent); }
                     finally { Marshal.Release(orderView); }
                     if (!IsCurrent()) { FinishSortRecovery(); return; }
+                    // Explicit isolated-probe injection; normal hosts never enable a trace/counter.
+                    if (_initialSortRecoveryTrace is not null && _initialSortIncorrectResultsForProbe > 0 && ordered == true)
+                    {
+                        _initialSortIncorrectResultsForProbe--;
+                        ordered = false;
+                        Trace("injected-wrong-row-order");
+                    }
                     if (ordered != true)
                     {
                         if (ordered == false && ++incorrectOrderSamples >= 2 && IsCurrent())

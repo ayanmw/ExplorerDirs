@@ -245,3 +245,12 @@ initial-sort-stability-1.log重现原问题且隔离守卫通过：第三窗格�
 最终源码30项后台总检通过：src/.state/background-checks/20261105-025054-8fd7e4e52fea4f0d8f4ff49482350d7b/summary.json。size-order-final-policy.log确认正确/错误方向、数量变化/退休合同及含文件夹/文件的混合/分类相反策略区分均通过，隔离守卫干净。先前size-order-async-policy.log因探针直接改native策略却未同步宿主已提交方向，触发额外异步校正导致读值尚未就绪；现改用产品UpdateFolderSizeSortPolicy路径，不修改产品以迎合该夹具。
 
 边界：最终只有资源释放和回调包装整理晚于大目录轮，其后总检及策略夹具已重新执行；未重做最终源码的大目录性能比较。图标/详细信息原生入口、受控重试、长编辑/拖选及集中可见验收、选项入口和正常DLL激活仍未完成。不覆盖temp.86。
+
+
+### 2026-11-05 重试分支受控注入
+
+新增显式 --product-sort-retry-host-private-desktop入口。仅开启恢复trace且隔离探针通过反射将本宿主私有计数设为2时，把前两次真实校验true转换为false；普通宿主计数0不改变结果。它注入的是校验结果，不篡改原生行或伪造最终成功。最终必须仍通过真实行序校验及四宿主数值、分组筛选、选区焦点、关闭和隔离守卫。
+
+sort-retry-injection.log、恢复源码后的sort-retry-restored.log均整项exit0：两次injected-wrong-row-order，出现原生命令retry-incorrect-row-order，重试后finish，连续选择和后续用户方向保持，私有计数归零。App/HostProbe/NativeProbe Release构建0警告0错误，diff检查通过。
+
+负对照sort-retry-disabled.log只临时将触发阈值改为int.MaxValue；两次注入仍发生但无retry，探针因未观察到重试后完成而超时退出1，前台/输入守卫干净。源码及二进制已恢复原阈值2，未留下禁用分支。该对照证明探针能区分重试被禁用，不等价于可稳定控制Windows自身产生错误行序；自然偶发机制及最终可见稳定性仍保留边界。本批不重跑或扩大宣称30项后台门槛，不发布。

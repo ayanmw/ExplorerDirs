@@ -70,6 +70,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunProductSizeDisplay(everythingSizeAdapter, explorerBrowser: true, source: FolderSizeSource.Everything);
         if (args is ["--product-sort-deadline-private-desktop", var deadlineHostProbe])
             return PrivateDesktopShellProbe.RunProductFourPaneHost(deadlineHostProbe, forceSortDeadline: true);
+        if (args is ["--product-sort-retry-host-private-desktop", var retryHostProbe, var retryHostAdapter])
+            return PrivateDesktopShellProbe.RunProductSortRetryHost(retryHostProbe, retryHostAdapter);
         if (args is ["--product-user-sort-host-private-desktop", var userSortHostProbe, var userSortHostAdapter])
             return PrivateDesktopShellProbe.RunProductUserSortHost(userSortHostProbe, userSortHostAdapter);
         if (args is ["--product-sort-rename-host-private-desktop", var renameHostProbe, var renameHostAdapter])
