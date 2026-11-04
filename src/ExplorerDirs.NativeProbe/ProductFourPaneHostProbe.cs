@@ -6,7 +6,7 @@ using System.Runtime.Loader;
 // Loading HostProbe here keeps its WPF/App types out of the desktop-monitor thread.
 internal static class ProductFourPaneHostProbe
 {
-    internal static int Run(string hostProbePath, bool large = false, bool observeNotifications = true, bool forceSortDeadline = false, string? sortContextAdapter = null, bool inputDuringSort = false, bool commandDuringSort = false, bool renameDuringSort = false, bool reconcileUserSort = false, bool retrySort = false, uint userSortMode = 3, bool hideSizeColumn = false, string? persistedSessionPath = null, bool readPersistedSession = false)
+    internal static int Run(string hostProbePath, bool large = false, bool observeNotifications = true, bool forceSortDeadline = false, string? sortContextAdapter = null, bool inputDuringSort = false, bool commandDuringSort = false, bool renameDuringSort = false, bool reconcileUserSort = false, bool retrySort = false, uint userSortMode = 3, bool hideSizeColumn = false, string? persistedSessionPath = null, bool readPersistedSession = false, bool unavailableSizes = false)
     {
         hostProbePath = Path.GetFullPath(hostProbePath);
         var directory = Path.GetDirectoryName(hostProbePath)!;
@@ -21,7 +21,7 @@ internal static class ProductFourPaneHostProbe
             var run = type.GetMethod(persistedSessionPath is not null ? "RunPersistedSortForProbe" : sortContextAdapter is null ? "Run" : retrySort ? "RunSortRetryForProbe" : reconcileUserSort ? "RunUserSortReconciliationForProbe" : renameDuringSort ? "RunRenameDuringSortForProbe" : commandDuringSort ? "RunCommandDuringSortForProbe" : inputDuringSort ? "RunInputDuringSortForProbe" : "RunWithSortContextForProbe", BindingFlags.Static | BindingFlags.NonPublic)!;
             // The large case reproduces the previously failing four-root, 1,025-folders-per-root
             // workload, including notification identity observation and saved sorts.
-            return (int)run.Invoke(null, persistedSessionPath is not null ? [sortContextAdapter, persistedSessionPath, readPersistedSession] : sortContextAdapter is null
+            return (int)run.Invoke(null, persistedSessionPath is not null ? [sortContextAdapter, persistedSessionPath, readPersistedSession, unavailableSizes] : sortContextAdapter is null
                 ? [false, large ? 1025 : 0, large, 8192, large && observeNotifications, forceSortDeadline]
                 : reconcileUserSort ? [sortContextAdapter, userSortMode, hideSizeColumn] : [sortContextAdapter])!;
         }

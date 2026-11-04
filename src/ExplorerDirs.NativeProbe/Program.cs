@@ -14,8 +14,8 @@ internal static class Program
     [STAThread]
     static int Main(string[] args)
     {
-        if (args is ["--product-persisted-sort-host-private-desktop", var persistedHost, var persistedAdapter, var persistedPath, var persistedPhase] && persistedPhase is "write" or "read")
-            return PrivateDesktopShellProbe.RunProductPersistedSortHost(persistedHost, persistedAdapter, persistedPath, persistedPhase == "read");
+        if (args is ["--product-persisted-sort-host-private-desktop", var persistedHost, var persistedAdapter, var persistedPath, var persistedPhase] && persistedPhase is "write" or "read" or "read-unknown")
+            return PrivateDesktopShellProbe.RunProductPersistedSortHost(persistedHost, persistedAdapter, persistedPath, persistedPhase != "write", persistedPhase == "read-unknown");
         if (args is ["--product-notification-capture-smoke", var captureAdapter])
             return ProductNotificationCaptureProbe.Run(captureAdapter);
         if (args.Length == 2 && args[0] == "--inspect-qdr-viewstate")

@@ -2249,6 +2249,8 @@ internal static class ShellProviderLocationProbe
         }
     }
 
+    internal static bool IsNativeGroupingEnabled(nint viewWindow) => SendMessageW(FindNativeListView(viewWindow), 0x10AF, 0, 0) != 0;
+
     internal static string ReadNativeGroupingState(nint viewWindow)
     {
         var list = FindNativeListView(viewWindow);
@@ -2276,7 +2278,7 @@ internal static class ShellProviderLocationProbe
         finally { Marshal.FreeHGlobal(pointer); }
     }
 
-    private static string[][] ReadNativeListViewCells(nint viewWindow, int subItemCount)
+    internal static string[][] ReadNativeListViewCells(nint viewWindow, int subItemCount)
     {
         var listView = FindNativeListView(viewWindow);
         var count = checked((int)SendMessageW(listView, 0x1004, 0, 0)); // LVM_GETITEMCOUNT.

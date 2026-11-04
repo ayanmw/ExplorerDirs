@@ -23,12 +23,23 @@ internal static class ProfileOwnerMultiRootShellHostProbe
 
     private static string? _persistedSessionPath;
     private static bool _readPersistedSession;
-    internal static int RunPersistedSortForProbe(string adapterPath, string sessionPath, bool read)
+    private static bool _unavailableSizes;
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int ConfigureUnavailableProvider(nint query, nint invalidate, [MarshalAs(UnmanagedType.Bool)] bool enabled);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int UnavailableSizeQuery([MarshalAs(UnmanagedType.LPWStr)] string path, nint cancelled,
+        out ulong bytes, out ulong files, out ulong folders, out ulong unreadable, out uint flags);
+    private static int QueryUnavailable(string path, nint cancelled, out ulong bytes, out ulong files,
+        out ulong folders, out ulong unreadable, out uint flags)
+    { bytes = files = folders = unreadable = 0; flags = 0; return 0; }
+
+    internal static int RunPersistedSortForProbe(string adapterPath, string sessionPath, bool read, bool unavailable)
     {
         _persistedSessionPath = Path.GetFullPath(sessionPath);
         _readPersistedSession = read;
+        _unavailableSizes = unavailable;
         try { return RunWithSortContextForProbe(adapterPath); }
-        finally { _persistedSessionPath = null; _readPersistedSession = false; }
+        finally { _persistedSessionPath = null; _readPersistedSession = false; _unavailableSizes = false; }
     }
 
     private static bool _inputDuringSort;
@@ -114,6 +125,8 @@ internal static class ProfileOwnerMultiRootShellHostProbe
         object? owner = null;
         HwndSource? source = null;
         nint adapterModule = 0;
+        ConfigureUnavailableProvider? configureUnavailable = null;
+        UnavailableSizeQuery? unavailableQuery = null;
         nint sortPolicyModule = 0, sortPolicyRoot = 0;
         var hosts = new List<HwndHost>();
         var replayViews = new List<object>();
@@ -167,6 +180,14 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 .Invoke(null, [classId, profile, adapterPath]);
             if (owner is not IDisposable) throw new InvalidOperationException("The production profile owner is not disposable.");
             Console.WriteLine("profile-owner-multi-root-shell-host: stage=profile-owner-created");
+            if (_unavailableSizes)
+            {
+                adapterModule = NativeLibrary.Load(adapterPath);
+                configureUnavailable = Marshal.GetDelegateForFunctionPointer<ConfigureUnavailableProvider>(NativeLibrary.GetExport(adapterModule, "ConfigureFolderSizeProvider"));
+                unavailableQuery = QueryUnavailable;
+                Marshal.ThrowExceptionForHR(configureUnavailable(Marshal.GetFunctionPointerForDelegate(unavailableQuery), 0, true));
+            }
+
 
             var codec = appAssembly.GetType("ExplorerDirs.App.QdrShellPathCodec", throwOnError: true)!;
             var hostType = appAssembly.GetType("ExplorerDirs.App.ExplorerBrowserHost", throwOnError: true)!;
@@ -425,6 +446,26 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                     var counts = readCounts.Invoke(host, [false, false]);
                     return counts is not null && (int)counts.GetType().GetProperty("Total")!.GetValue(counts)! == expectedItemCount;
                 }, TimeSpan.FromSeconds(30), $"Product pane {index + 1} did not enumerate its own {expectedItemCount} rows.");
+            }
+
+            if (_unavailableSizes)
+            {
+                var firstWindow = (nint)hostViewWindow.GetValue(hosts[0])!;
+                WaitUntil(() => ShellProviderLocationProbe.IsNativeGroupingEnabled(firstWindow),
+                    TimeSpan.FromSeconds(36), "Unavailable size values left saved grouping unmaterialized after its bounded recovery.");
+                var state = hostType.GetMethod("CaptureViewState")!.Invoke(hosts[0], null)!;
+                if (!Equals(state.GetType().GetProperty("GroupKey")!.GetValue(state), replayViews[0].GetType().GetProperty("GroupKey")!.GetValue(replayViews[0])))
+                    throw new InvalidOperationException("Unknown size grouping lost the saved group key.");
+                string[][] unknownCells = [];
+                WaitUntil(() =>
+                {
+                    unknownCells = ShellProviderLocationProbe.ReadNativeListViewCells(firstWindow, 3);
+                    return unknownCells.Length == 2;
+                }, TimeSpan.FromSeconds(10), "Unknown-size native refresh did not restore its rows.");
+                if (unknownCells.Length != 2 || unknownCells.Any(row => !string.IsNullOrWhiteSpace(row[1]) && row[1] != "—"))
+                    throw new InvalidOperationException($"Unavailable size cells: {string.Join("/", unknownCells.Select(row => string.Join("|", row)))}.");
+                Console.WriteLine($"product-unavailable-size-grouping: preserved=True; {ShellProviderLocationProbe.ReadNativeGroupingState(firstWindow)}");
+                return 0;
             }
 
             if (_readPersistedSession)
@@ -1080,6 +1121,8 @@ internal static class ProfileOwnerMultiRootShellHostProbe
         }
         finally
         {
+            if (configureUnavailable is not null) Marshal.ThrowExceptionForHR(configureUnavailable(0, 0, false));
+            GC.KeepAlive(unavailableQuery);
             deadlineStall?.Stop();
             if (sortPolicyRoot != 0) Marshal.FreeCoTaskMem(sortPolicyRoot);
             if (sortPolicyModule != 0) NativeLibrary.Free(sortPolicyModule);

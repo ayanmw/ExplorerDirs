@@ -3123,6 +3123,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 }
             }
         }
+        void FinishGroupedRecovery(string stage)
+        {
+            Trace(stage);
+            FinishSortRecovery();
+            if (IsCurrent()) Refresh();
+        }
         var timer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromMilliseconds(100)
@@ -3142,7 +3148,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             if (!IsCurrent() || readinessWait.Elapsed >= TimeSpan.FromSeconds(30))
             {
                 Trace("cancel-or-deadline");
-                FinishSortRecovery();
+                if (grouped && IsCurrent()) FinishGroupedRecovery("grouped-unknown-deadline-refresh");
+                else FinishSortRecovery();
                 return;
             }
 
@@ -3337,7 +3344,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
             if (!IsCurrent() || readinessWait.Elapsed >= TimeSpan.FromSeconds(30))
             {
-                FinishSortRecovery();
+                if (grouped && IsCurrent()) FinishGroupedRecovery("grouped-unknown-deadline-refresh");
+                else FinishSortRecovery();
                 return;
             }
             if (readinessFoundPendingValue)
@@ -3353,9 +3361,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 // A saved group can be accepted before DefView builds its groups.
                 // One refresh after all Size values exist materializes native grouping;
                 // refreshing before values are ready only creates an unsorted empty group.
-                Trace("grouped-values-ready-refresh");
-                FinishSortRecovery();
-                if (IsCurrent()) Refresh();
+                FinishGroupedRecovery("grouped-values-ready-refresh");
                 return;
             }
             // SetSortColumns restores state but does not always execute a provider's

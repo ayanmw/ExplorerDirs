@@ -363,3 +363,14 @@ The product candidate schedules provider Size restoration for grouped views too.
 Final independent processes: group-fixed-write.log PID 16508 saved four actual hosts via production SessionStore; group-fixed-read.log PID 63364 restored initial native row order plus mode/icon/sort/group/mixed/columns. Both exited 0 with private Desktop foreground/input/cleanup guards passing. group-startup-input-regression.log passed all four hosts. group-startup-policy-regression.log passed grouped identities and all ungroup policy/direction cases. This uses fresh physical fixture paths, not full application restart/path/placement acceptance, and the two-directory workload does not establish large-folder performance or unavailable-Everything behavior. Initial grouped materialization now performs one native refresh after values are ready; visible startup repaint remains for consolidated acceptance.
 
 Final complete background gate: 30/30 passed, src/.state/background-checks/20261105-043602-c7c214b442bc460fb99502f6b34187b3/summary.json. No visible GUI or real publication.
+
+
+### 2026-11-05 Unavailable Size source: bounded grouping fallback
+
+Added explicit read-unknown to the existing cross-process fixture. It supplies a native provider callback returning S_OK with availability flags=0, matching the Everything-only unavailable contract; it does not query the user's Everything service or enable built-in fallback. Delegates stay rooted until native unregister, before host/owner/module cleanup. The original product failed after 36 seconds because its 30-second readiness exit never materialized grouping (unknown-group-red.log).
+
+Current grouped recovery now materializes native grouping on its existing deadline as well as when all values are ready, guarded against retirement/user-input cancellation. Values remain unknown; there is no forced zero or native scanner fallback. unknown-group-final.log exited 0: native grouping enabled, one group, both original rows returned with em dash Size cells, saved group retained, foreground/input/cleanup guards passed. Earlier post-refresh assertions sampled the temporary zero-row phase and were corrected to wait for restored rows, without weakening unknown-value assertions. Known-value replay regression is recorded separately in unknown-fallback-known-regression.log.
+
+Limitation: terminal unknown is not distinguishable from pending through this Shell value contract, so materialization can wait the existing 30-second bound. This fixes permanent missing grouping, not prompt unavailable-state startup. Real Everything IPC failure and visible timing remain separate acceptance boundaries. No release.
+
+Final background gate: 30/30 passed, src/.state/background-checks/20261105-044326-e5c3efab3fa544d79fa14455163f098e/summary.json. No visible UI or real publication.
