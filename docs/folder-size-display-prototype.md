@@ -100,4 +100,33 @@ Everything 新增夹具的索引有延迟：第一次未等待索引就绪的原
 dotnet run --project src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj -c Release -- --product-four-pane-host-large-private-desktop src/ExplorerDirs.HostProbe/bin/Release/net10.0-windows10.0.19041.0/ExplorerDirs.HostProbe.dll
 ```
 
-后续重点为大目录延迟及未索引/不可用场景，再集中进行菜单、文件操作、重命名、拖放和可见体验验收；不覆盖现有 temp.86 预览。
+## 热缓存读取优化
+
+2026-11-04 后续性能批次。先增加关闭通知身份记录的独立入口和原生比较器采样信息，再测量既有的最终 1,025 行大小读取，不额外重复读取来预热。确认已有快照时，`ScheduleRecursiveSizeSnapshot`、`GetDetailsEx` 和大小显示文字仍反复调用 Shell 路径解析。
+
+实现 `TryGetLocalRecursiveSize`，复用此前仅用于排序的本目录路径＋文件身份缓存查询。命中时直接读取同一缓存的值和可用/不完整标志；未命中保留原 canonical Shell 解析和扫描路径。不增加逐项缓存，不放宽身份检查，也不将未知值当零。
+
+关闭通知身份记录的同一 4×1,025 目录负载，最终每窗格读取全部已缓存值的耗时：
+
+| 窗格 | 修改前 ms | 修改后 ms |
+| --- | ---: | ---: |
+| 1 | 166.01 | 2.86 |
+| 2 | 185.88 | 2.50 |
+| 3 | 165.51 | 2.73 |
+| 4 | 163.51 | 2.97 |
+
+日志分别为 `product-four-pane-1025-warm-before.log` 和 `product-four-pane-1025-warm-after.log`。修改前功能通过、输入/前台保护失败；修改后功能与整轮隔离保护通过。缓存均为 4,100 条、1,508,800 B、0 淘汰，没有测量进程整体内存差值。这是特定热缓存操作的对照，不是整体程序加速倍数；两个独立夹具运行也受到系统缓存和并发负载影响。
+
+没有用轻量场景代替原故障负载：修改后继续执行通知身份记录开启的原始大目录场景，四窗格值/排序/选区/焦点功能均通过，热读取仍约 2.2～3.3 ms，但其中一处排序等待约 36 秒。该轮输入/前台保护失败。关闭记录的两轮等待明显较短，但不足以把全部差异归因于记录开关；不声明冷启动或首次排序性能已经解决。
+
+优化后实际产品小目录的单元格、大小分组/筛选恢复检查通过；真实 Everything 专用来源的值、0 B、40 KB 更新、F5、分组及自动更新子检查通过，自动完整枚举仍为 0。这两轮检测到用户输入，整轮保护不记通过。25 项后台门槛全部通过，报告 `src/.state/background-checks/20261104-141751-3475d4548642426e9abfa942b087bbce/summary.json`。
+
+另发现原生产品/诊断脚本直接调用 cl.exe，没有显式 `/O2`，当前进程也没有 CL/_CL_ 环境覆盖。MSVC 命令行默认 `/Od`，见 [微软说明](https://learn.microsoft.com/en-gb/cpp/build/reference/od-disable-debug?view=msvc-170)。因此后续需单独对齐原生 Release 参数与构建信息并验证，不把本次热缓存收益混同于编译优化收益；本次尚未改这些编译参数。
+
+关闭观察器入口：
+
+```powershell
+dotnet run --project src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj -c Release -- --product-four-pane-host-large-no-observer-private-desktop src/ExplorerDirs.HostProbe/bin/Release/net10.0-windows10.0.19041.0/ExplorerDirs.HostProbe.dll
+```
+
+后续重点为原生 Release 参数、诊断记录开销、冷值/首次排序与未索引场景，再集中进行菜单、文件操作、重命名、拖放和可见体验验收；不覆盖现有 temp.86 预览。

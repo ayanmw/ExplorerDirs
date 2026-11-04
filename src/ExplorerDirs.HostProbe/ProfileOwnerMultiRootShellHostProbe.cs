@@ -314,10 +314,13 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             var readFocusedRow = typeof(ShellProviderLocationProbe).GetMethod("ReadShellFocusedRow",
                 BindingFlags.Static | BindingFlags.NonPublic)!;
             var paneFocus = new string?[hosts.Count];
+            var paneWarmReadMilliseconds = new double[hosts.Count];
             for (var index = 0; index < hosts.Count; index++)
             {
                 var host = hosts[index];
+                var warmRead = Stopwatch.StartNew();
                 paneValues[index] = (string[])readValues.Invoke(null, [hostType, host, expectedItemCount])!;
+                paneWarmReadMilliseconds[index] = warmRead.Elapsed.TotalMilliseconds;
 
                 var viewWindow = (nint)hostViewWindow.GetValue(host)!;
                 var selection = readSelection.Invoke(null, [viewWindow])!;
@@ -335,6 +338,8 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 throw new InvalidOperationException("The product panes changed the foreground window.");
             var valueEdges = paneValues.Select(values => $"{values.Length}:{values[0]}..{values[^1]}");
             var cacheMetrics = adapterModule == 0 ? "diagnostic-counters=unavailable" : ReadCacheMetrics(adapterModule);
+            Console.WriteLine("profile-owner-multi-root-shell-host: warm-size-read-ms=[" + string.Join('|',
+                paneWarmReadMilliseconds.Select(value => value.ToString("F2", System.Globalization.CultureInfo.InvariantCulture))) + "]");
             Console.WriteLine($"profile-owner-multi-root-shell-host: large={large}; diagnostic-notification-identity-capture={(adapterModule != 0 ? captureNotificationIdentities.ToString() : "unavailable")}; simultaneous-hosts={hosts.Count}; rows-per-pane={expectedItemCount}; roots=independent; value-ready-ms=[{string.Join('|', paneValueReadyMilliseconds)}]; sort-ready-ms=[{string.Join('|', paneSortReadyMilliseconds)}]; recursive-sort-value-edges=[{string.Join(" || ", valueEdges)}]; source-cache-capacity={cacheCapacity}; cache=[{cacheMetrics}]; selections=[{string.Join('|', paneSelections.Select(values => string.Join(',', values)))}]; focused-rows=[{string.Join('|', paneFocus)}]; parents-hidden=True; foreground-unchanged=True");
             return 0;
         }
@@ -432,7 +437,16 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             NativeLibrary.GetExport(module, "GetSyntheticRecursiveSizeCacheEvictionsForProbe"))();
         // Those scan counters increment only in NATIVEPROBE builds. Their zero
         // exports in the product diagnostic DLL are not measured absence of IO.
-        return $"entries={snapshots};payload={payload};hits={hits};misses={misses};evictions={evictions};scan-counters=unavailable-in-product-diagnostics";
+        long Read64(string name) => Marshal.GetDelegateForFunctionPointer<GetCounter64>(NativeLibrary.GetExport(module, name))();
+        var comparisons = Read64("GetProductRecursiveCompareCount");
+        var samples = Read64("GetProductRecursiveCompareTimingSamples");
+        var sampledTicks = Read64("GetProductRecursiveCompareSampledTicks");
+        var maximumTicks = Read64("GetProductRecursiveCompareMaximumSampleTicks");
+        var fastHits = Read64("GetProductRecursiveCompareFastPathHits");
+        var fastMisses = Read64("GetProductRecursiveCompareFastPathMisses");
+        var meanMicroseconds = samples > 0 ? sampledTicks * 1_000_000.0 / Stopwatch.Frequency / samples : 0;
+        var maximumMicroseconds = maximumTicks * 1_000_000.0 / Stopwatch.Frequency;
+        return FormattableString.Invariant($"entries={snapshots};payload={payload};hits={hits};misses={misses};evictions={evictions};compare-count={comparisons};compare-samples={samples};sampled-mean-us={meanMicroseconds:F2};sampled-max-us={maximumMicroseconds:F2};size-fast-hits={fastHits};size-fast-misses={fastMisses};scan-counters=unavailable-in-product-diagnostics");
     }
 
     private static void WaitUntil(Func<bool> condition, TimeSpan timeout, string message, int pollMilliseconds = 20)

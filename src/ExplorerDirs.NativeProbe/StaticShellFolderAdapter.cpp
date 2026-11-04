@@ -4276,7 +4276,8 @@ namespace
                     std::wstring parsingName;
                     ULONGLONG cachedBytes = 0;
                     bool available = true;
-                    const bool cached = SUCCEEDED(GetAbsoluteParsingName(sizeChild, &parsingName)) &&
+                    bool cached = TryGetLocalRecursiveSize(sizeChild, &cachedBytes, nullptr, &available);
+                    if (!cached) cached = SUCCEEDED(GetAbsoluteParsingName(sizeChild, &parsingName)) &&
                         _recursiveSizeStore->TryGet(parsingName, sizeChild->identity, &cachedBytes, nullptr, nullptr, nullptr, &available);
                     // Before the first async result, the PIDL's placeholder is not a real zero-byte total.
                     // Keep synchronous probe behavior, but expose pending and unavailable async values as empty.
@@ -4827,6 +4828,25 @@ namespace
             }
             catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
         }
+        bool TryGetLocalRecursiveSize(const SyntheticChild* child, ULONGLONG* bytes,
+            ULONGLONG* unreadable = nullptr, bool* available = nullptr) const
+        {
+            if (!child || !_recursiveSizeStore || !(child->attributes & FILE_ATTRIBUTE_DIRECTORY) ||
+                !child->identity.available || _backingPath.empty()) return false;
+            // Warm display/property reads used to reparse every child through Shell
+            // even after sorting had found its cached value. Reuse that exact fast
+            // key and identity check; misses still use the canonical Shell fallback.
+            thread_local std::wstring parsingName;
+            try
+            {
+                parsingName.assign(_backingPath);
+                if (parsingName.back() != L'\\' && parsingName.back() != L'/') parsingName.push_back(L'\\');
+                parsingName.append(child->name);
+                return _recursiveSizeStore->TryGet(parsingName, child->identity, bytes,
+                    nullptr, nullptr, unreadable, available);
+            }
+            catch (const std::bad_alloc&) { return false; }
+        }
         HRESULT GetAbsoluteParsingName(const SyntheticChild* child, std::wstring* parsingName) const
         {
             if (!child || !parsingName || !_inner || !_backingRoot) return E_INVALIDARG;
@@ -4911,10 +4931,11 @@ namespace
             if (InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeBatchByViewForProbe, 0, 0))
                 return ScheduleRecursiveSizeBatchForView(child);
 
+            ULONGLONG cachedBytes = 0;
+            if (TryGetLocalRecursiveSize(child, &cachedBytes)) return S_OK;
             std::wstring parsingName;
             auto result = GetAbsoluteParsingName(child, &parsingName);
             if (FAILED(result)) return result;
-            ULONGLONG cachedBytes = 0;
             if (_recursiveSizeStore->TryGet(parsingName, child->identity, &cachedBytes)) return S_OK;
 
             std::wstring childPath;
@@ -5517,25 +5538,14 @@ namespace
             if (_recursiveSizeStore && (child->attributes & FILE_ATTRIBUTE_DIRECTORY) &&
                 child->identity.available && !_backingPath.empty())
             {
-                // CompareIDs runs repeatedly during Shell sorting; reuse the current folder path
-                // instead of reparsing the same child PIDL through the Shell on every comparison.
-                thread_local std::wstring comparisonParsingName;
-                try
+                ULONGLONG bytes = 0;
+                if (TryGetLocalRecursiveSize(child, &bytes))
                 {
-                    comparisonParsingName.assign(_backingPath);
-                    if (comparisonParsingName.back() != L'\\' && comparisonParsingName.back() != L'/')
-                        comparisonParsingName.push_back(L'\\');
-                    comparisonParsingName.append(child->name);
-                    ULONGLONG bytes = 0;
-                    if (_recursiveSizeStore->TryGet(comparisonParsingName, child->identity, &bytes))
-                    {
 #if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
-                        InterlockedIncrement64(&g_productRecursiveCompareFastPathHits);
+                    InterlockedIncrement64(&g_productRecursiveCompareFastPathHits);
 #endif
-                        return bytes;
-                    }
+                    return bytes;
                 }
-                catch (const std::bad_alloc&) { }
 #if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
                 InterlockedIncrement64(&g_productRecursiveCompareFastPathMisses);
 #endif
@@ -5558,8 +5568,9 @@ namespace
             std::wstring parsingName;
             ULONGLONG cachedBytes = 0, unreadable = 0;
             bool available = true;
-            if (FAILED(GetAbsoluteParsingName(child, &parsingName)) ||
-                !_recursiveSizeStore->TryGet(parsingName, child->identity, &cachedBytes, nullptr, nullptr, &unreadable, &available))
+            if (!TryGetLocalRecursiveSize(child, &cachedBytes, &unreadable, &available) &&
+                (FAILED(GetAbsoluteParsingName(child, &parsingName)) ||
+                !_recursiveSizeStore->TryGet(parsingName, child->identity, &cachedBytes, nullptr, nullptr, &unreadable, &available)))
                 return FormatSyntheticSizeText(bytes);
             if (!available) return L"\x2014";
             if (unreadable == 0) return FormatSyntheticSizeText(bytes);

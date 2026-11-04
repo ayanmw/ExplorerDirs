@@ -1,4 +1,6 @@
-﻿2026-11-04 文件夹大小产品接线：保留 ExplorerBrowser/原生 DefView，通过标准 PKEY_Size 和实际行 PIDL 补充目录显示文字；订阅当前目录而非整个 profile，以让原生列表应用条目通知。原生四视图自动增删改名、选区/焦点及零完整枚举通过，隔离保护同轮通过。标准 Size 的保存排序恢复原先被 GUID 标题条件排除，现针对 provider 开放命名列就绪检查；四个实际 WPF 宿主的大小显示、独立升降序和选区子检查通过，但该轮输入保护未通过，整项不记通过。没有替换成普通列表，没有覆盖 release；菜单、拖放、主题及可见体验仍需集中验收。见 [实现与验证](folder-size-display-prototype.md)。
+﻿2026-11-04 热缓存大小读取复验：复用既有路径与文件身份缓存查询，消除已缓存值读取中的重复 Shell 解析；未命中保留原处理。四根各 1,025 目录的每窗格热读取由约 164～186 ms 降至 2.5～3.0 ms，缓存载荷相同，优化后该轮隔离守卫通过。原始观察开启场景仍有长排序等待，不声明冷启动或整体性能达标。25 项后台检查通过。详见 [热缓存记录](folder-size-display-prototype.md#热缓存读取优化)。
+
+2026-11-04 文件夹大小产品接线：保留 ExplorerBrowser/原生 DefView，通过标准 PKEY_Size 和实际行 PIDL 补充目录显示文字；订阅当前目录而非整个 profile，以让原生列表应用条目通知。原生四视图自动增删改名、选区/焦点及零完整枚举通过，隔离保护同轮通过。标准 Size 的保存排序恢复原先被 GUID 标题条件排除，现针对 provider 开放命名列就绪检查；四个实际 WPF 宿主的大小显示、独立升降序和选区子检查通过，但该轮输入保护未通过，整项不记通过。没有替换成普通列表，没有覆盖 release；菜单、拖放、主题及可见体验仍需集中验收。见 [实现与验证](folder-size-display-prototype.md)。
 
 2026-10-31 自有行模型属性事件合同补充：NativeProbe 的合成 adapter 事件分类现在包含 `SHCNE_ATTRIBUTES`，以便只读/隐藏等属性变化使行模型重新枚举；仅完成 classifier smoke 与编译，未创建 Shell view 或验证真实通知/绘制。它属于隔离 IShellView 迁移原型，不是当前 ExplorerBrowser 产品功能。详见[隔离调查](folder-size-column-investigation.md#2026-10-31-隔离属性变更通知分类)。
 

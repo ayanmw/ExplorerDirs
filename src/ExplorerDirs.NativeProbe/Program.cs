@@ -38,6 +38,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunProductFourPaneHost(productHostProbe);
         if (args is ["--product-four-pane-host-large-private-desktop", var largeProductHostProbe])
             return PrivateDesktopShellProbe.RunProductFourPaneHost(largeProductHostProbe, large: true);
+        if (args is ["--product-four-pane-host-large-no-observer-private-desktop", var unobservedProductHostProbe])
+            return PrivateDesktopShellProbe.RunProductFourPaneHost(unobservedProductHostProbe, large: true, observeNotifications: false);
         if (args.Length == 1 && args[0] == "--shell-namespace-profile-owners-private-desktop")
             return PrivateDesktopShellProbe.RunShellNamespaceProfileOwners();
         if (args.Length == 1 && args[0] == "--shell-link-profile-clone-private-desktop")
