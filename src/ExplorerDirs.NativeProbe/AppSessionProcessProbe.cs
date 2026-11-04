@@ -249,6 +249,20 @@ internal static class AppSessionProcessProbe
         AwaitRows(5, "file-burst-create");
         foreach (var file in burstFiles) File.Delete(file);
         AwaitRows(2, "file-burst-delete");
+        foreach (var file in files) File.WriteAllBytes(file, new byte[37]);
+        AwaitRows(3, "same-name-seed");
+        foreach (var file in files)
+        {
+            File.Delete(file);
+            File.WriteAllBytes(file, new byte[83]);
+        }
+        // Let the delayed delete quiet period expire before checking the replacement.
+        Thread.Sleep(2000);
+        AwaitRows(3, "same-name-recreate-settled");
+        if (files.Any(file => new FileInfo(file).Length != 83))
+            throw new InvalidOperationException("Same-name replacement content was unexpectedly changed.");
+        foreach (var file in files) File.Delete(file);
+        AwaitRows(2, "same-name-final-delete");
     }
 
     private static void VerifySession(SessionState expected, SessionState? actual)
