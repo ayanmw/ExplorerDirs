@@ -202,3 +202,14 @@ sort-post-input-host.log、sort-input-consecutive-no-edit.log、sort-input-revie
 普通产品的混合策略激活与菜单方向校正、恢复期间用户原生排序/重命名/导航的剩余边界、整批temp.86集中可见验收均保持未完成；不发布中间版本。
 
 最终审查源码的30项后台整轮通过：src/.state/background-checks/20261105-020009-23edead34bee427b94ebdeea12a381ef/summary.json。此前一轮20261105-015737亦通过，但早于列头/WM_COMMAND区分和过期回调清理补充，最终证据以上述020009为准。未覆盖发布。
+
+
+### 2026-11-05 显式排序取消与原生编辑框补充
+
+增加两项显式私有桌面入口：--product-sort-command-host-private-desktop、--product-sort-rename-host-private-desktop，参数同输入探针（HostProbe.dll、实验adapter.dll）。均复用实际四宿主及其后续完整检查，不创建可见用户桌面窗口，不发送全局键盘输入。
+
+命令场景在临时降序、真实行已就绪时模拟原生命令输入边界并调用Shell canonical sortascending。sort-command-cancellation-final.log整项通过：原任务出现取消记录且没有继续发送saved-verb，当前升序和后续降序保持正确；并通过四窗格行序/数值、分组筛选、导航、选区焦点、关闭上下文及隔离守卫。只覆盖此canonical命令序列，不等价于真实菜单ID路由或用户选择其他列。
+
+重命名场景显式使用SVSI_EDIT在folder-large打开真实Edit，泵消息350ms确认编辑仍聚焦、排序仍为临时降序（未在编辑中重排），向私有桌面编辑控件发送Escape取消后，恢复原排序与最新选区。sort-rename-host-final.log整项通过且隔离守卫干净。首轮因反射遗漏Public标志失败（sort-rename-host.log），已修正探针，不将该轮记成功。该证据覆盖原生编辑生命周期，不替代物理F2/方向键、长时间编辑及拖选验收。
+
+普通连续选择回归sort-boundaries-selection-control.log再次整项通过。HostProbe/NativeProbe Release构建均0警告0错误，diff检查通过。本批只扩展诊断入口/测试，没有修改产品实现或重跑宣称整轮30项总检。混合策略正式激活、原生菜单/列头方向同步、剩余交互合同及temp.86集中验收继续推进，不覆盖发布。

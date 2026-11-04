@@ -14,6 +14,28 @@ internal static class ProfileOwnerMultiRootShellHostProbe
 
     private static string? _sortContextAdapter;
     private static bool _inputDuringSort;
+    private static bool _renameDuringSort;
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int SelectProbeItem(nint self, int index, uint flags);
+    [DllImport("user32.dll")] private static extern nint GetFocus();
+    [DllImport("user32.dll", EntryPoint = "SendMessageW")]
+    private static extern nint SendProbeMessage(nint hwnd, uint message, nint wParam, nint lParam);
+
+    internal static int RunRenameDuringSortForProbe(string adapterPath)
+    {
+        _renameDuringSort = true;
+        try { return RunInputDuringSortForProbe(adapterPath); }
+        finally { _renameDuringSort = false; }
+    }
+
+    private static bool _commandDuringSort;
+    internal static int RunCommandDuringSortForProbe(string adapterPath)
+    {
+        _commandDuringSort = true;
+        try { return RunInputDuringSortForProbe(adapterPath); }
+        finally { _commandDuringSort = false; }
+    }
+
     internal static int RunInputDuringSortForProbe(string adapterPath)
     {
         _inputDuringSort = true;
@@ -209,15 +231,51 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                             // Record native rows before and after input completion; direction alone cannot prove gesture readiness.
                             var beforeInputRows = readNativeRows.Invoke(null, [(nint)hostViewWindow.GetValue(hosts[0])!])!;
                             Console.WriteLine($"sort-input-boundary: before={beforeInputRows}");
-                            hostType.GetMethod("NoteNativeUserInput", BindingFlags.Instance | BindingFlags.NonPublic)!
-                                .Invoke(hosts[0], [(nint)hostViewWindow.GetValue(hosts[0])!]);
-                            var afterInputRows = readNativeRows.Invoke(null, [(nint)hostViewWindow.GetValue(hosts[0])!])!;
-                            Console.WriteLine($"sort-input-boundary: after={afterInputRows}");
-                            // Only the latest gesture before the queued capture runs may win.
-                            selectItem.Invoke(null, [hostType, hosts[0], Path.Combine(folders[0], "folder-small")]);
-                            hostType.GetMethod("NoteNativeUserInput", BindingFlags.Instance | BindingFlags.NonPublic)!
-                                .Invoke(hosts[0], [(nint)hostViewWindow.GetValue(hosts[0])!]);
-                            selectItem.Invoke(null, [hostType, hosts[0], Path.Combine(folders[0], "folder-large")]);
+                            if (_commandDuringSort)
+                            {
+                                hostType.GetMethod("NoteNativeUserInput", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(hosts[0], [nint.Zero]);
+                                var invokeCommand = hostType.GetMethod("InvokeVirtualSortVerb", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                                if (!(bool)invokeCommand.Invoke(hosts[0], ["sortascending", new Func<bool>(() => true)])!)
+                                    throw new InvalidOperationException("User ascending command during initial recovery failed.");
+                            }
+                            else
+                            {
+                                hostType.GetMethod("NoteNativeUserInput", BindingFlags.Instance | BindingFlags.NonPublic)!
+                                    .Invoke(hosts[0], [(nint)hostViewWindow.GetValue(hosts[0])!]);
+                                var afterInputRows = readNativeRows.Invoke(null, [(nint)hostViewWindow.GetValue(hosts[0])!])!;
+                                Console.WriteLine($"sort-input-boundary: after={afterInputRows}");
+                                // Only the latest gesture before the queued capture runs may win.
+                                selectItem.Invoke(null, [hostType, hosts[0], Path.Combine(folders[0], "folder-small")]);
+                                hostType.GetMethod("NoteNativeUserInput", BindingFlags.Instance | BindingFlags.NonPublic)!
+                                    .Invoke(hosts[0], [(nint)hostViewWindow.GetValue(hosts[0])!]);
+                                selectItem.Invoke(null, [hostType, hosts[0], Path.Combine(folders[0], "folder-large")]);
+                            }
+                            if (_renameDuringSort)
+                            {
+                                var nativeRows = readNativeRows.Invoke(null, [(nint)hostViewWindow.GetValue(hosts[0])!])!;
+                                var names = (string[])nativeRows.GetType().GetField("Item2")!.GetValue(nativeRows)!;
+                                var renameIndex = Array.IndexOf(names, "folder-large");
+                                if (renameIndex < 0) throw new InvalidOperationException("Rename target disappeared before editing.");
+                                var selectNative = Marshal.GetDelegateForFunctionPointer<SelectProbeItem>(
+                                    Marshal.ReadIntPtr(Marshal.ReadIntPtr(view), 15 * IntPtr.Size));
+                                if (selectNative(view, renameIndex, 0x1f) < 0)
+                                    throw new InvalidOperationException("Native rename setup failed.");
+                                PumpDispatcher(TimeSpan.FromMilliseconds(350));
+                                var editing = hostType.GetMethod("IsRenameEditorFocused", BindingFlags.Instance | BindingFlags.Public)!;
+                                if (!(bool)editing.Invoke(hosts[0], null)!)
+                                    throw new InvalidOperationException("Initial sort ended the native rename editor.");
+                                object?[] editingSort = [1, null];
+                                if ((int)sourceType.GetMethod("GetSortColumns")!.Invoke(reader, editingSort)! < 0 ||
+                                    editingSort[1] is not System.Collections.IEnumerable editingColumns ||
+                                    (int)editingColumns.Cast<object>().Single().GetType().GetProperty("Direction")!.GetValue(editingColumns.Cast<object>().Single())! != -1)
+                                    throw new InvalidOperationException("Recovery reordered the view under an active rename editor.");
+                                // Cancel only the private Desktop's native Edit; no global keyboard injection.
+                                SendProbeMessage(GetFocus(), 0x0100, 0x1b, 0);
+                                PumpDispatcher(TimeSpan.FromMilliseconds(50));
+                                if ((bool)editing.Invoke(hosts[0], null)!)
+                                    throw new InvalidOperationException("Native rename editor did not cancel.");
+                                Console.WriteLine("product-initial-sort-rename: editor-preserved=True; sort-paused=True; cancelled=True");
+                            }
                             WaitUntil(() =>
                             {
                                 object?[] completedSort = [1, null];
@@ -227,8 +285,15 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                                     !(bool)hostType.GetProperty("ViewCaptureFailed", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!.GetValue(hosts[0])!;
                             }, TimeSpan.FromSeconds(5), "Input-preserving recovery did not settle in the saved direction.");
                             PumpDispatcher(TimeSpan.FromMilliseconds(350));
+                            if (_commandDuringSort)
+                            {
+                                var commandTrace = (string)hostType.GetProperty("InitialSortRecoveryStatus", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(hosts[0])!;
+                                if (!commandTrace.Contains("cancel-or-deadline", StringComparison.Ordinal) ||
+                                    commandTrace.Contains("saved-verb-returned", StringComparison.Ordinal))
+                                    throw new InvalidOperationException("Old recovery dispatched its saved direction after an explicit user command.");
+                            }
                             var selection = readSelection.Invoke(null, [(nint)hostViewWindow.GetValue(hosts[0])!])!;
-                            if (!((string[])selection.GetType().GetField("Item1")!.GetValue(selection)!).SequenceEqual(["folder-large"]))
+                            if (!_commandDuringSort && !((string[])selection.GetType().GetField("Item1")!.GetValue(selection)!).SequenceEqual(["folder-large"]))
                                 throw new InvalidOperationException("Recovery overwrote the subsequent user's selection.");
                             var invokeSort = hostType.GetMethod("InvokeVirtualSortVerb", BindingFlags.Instance | BindingFlags.NonPublic)!;
                             hostType.GetMethod("NoteNativeUserInput", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(hosts[0], [nint.Zero]);
@@ -242,7 +307,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                             if (!(bool)invokeSort.Invoke(hosts[0], ["sortascending", new Func<bool>(() => true)])!)
                                 throw new InvalidOperationException("Could not restore the normal test baseline.");
                             hostType.GetMethod("CaptureViewState")!.Invoke(hosts[0], null);
-                            Console.WriteLine("product-initial-sort-input: gesture-before-recovery=True; consecutive-input-retained=True; new-selection-retained=True; later-user-sort-retained=True");
+                            Console.WriteLine($"product-initial-sort-input: scenario={(_renameDuringSort ? "rename" : _commandDuringSort ? "command" : "selection")}; settled-saved-direction=True; later-user-sort-retained=True");
                         }
                         transientCaptureObserved = true;
                         transientCaptureTimer.Stop();
