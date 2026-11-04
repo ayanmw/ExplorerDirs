@@ -21,6 +21,7 @@
 #include <propkey.h>
 #include <strsafe.h>
 #include <algorithm>
+#include <atomic>
 #include <condition_variable>
 #include <functional>
 #include <memory>
@@ -64,6 +65,9 @@ static void InvalidateManagedFolderSize(PCWSTR path)
 
 namespace
 {
+#if defined(EXPLORERDIRS_SIZE_TEXT_EXPERIMENT)
+    std::atomic<ULONG_PTR> g_sizeDisplayCookie{0};
+#endif
 #if defined(EXPLORERDIRS_SIZE_TRACE_EXPERIMENT)
 #define ED_SIZE_TRACE TraceSizeRequest
     void TraceSizeRequest(const char* stage, const void* instance, PCWSTR name, DWORD code,
@@ -4444,6 +4448,100 @@ namespace
             return result;
         }
 #if defined(EXPLORERDIRS_NOTIFICATION_BRIDGE_EXPERIMENT)
+        static UINT SizeDisplayMessage()
+        {
+            static const UINT message = RegisterWindowMessageW(L"ExplorerDirs.SizeDisplayReady.v1");
+            return message;
+        }
+#if defined(EXPLORERDIRS_SIZE_TEXT_EXPERIMENT)
+        bool IsSizeDisplayColumn(int subItem)
+        {
+            if (!_shellView || subItem < 0) return false;
+            IColumnManager* manager = nullptr;
+            if (FAILED(_shellView->QueryInterface(IID_PPV_ARGS(&manager)))) return false;
+            UINT count = 0;
+            auto result = manager->GetColumnCount(CM_ENUM_VISIBLE, &count);
+            std::vector<PROPERTYKEY> columns;
+            try { if (SUCCEEDED(result) && count <= 512) columns.resize(count); }
+            catch (const std::bad_alloc&) { manager->Release(); return false; }
+            if (columns.empty()) { manager->Release(); return false; }
+            result = manager->GetColumns(CM_ENUM_VISIBLE, columns.data(), count);
+            manager->Release();
+            return SUCCEEDED(result) && static_cast<UINT>(subItem) < count && columns[subItem] == PKEY_Size;
+        }
+        bool ReadSizeDisplayRow(int index, std::wstring* name, std::wstring* text)
+        {
+            if (!_shellView || index < 0) return false;
+            IFolderView* view = nullptr;
+            if (FAILED(_shellView->QueryInterface(IID_PPV_ARGS(&view)))) return false;
+            PITEMID_CHILD item = nullptr;
+            const auto itemResult = view->Item(index, &item);
+            view->Release();
+            if (FAILED(itemResult) || !item) return false;
+            const auto* child = SyntheticData(item);
+            bool read = false;
+            if (child && (child->attributes & FILE_ATTRIBUTE_DIRECTORY) &&
+                !(child->attributes & FILE_ATTRIBUTE_REPARSE_POINT))
+            {
+                SHELLDETAILS details{};
+                if (SUCCEEDED(GetDetailsOf(item, 1, &details)))
+                {
+                    LPWSTR value = nullptr;
+                    if (SUCCEEDED(StrRetToStrW(&details.str, item, &value)) && value)
+                    {
+                        try { name->assign(child->name); text->assign(value); read = true; }
+                        catch (const std::bad_alloc&) {}
+                        CoTaskMemFree(value);
+                    }
+                }
+            }
+            CoTaskMemFree(item);
+            return read;
+        }
+        void FillSizeDisplayText(HWND window, NMLVDISPINFOW* display, const LVITEMW& request)
+        {
+            if (!_shellView || !display || !request.pszText ||
+                request.pszText == LPSTR_TEXTCALLBACKW || request.cchTextMax <= 0 ||
+                !IsSizeDisplayColumn(request.iSubItem)) return;
+            std::wstring name, text;
+            if (!ReadSizeDisplayRow(request.iItem, &name, &text) || _notificationWindow != window) return;
+            // Read cached/asynchronous values only. The Shell retains row ownership,
+            // selection, hit testing and all ordinary file-item text.
+            // The default handler may substitute its own string pointer. Write only
+            // into the caller's original buffer, never into Shell-owned text storage.
+            StringCchCopyNW(request.pszText, request.cchTextMax, text.c_str(), request.cchTextMax - 1);
+            display->item.pszText = request.pszText;
+            display->item.cchTextMax = request.cchTextMax;
+            display->item.mask &= ~LVIF_DI_SETITEM;
+            if (_sizeDisplayRows.size() >= 256 && !_sizeDisplayRows.count(display->item.iItem))
+                _sizeDisplayRows.erase(_sizeDisplayRows.begin());
+            _sizeDisplayRows.insert_or_assign(display->item.iItem, std::make_pair(std::move(name), std::move(text)));
+            ED_SIZE_TRACE("display-text-filled", this, display->item.pszText, display->item.iItem, display->item.iSubItem, 0);
+        }
+        void RefreshSizeDisplayRows(HWND window)
+        {
+            if (_refreshingSizeDisplay || _notificationWindow != window || !_shellView) return;
+            _refreshingSizeDisplay = true;
+            try
+            {
+                auto rows = _sizeDisplayRows;
+                for (const auto& entry : rows)
+                {
+                    std::wstring name, text;
+                    if (_notificationWindow != window) break;
+                    if (!ReadSizeDisplayRow(entry.first, &name, &text) || name != entry.second.first)
+                    { _sizeDisplayRows.erase(entry.first); continue; }
+                    if (_notificationWindow != window) break;
+                    if (text == entry.second.second) continue;
+                    _sizeDisplayRows.insert_or_assign(entry.first, std::make_pair(name, text));
+                    if (_sizeDisplayList && IsWindow(_sizeDisplayList) && IsChild(window, _sizeDisplayList))
+                        SendMessageW(_sizeDisplayList, LVM_REDRAWITEMS, entry.first, entry.first);
+                }
+            }
+            catch (const std::bad_alloc&) {}
+            _refreshingSizeDisplay = false;
+        }
+#endif
         static UINT BackingNotificationMessage()
         {
             static const UINT message = RegisterWindowMessageW(L"ExplorerDirs.BackingFolderChange.v1");
@@ -4458,13 +4556,20 @@ namespace
             // This reference belongs to the HWND, not to the Shell view COM object.
             AddRef();
             _notificationWindow = window;
+#if defined(EXPLORERDIRS_SIZE_TEXT_EXPERIMENT)
+            _sizeDisplayWindow.store(window);
+#endif
             SHChangeNotifyEntry entry{ _backingRoot, FALSE };
             _backingNotificationRegistration = SHChangeNotifyRegister(window,
                 SHCNRF_ShellLevel | SHCNRF_InterruptLevel | SHCNRF_NewDelivery,
                 SHCNE_ALLEVENTS, BackingNotificationMessage(), 1, &entry);
+            ED_SIZE_TRACE("physical-view-subscription", this, nullptr, _backingNotificationRegistration, 0, 0);
             if (!_backingNotificationRegistration)
             {
                 _notificationWindow = nullptr;
+#if defined(EXPLORERDIRS_SIZE_TEXT_EXPERIMENT)
+                _sizeDisplayWindow.store(nullptr);
+#endif
                 RemoveWindowSubclass(window, BackingNotificationProc, reinterpret_cast<UINT_PTR>(this));
                 Release();
                 return E_FAIL;
@@ -4505,6 +4610,7 @@ namespace
         }
         void ForwardBackingNotification(PCIDLIST_ABSOLUTE first, PCIDLIST_ABSOLUTE second, LONG event)
         {
+            ED_SIZE_TRACE("physical-view-event", this, nullptr, event, 0, 0);
             const auto kind = event & ~SHCNE_INTERRUPT;
             if (!first || !_notificationWindow) return;
             // Retain the existing cache invalidation behavior for physical paths.
@@ -4514,7 +4620,10 @@ namespace
             auto* translatedFirst = ProviderNotificationIdentity(first, kind);
             auto* translatedSecond = second ? ProviderNotificationIdentity(second, kind) : nullptr;
             if (translatedFirst && (!second || translatedSecond))
+            {
+                ED_SIZE_TRACE("provider-view-forwarded", this, nullptr, kind, 0, 0);
                 SHChangeNotify(kind, SHCNF_IDLIST | SHCNF_FLUSHNOWAIT, translatedFirst, translatedSecond);
+            }
             else if (ILIsEqual(first, _backingRoot) || ILIsParent(_backingRoot, first, FALSE))
                 SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_IDLIST | SHCNF_FLUSHNOWAIT, _root, nullptr);
             if (translatedFirst) CoTaskMemFree(translatedFirst);
@@ -4526,6 +4635,11 @@ namespace
             auto* self = reinterpret_cast<SyntheticSortFolder*>(data);
             if (message == WM_NCDESTROY)
             {
+#if defined(EXPLORERDIRS_SIZE_TEXT_EXPERIMENT)
+                self->_sizeDisplayWindow.store(nullptr);
+                self->_sizeDisplayRows.clear();
+                self->_sizeDisplayList = nullptr;
+#endif
                 self->_notificationWindow = nullptr;
                 const auto registration = self->_backingNotificationRegistration;
                 self->_backingNotificationRegistration = 0;
@@ -4536,6 +4650,36 @@ namespace
                 self->Release();
                 return result;
             }
+#if defined(EXPLORERDIRS_SIZE_TEXT_EXPERIMENT)
+            if (message == WM_NOTIFY && lParam)
+            {
+                auto* header = reinterpret_cast<NMHDR*>(lParam);
+                WCHAR className[64]{};
+                if (header->code == LVN_GETDISPINFOW &&
+                    GetClassNameW(header->hwndFrom, className, ARRAYSIZE(className)) &&
+                    wcscmp(className, L"SysListView32") == 0)
+                {
+                    auto* display = reinterpret_cast<NMLVDISPINFOW*>(lParam);
+                    const auto request = display->item;
+                    const bool requestedText = (display->item.mask & LVIF_TEXT) != 0;
+                    self->AddRef();
+                    const auto result = DefSubclassProc(window, message, wParam, lParam);
+                    if (requestedText && self->_notificationWindow == window)
+                    {
+                        self->_sizeDisplayList = header->hwndFrom;
+                        try { self->FillSizeDisplayText(window, display, request); }
+                        catch (...) { TraceSyntheticSortStage("size-display: text-read-failed"); }
+                    }
+                    self->Release();
+                    return result;
+                }
+            }
+            if (message == SizeDisplayMessage() && wParam == self->_sizeDisplayCookie)
+            {
+                self->AddRef(); self->RefreshSizeDisplayRows(window); self->Release();
+                return 0;
+            }
+#endif
             if (message == BackingNotificationMessage())
             {
                 PIDLIST_ABSOLUTE* pidls = nullptr;
@@ -4551,7 +4695,13 @@ namespace
                     SHChangeNotification_Unlock(lock);
                     // Parsing can reenter window destruction; hold the callback until all clones are released.
                     self->AddRef();
-                    try { self->ForwardBackingNotification(first, second, event); }
+                    try
+                    {
+                        self->ForwardBackingNotification(first, second, event);
+#if defined(EXPLORERDIRS_SIZE_TEXT_EXPERIMENT)
+                        self->RefreshSizeDisplayRows(window);
+#endif
+                    }
                     catch (...) { TraceSyntheticSortStage("backing-notification: forwarding-failed"); }
                     if (first) CoTaskMemFree(first);
                     if (second) CoTaskMemFree(second);
@@ -5283,6 +5433,10 @@ namespace
                             }
                         }
 
+#if defined(EXPLORERDIRS_SIZE_TEXT_EXPERIMENT)
+                        if (const auto window = self->_sizeDisplayWindow.load())
+                            PostMessageW(window, SizeDisplayMessage(), self->_sizeDisplayCookie, 0);
+#endif
                         if (notifyDirectory)
                         {
                             ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeNotificationsSentForProbe);
@@ -5783,6 +5937,13 @@ namespace
 #if defined(EXPLORERDIRS_NOTIFICATION_BRIDGE_EXPERIMENT)
         HWND _notificationWindow = nullptr;
         ULONG _backingNotificationRegistration = 0;
+#if defined(EXPLORERDIRS_SIZE_TEXT_EXPERIMENT)
+        std::atomic<HWND> _sizeDisplayWindow{nullptr};
+        const ULONG_PTR _sizeDisplayCookie = ++g_sizeDisplayCookie;
+        HWND _sizeDisplayList = nullptr;
+        bool _refreshingSizeDisplay = false;
+        std::map<int, std::pair<std::wstring, std::wstring>> _sizeDisplayRows;
+#endif
 #endif
         mutable std::mutex _backingColumnMutex;
         mutable std::vector<UINT> _backingColumnOrdinals;

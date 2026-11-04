@@ -8,7 +8,7 @@ using System.Windows.Threading;
 using ExplorerDirs.App;
 using ExplorerDirs.NativeProbe;
 
-public static class SyntheticShellSortProbe
+public static partial class SyntheticShellSortProbe
 {
     private static readonly Guid FolderView2Id = new("1AF3A467-214F-4298-908E-06B03E0B39F9");
     private static readonly Guid ShellFolderViewId = new("37A378C0-F82D-11CE-AE65-08002B2E1262");
