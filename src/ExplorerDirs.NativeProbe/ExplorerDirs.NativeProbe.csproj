@@ -12,6 +12,8 @@
     <PackageReference Include="OfficeIMO.Excel" Version="3.5.1" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="../ExplorerDirs.App/WindowPlacement.cs" Link="WindowPlacement.cs" />
+    <Compile Include="../ExplorerDirs.App/WindowPlacementStore.cs" Link="WindowPlacementStore.cs" />
     <Compile Include="../ExplorerDirs.App/ShellViewRedrawLease.cs" Link="ShellViewRedrawLease.cs" />
     <Compile Include="../ExplorerDirs.App/FolderSizeSortContext.cs" Link="FolderSizeSortContext.cs" />
   </ItemGroup>

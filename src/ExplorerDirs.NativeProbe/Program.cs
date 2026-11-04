@@ -14,6 +14,13 @@ internal static class Program
     [STAThread]
     static int Main(string[] args)
     {
+        if (args is ["--full-app-session-cleanup-owned-profile", var failedAppProfile])
+        {
+            AppSessionProcessProbe.CleanupOwnedProfile(failedAppProfile);
+            return 0;
+        }
+        if (args is ["--full-app-session-private-desktop", var preparedAppRun])
+            return PrivateDesktopShellProbe.RunFullAppSession(preparedAppRun);
         if (args is ["--product-everything-hosts-private-desktop", var realEverythingHost, var realEverythingAdapter])
             return PrivateDesktopShellProbe.RunProductEverythingHosts(realEverythingHost, realEverythingAdapter);
         if (args is ["--product-grouped-four-pane-host-large-private-desktop", var groupedCountHost, var groupedCountAdapter, var groupedCountText] && int.TryParse(groupedCountText, out var groupedCount) && groupedCount > 2)
