@@ -24,12 +24,15 @@ public static partial class SyntheticShellSortProbe
                 !FolderSizeSortContext.TryCreate(adapterPath, root, true, -1, out second, out secondLocation))
                 throw new InvalidOperationException("Expected context capability was unavailable.");
             Check(verify(firstLocation, 0));
+            if (!first!.Contains(firstLocation) || first.Contains(secondLocation) || first.Contains(root))
+                throw new InvalidOperationException("Context location ownership check failed.");
             Check(verify(secondLocation, 3));
             first!.Update(true, 1);
             Check(verify(firstLocation, 1));
             Check(verify(secondLocation, 3));
             prepared = first.Prepare(nextRoot);
             Check(verify(prepared, 1));
+            if (!first.Contains(prepared)) throw new InvalidOperationException("Prepared next location lost context ownership.");
             first.Update(false, -1);
             Check(verify(firstLocation, 2));
             Check(verify(prepared, 2));

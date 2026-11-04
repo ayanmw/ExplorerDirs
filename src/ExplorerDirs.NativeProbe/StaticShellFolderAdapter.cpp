@@ -6615,6 +6615,28 @@ extern "C" __declspec(dllexport) HRESULT WINAPI PrepareFolderSizeSortLocation(
     const auto& state = *static_cast<std::shared_ptr<SizeSortContext>*>(lease);
     return CreateSizeSortPolicyPidl(source, (state->id << 2) | state->policy.load(), output);
 }
+extern "C" __declspec(dllexport) HRESULT WINAPI IsFolderSizeSortLocationForContext(
+    PCIDLIST_ABSOLUTE source, void* lease, BOOL* matches)
+{
+    if (!source || !lease || !matches) return E_INVALIDARG;
+    *matches = FALSE;
+    std::wstring path;
+    const auto result = ReadSyntheticRootPathFromPidl(source, &path, true);
+    if (FAILED(result)) return result;
+    if (result == S_FALSE) return S_OK;
+    const auto& state = *static_cast<std::shared_ptr<SizeSortContext>*>(lease);
+    for (auto* part = reinterpret_cast<PCUIDLIST_RELATIVE>(source); !ILIsEmpty(part); part = ILNext(part))
+    {
+        if (part->mkid.cb < kSyntheticRootPathPidlHeaderSize + sizeof(DWORD)) continue;
+        const auto* header = reinterpret_cast<const SyntheticRootPathPidlItem*>(part);
+        if (header->magic != 0x32525044) continue;
+        DWORD encoded = 0;
+        CopyMemory(&encoded, reinterpret_cast<const BYTE*>(header) + kSyntheticRootPathPidlHeaderSize, sizeof(encoded));
+        *matches = (encoded >> 2) == state->id;
+        break;
+    }
+    return S_OK;
+}
 extern "C" __declspec(dllexport) HRESULT WINAPI SetFolderSizeSortPolicy(void* lease, DWORD policy)
 { return SetDynamicSizeSortPolicyForProbe(lease, policy); }
 extern "C" __declspec(dllexport) void WINAPI ReleaseFolderSizeSortContext(void* lease)

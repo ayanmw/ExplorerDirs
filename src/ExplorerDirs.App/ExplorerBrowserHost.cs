@@ -197,6 +197,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private bool _folderSizesEnabled;
     private string? _nativeDirectoryIdentity;
     private long _folderSizeRedirectVersion;
+    private FolderSizeSortContextFactory? _folderSizeSortContextFactory;
+    private FolderSizeSortContext? _folderSizeSortContext;
     internal bool IsFolderSizeProvider => _nativeDirectoryIdentity is { } identity &&
         QdrShellPathCodec.TryGetProviderPath(identity, _folderSizeProfileClassId, out _);
 
@@ -205,6 +207,36 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         _folderSizeRedirectVersion++;
         _folderSizeProfileClassId = profileClassId;
         _folderSizesEnabled = enabled;
+    }
+
+    internal void ConfigureFolderSizeSortContextFactory(FolderSizeSortContextFactory factory)
+    {
+        if (_folderSizeSortContext is not null) throw new InvalidOperationException("Cannot replace an active tab sort context factory.");
+        _folderSizeSortContextFactory = factory;
+    }
+
+    private nint PrepareFolderSizeSortLocation(nint source, Func<bool> isCurrent)
+    {
+        if (!isCurrent() || !_folderSizesEnabled || _folderSizeSortContextFactory is null ||
+            !ShellLocationIdentity.TryGetProviderParsingIdentity(source, _folderSizeProfileClassId, out _) ||
+            !isCurrent()) return 0;
+        var intended = FolderSizeLocationPolicy.MigrateLegacySizeKey(_viewState, isProvider: true);
+        var direction = intended.SortColumns.FirstOrDefault(sort => sort.Key == FolderSizeLocationPolicy.SizeColumn)?.Direction ?? 1;
+        if (_folderSizeSortContext is null)
+        {
+            if (!_folderSizeSortContextFactory(source, intended.MixedSizeSort, direction,
+                out var context, out var prepared)) return 0;
+            _folderSizeSortContext = context;
+            return prepared;
+        }
+        _folderSizeSortContext.Update(intended.MixedSizeSort, direction);
+        return _folderSizeSortContext.Contains(source) ? 0 : _folderSizeSortContext.Prepare(source);
+    }
+
+    private void UpdateFolderSizeSortPolicy(IReadOnlyList<SortColumnState> sorts)
+    {
+        var direction = sorts.FirstOrDefault(sort => sort.Key == FolderSizeLocationPolicy.SizeColumn)?.Direction ?? 1;
+        _folderSizeSortContext?.Update(_viewState.MixedSizeSort, direction);
     }
 
     internal bool HasNativeView => _browser is not null && _viewWindow != IntPtr.Zero;
@@ -677,7 +709,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         if (view == IntPtr.Zero) return unchecked((int)0x80004005);
         try
         {
-            var target = new NativeViewStateTarget(view, Current);
+            var target = new NativeViewStateTarget(view, Current, UpdateFolderSizeSortPolicy);
             if (disabled)
             {
                 var result = target.SetGrouping(null, ascending: false);
@@ -2395,6 +2427,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             // A newer request may cancel this probe while Shell parses or
             // reads the folder identity; do not register stale preparation.
             if (!_navigationGate.IsCurrent(probe) || _browser is null) return;
+            var sortLocation = PrepareFolderSizeSortLocation(pidl,
+                () => _navigationGate.IsCurrent(probe) && _browser is not null);
+            if (sortLocation != 0)
+            {
+                Marshal.FreeCoTaskMem(pidl);
+                pidl = sortLocation;
+            }
+            if (!_navigationGate.IsCurrent(probe) || _browser is null) return;
             TrackIssuedPath(issuedPath);
             int? result;
             var browser = _browser;
@@ -2655,7 +2695,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 using (ShellViewRedrawLease.TrySuppress(view))
                 {
                     if (!ShellViewStateRestore.ApplyMode(style.Mode, requestedIconSize,
-                            new NativeViewStateTarget(view, Current),
+                            new NativeViewStateTarget(view, Current, UpdateFolderSizeSortPolicy),
                             result => MenuError?.Invoke(this, $"无法切换查看方式：0x{result:X8}"), Current)) return false;
                 }
                 // Re-enabling redraw does not guarantee that a control invalidated while
@@ -2730,7 +2770,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             // Do not capture a partial preset over the previous complete state.
             // Native setters can pump a navigation callback, just like getters.
             _viewRestoreFailed = true;
-            var applied = ShellViewStateRestore.ApplyPreset(validated, new NativeViewStateTarget(view, Current), (step, result) =>
+            var applied = ShellViewStateRestore.ApplyPreset(validated, new NativeViewStateTarget(view, Current, UpdateFolderSizeSortPolicy), (step, result) =>
             {
                 var label = step == ShellViewRestoreStep.Mode ? "查看方式" : "列设置";
                 MenuError?.Invoke(this, $"查看预设的{label}未能完整应用；会话保存将等待重新读取。0x{result:X8}");
@@ -2776,7 +2816,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         if (view == IntPtr.Zero) return;
         try
         {
-            var restored = ShellViewStateRestore.Restore(saved, new NativeViewStateTarget(view, Current), (step, result) =>
+            var restored = ShellViewStateRestore.Restore(saved, new NativeViewStateTarget(view, Current, UpdateFolderSizeSortPolicy), (step, result) =>
             {
                 var label = step switch
                 {
@@ -3161,13 +3201,17 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         finally { Interlocked.Decrement(ref _shellSortCommandDispatchDepth); }
     }
 
-    private sealed class NativeViewStateTarget(nint view, Func<bool> isCurrent) : IShellViewStateTarget
+    private sealed class NativeViewStateTarget(nint view, Func<bool> isCurrent,
+        Action<IReadOnlyList<SortColumnState>>? beforeSorting = null) : IShellViewStateTarget
     {
         public int SetMode(uint mode, int iconSize) =>
             GetMethod<SetViewModeAndIconSizeDelegate>(view, 35)(view, mode, iconSize);
         public int SetColumns(IReadOnlyList<DisplayColumnState> columns) => ShellColumnManager.Apply(view, columns, isCurrent);
         public int SetSorting(IReadOnlyList<SortColumnState> columns)
         {
+            if (!isCurrent()) return unchecked((int)0x80004004);
+            beforeSorting?.Invoke(columns);
+            if (!isCurrent()) return unchecked((int)0x80004004);
             var native = columns.Select(sort => new NativeSortColumn
             {
                 Key = new NativePropertyKey { FormatId = sort.Key.FormatId, PropertyId = sort.Key.PropertyId },
@@ -5358,7 +5402,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         _searchHistory.Clear();
         _pendingFileOperationFocusRestore = null;
         _focusRestoreTimer.Stop();
-        if (_browser is null) return;
+        if (_browser is null)
+        {
+            _folderSizeSortContext?.Dispose();
+            _folderSizeSortContext = null;
+            return;
+        }
         try { UpdateQuickFilterAttachment(searchActive: true); }
         catch (COMException) { /* The browser may already have released its filter site. */ }
         DetachViewWindow();
@@ -5368,6 +5417,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         catch (COMException) { /* The browser may already have released its site. */ }
         Marshal.ReleaseComObject(_browser);
         _browser = null;
+        _folderSizeSortContext?.Dispose();
+        _folderSizeSortContext = null;
     }
 
     int IExplorerBrowserEvents.OnNavigationPending(IntPtr pidl)
@@ -5427,12 +5478,20 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var request = _navigationRequestVersion;
         var redirectVersion = _folderSizeRedirectVersion;
         if (!_folderSizesEnabled || _folderSizeProfileClassId is null || browser is null ||
-            _searchHistory.TryResolve(pidl, out _) ||
-            ShellLocationIdentity.TryGetProviderParsingIdentity(pidl, _folderSizeProfileClassId, out _) ||
-            !ShellLocationIdentity.TryGetPersistedIdentity(pidl, out var path, out _) ||
-            !ShellLocationIdentity.TryGetAttributes(pidl, out var attributes)) return false;
-        var routed = FolderSizeLocationPolicy.NativeIdentity(path, attributes, _folderSizeProfileClassId, true);
-        if (string.Equals(routed, path, StringComparison.OrdinalIgnoreCase)) return false;
+            _searchHistory.TryResolve(pidl, out _)) return false;
+        string path;
+        if (ShellLocationIdentity.TryGetProviderParsingIdentity(pidl, _folderSizeProfileClassId, out var providerIdentity))
+        {
+            if (_folderSizeSortContext is null || _folderSizeSortContext.Contains(pidl)) return false;
+            path = FolderSizeLocationPolicy.LogicalPath(providerIdentity, _folderSizeProfileClassId);
+        }
+        else
+        {
+            if (!ShellLocationIdentity.TryGetPersistedIdentity(pidl, out path, out _) ||
+                !ShellLocationIdentity.TryGetAttributes(pidl, out var attributes)) return false;
+            var routed = FolderSizeLocationPolicy.NativeIdentity(path, attributes, _folderSizeProfileClassId, true);
+            if (string.Equals(routed, path, StringComparison.OrdinalIgnoreCase)) return false;
+        }
         // Cancel before accepting the physical visit. Re-enter Browse only after this Shell callback exits.
         Dispatcher.BeginInvoke(DispatcherPriority.Normal, new Action(() =>
         {

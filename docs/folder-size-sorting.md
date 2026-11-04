@@ -144,3 +144,15 @@ FolderSizeSortContext 已加入产品源码，提供候选ABI能力检测、创�
 新 managed-sort-context-lifecycle-smoke 不创建浏览器/窗口、不注册namespace、不访问伪目录夹具：验证同路径两实例独立、跨目录准备仍共享策略、旧PIDL观察更新、非法方向不污染状态、重复释放、释放后调用拒绝、兄弟上下文继续可用及旧DLL能力缺失回退。managed-sort-context-lifecycle.log 通过；路径只是无IO编码输入，DLL加载本身仍有正常文件访问。
 
 后台总检加入隔离ABI严格构建与上述纯检查，共30项整轮通过：src/.state/background-checks/20261105-002725-7000d4f00a98429b9078a3254bc6ecb0/summary.json。此时源码为 f227743 加本批修改。常规产品DLL仍不启用候选ABI；适配层尚未绑定实际宿主导航、菜单或关闭流程，不声称产品生命周期已经覆盖。未发布。
+
+## 产品宿主导航与关闭接线（候选ABI仍隔离）
+
+App/ProfileShellNamespaceOwner 提供上下文工厂，按实际 DLL 完整导出集缓存能力；Pane 创建 tab 时绑定工厂。ExplorerBrowserHost 在发起 provider Browse 前准备本标签 PIDL，并在 Shell getter 后重新核对导航请求；同一上下文复用于下一物理目录，未带本标签上下文的 provider 访问重新经稳定路径进入。新增 Contains/IsFolderSizeSortLocationForContext 按上下文身份判定，不按物理路径全局共享。INI/地址继续用既有稳定物理路径。
+
+应用自有的 NativeViewStateTarget.SetSorting 在调用 Shell 前同步原子策略，并前后核对当前代际；关闭或重建 browser 时，先销毁 browser/TravelLog，再释放上下文。常规产品DLL尚无候选导出，工厂返回未支持，菜单不开放；尚未接实际用户原生菜单命令后的校正。
+
+纯生命周期测试新增旧普通PIDL、同/异上下文及跨目录PIDL的 Contains 检查，host-context-ownership-pure.log通过。候选四产品 HwndHost 探针 product-sort-context-host.log 证实四上下文独立、跨目录复用、后退/前进保持上下文与稳定路径，关闭后四上下文全部 retired=True，隔离守卫干净。但后续 pane3 保存排序失败：接口为Size升序、实际37/11降序，故整轮失败，不能记产品接线完成。首次误用了旧 net10.0-windows 输出目录导致类型加载失败，已改用实际目标 net10.0-windows10.0.19041.0；未替换旧输出或发布文件。
+
+探针新增生命周期断言时发现：RootVisual=null仅会停放HwndHost；原探针source分支没有显式Dispose各host。现source销毁后逐一Dispose宿主，再断言上下文释放，避免以进程退出冒充产品关闭证据。此修正只影响探针，不改生产窗口关闭路径。
+
+普通后台30项整轮通过：src/.state/background-checks/20261105-004318-297c58096f9d4d7180dced442edb5593/summary.json（本批源码状态）。最后对HostProbe反射构造新增第三个排序回调的接线，HostProbe/App Release重建通过；未据此重跑并关闭候选保存排序失败。候选ABI native严格构建与最终diff检查通过。未覆盖temp.86。

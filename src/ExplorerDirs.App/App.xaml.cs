@@ -212,6 +212,12 @@ public partial class App : Application
     }
 
     internal void SetFolderSizeSource(FolderSizeSource source, bool? enabled = null) => _shellNamespaceOwner?.SetFolderSizeSource(source, enabled);
+    internal bool TryCreateFolderSizeSortContext(nint source, bool mixed, int direction,
+        out FolderSizeSortContext? context, out nint location)
+    {
+        context = null; location = 0;
+        return _shellNamespaceOwner is { } owner && owner.TryCreateSortContext(source, mixed, direction, out context, out location);
+    }
     internal void InvalidateFolderSizes(string path) => _shellNamespaceOwner?.InvalidateFolderSizes(path);
 
     private MainWindow CreateWindow(string sessionPath, string? startupDirectory, string? warning,

@@ -1828,6 +1828,8 @@ public partial class PaneControl : UserControl
             previewPaneVisible, detailsPaneVisible, _hiddenItemsPreference, _selectionCheckBoxes, _fullRowSelection,
             _disableGrouping, _softRefresh);
         browser.ConfigureFolderSizeLocations(_shellNamespaceProfileClassId, _folderSizesEnabled);
+        if (Application.Current is App application)
+            browser.ConfigureFolderSizeSortContextFactory(application.TryCreateFolderSizeSortContext);
         var tab = new TabItem();
         if (_compactMode) tab.Padding = new Thickness(4, 1, 4, 1);
         var state = new TabState { Owner = this, Tab = tab, Browser = browser, IsPinned = pinned,

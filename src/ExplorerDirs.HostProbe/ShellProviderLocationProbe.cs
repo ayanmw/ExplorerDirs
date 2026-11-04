@@ -1750,8 +1750,10 @@ internal static class ShellProviderLocationProbe
         {
             var targetType = hostType.GetNestedType("NativeViewStateTarget", BindingFlags.NonPublic)!;
             var constructor = targetType.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .Single(candidate => candidate.GetParameters().Length == 2);
-            var target = constructor.Invoke([view, new Func<bool>(() => true)]);
+                .Single(candidate => candidate.GetParameters().Length == 3);
+            var policyCallback = Delegate.CreateDelegate(constructor.GetParameters()[2].ParameterType, host,
+                hostType.GetMethod("UpdateFolderSizeSortPolicy", BindingFlags.Instance | BindingFlags.NonPublic)!);
+            var target = constructor.Invoke([view, new Func<bool>(() => true), policyCallback]);
             var setSorting = targetType.GetMethod("SetSorting", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!;
             return (int)setSorting.Invoke(target, [sortColumns])!;
         }

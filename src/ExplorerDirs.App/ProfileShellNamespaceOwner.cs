@@ -19,6 +19,7 @@ internal sealed class ProfileShellNamespaceOwner : IDisposable
     private readonly string _profileRoot;
     private nint _adapterModule;
     private FolderSizeNativeBridge? _folderSizeBridge;
+    private bool? _sortContextSupported;
 
     private ProfileShellNamespaceOwner(Guid classId, string adapterPath, string profileRoot, nint adapterModule)
     {
@@ -64,6 +65,21 @@ internal sealed class ProfileShellNamespaceOwner : IDisposable
         DeleteOwnedRegistration(_classId, _adapterPath, _profileRoot);
         module = Interlocked.Exchange(ref _adapterModule, 0);
         if (module != 0) NativeLibrary.Free(module);
+    }
+
+    internal bool TryCreateSortContext(nint source, bool mixed, int direction,
+        out FolderSizeSortContext? context, out nint location)
+    {
+        var module = Volatile.Read(ref _adapterModule);
+        ObjectDisposedException.ThrowIf(module == 0, this);
+        context = null; location = 0;
+        _sortContextSupported ??= NativeLibrary.TryGetExport(module, "CreateFolderSizeSortContext", out _) &&
+            NativeLibrary.TryGetExport(module, "PrepareFolderSizeSortLocation", out _) &&
+            NativeLibrary.TryGetExport(module, "SetFolderSizeSortPolicy", out _) &&
+            NativeLibrary.TryGetExport(module, "ReleaseFolderSizeSortContext", out _) &&
+            NativeLibrary.TryGetExport(module, "IsFolderSizeSortLocationForContext", out _);
+        return _sortContextSupported.Value && FolderSizeSortContext.TryCreate(_adapterPath, source, mixed,
+            direction, out context, out location);
     }
 
     internal void SetFolderSizeSource(FolderSizeSource source, bool? enabled = null)

@@ -6,7 +6,7 @@ using System.Runtime.Loader;
 // Loading HostProbe here keeps its WPF/App types out of the desktop-monitor thread.
 internal static class ProductFourPaneHostProbe
 {
-    internal static int Run(string hostProbePath, bool large = false, bool observeNotifications = true, bool forceSortDeadline = false)
+    internal static int Run(string hostProbePath, bool large = false, bool observeNotifications = true, bool forceSortDeadline = false, string? sortContextAdapter = null)
     {
         hostProbePath = Path.GetFullPath(hostProbePath);
         var directory = Path.GetDirectoryName(hostProbePath)!;
@@ -18,10 +18,12 @@ internal static class ProductFourPaneHostProbe
         {
             var assembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(hostProbePath);
             var type = assembly.GetType("ProfileOwnerMultiRootShellHostProbe", throwOnError: true)!;
-            var run = type.GetMethod("Run", BindingFlags.Static | BindingFlags.NonPublic)!;
+            var run = type.GetMethod(sortContextAdapter is null ? "Run" : "RunWithSortContextForProbe", BindingFlags.Static | BindingFlags.NonPublic)!;
             // The large case reproduces the previously failing four-root, 1,025-folders-per-root
             // workload, including notification identity observation and saved sorts.
-            return (int)run.Invoke(null, [false, large ? 1025 : 0, large, 8192, large && observeNotifications, forceSortDeadline])!;
+            return (int)run.Invoke(null, sortContextAdapter is null
+                ? [false, large ? 1025 : 0, large, 8192, large && observeNotifications, forceSortDeadline]
+                : [sortContextAdapter])!;
         }
         catch (TargetInvocationException error) when (error.InnerException is not null)
         {

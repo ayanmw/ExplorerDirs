@@ -12,6 +12,14 @@ internal static class ProfileOwnerMultiRootShellHostProbe
 {
     private const int LargeFolderCount = 500;
 
+    private static string? _sortContextAdapter;
+    internal static int RunWithSortContextForProbe(string adapterPath)
+    {
+        _sortContextAdapter = Path.GetFullPath(adapterPath);
+        try { return Run(); }
+        finally { _sortContextAdapter = null; }
+    }
+
     internal static object CreateViewStateForProbe(Assembly appAssembly) => CreateViewState(appAssembly, 0);
     internal static string FindProductAdapterForProbe() => FindProductAdapter();
 
@@ -35,6 +43,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
         HwndSource? source = null;
         nint adapterModule = 0;
         var hosts = new List<HwndHost>();
+        var sortContexts = new List<object>();
         DispatcherTimer? deadlineStall = null;
         var deadlineStalled = false;
         var foreground = GetForegroundWindow();
@@ -63,7 +72,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             var appAssembly = Assembly.Load("ExplorerDirs.App");
             Console.WriteLine("profile-owner-multi-root-shell-host: stage=assembly-loaded");
             var ownerType = appAssembly.GetType("ExplorerDirs.App.ProfileShellNamespaceOwner", throwOnError: true)!;
-            var adapterPath = (large && diagnosticAdapter || forceSortDeadline) ? FindProductDiagnosticAdapter() : FindProductAdapter();
+            var adapterPath = _sortContextAdapter ?? ((large && diagnosticAdapter || forceSortDeadline) ? FindProductDiagnosticAdapter() : FindProductAdapter());
             if (large && diagnosticAdapter || forceSortDeadline)
             {
                 adapterModule = NativeLibrary.Load(adapterPath);
@@ -111,6 +120,11 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 // Match PaneControl: provider identity is paired with its owning profile.
                 hostType.GetMethod("ConfigureFolderSizeLocations", BindingFlags.Instance | BindingFlags.NonPublic)!
                     .Invoke(host, [classId, true]);
+                var factoryType = appAssembly.GetType("ExplorerDirs.App.FolderSizeSortContextFactory", true)!;
+                var factory = Delegate.CreateDelegate(factoryType, owner,
+                    ownerType.GetMethod("TryCreateSortContext", BindingFlags.Instance | BindingFlags.NonPublic)!);
+                hostType.GetMethod("ConfigureFolderSizeSortContextFactory", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .Invoke(host, [factory]);
                 hosts.Add(host);
                 Grid.SetRow(host, index / 2);
                 Grid.SetColumn(host, index % 2);
@@ -173,6 +187,33 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                     var counts = readCounts.Invoke(host, [false, false]);
                     return counts is not null && (int)counts.GetType().GetProperty("Total")!.GetValue(counts)! == expectedItemCount;
                 }, TimeSpan.FromSeconds(30), $"Product pane {index + 1} did not enumerate its own {expectedItemCount} rows.");
+            }
+
+            if (_sortContextAdapter is not null)
+            {
+                var contextField = hostType.GetField("_folderSizeSortContext", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                foreach (var host in hosts)
+                    sortContexts.Add(contextField.GetValue(host) ?? throw new InvalidOperationException("Host did not create its sort context."));
+                if (sortContexts.Distinct().Count() != hosts.Count) throw new InvalidOperationException("Hosts shared sort contexts.");
+                var first = hosts[0];
+                void WaitForPath(string path, ulong[] expected)
+                {
+                    WaitUntil(() => string.Equals((string)hostType.GetProperty("CurrentPath")!.GetValue(first)!, path, StringComparison.OrdinalIgnoreCase),
+                        TimeSpan.FromSeconds(15), "Context navigation did not settle its physical path.");
+                    WaitUntil(() => ((string[])readValues.Invoke(null, [hostType, first, expectedItemCount])!)
+                        .Select(value => ulong.TryParse(value, out var bytes) ? bytes : ulong.MaxValue).Order().SequenceEqual(expected),
+                        TimeSpan.FromSeconds(15), "Context navigation did not restore this directory's values.");
+                    if (!ReferenceEquals(contextField.GetValue(first), sortContexts[0])) throw new InvalidOperationException("Navigation replaced the tab context.");
+                }
+                hostType.GetMethod("Navigate")!.Invoke(first, [folders[1]]);
+                WaitForPath(folders[1], expectedSizes[1]);
+                if (!(bool)hostType.GetMethod("GoBack")!.Invoke(first, null)!) throw new InvalidOperationException("Context history back failed.");
+                WaitForPath(folders[0], expectedSizes[0]);
+                if (!(bool)hostType.GetMethod("GoForward")!.Invoke(first, null)!) throw new InvalidOperationException("Context history forward failed.");
+                WaitForPath(folders[1], expectedSizes[1]);
+                if (!(bool)hostType.GetMethod("GoBack")!.Invoke(first, null)!) throw new InvalidOperationException("Context history return failed.");
+                WaitForPath(folders[0], expectedSizes[0]);
+                Console.WriteLine("product-sort-context-navigation: independent-four-contexts=True; cross-directory-reuse=True; back-forward=True; stable-physical-path=True");
             }
 
             var paneValues = new string[hosts.Count][];
@@ -386,17 +427,24 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 source.RootVisual = null;
                 source.Dispose();
             }
-            else
+            // Detaching RootVisual parks HwndHosts; explicit disposal is required to
+            // exercise product browser/context teardown rather than process-exit cleanup.
+            foreach (var host in hosts)
+                if (host is IDisposable disposable) disposable.Dispose();
+            var contextsRetired = true;
+            foreach (var context in sortContexts)
             {
-                foreach (var host in hosts)
-                    if (host is IDisposable disposable) disposable.Dispose();
+                try { context.GetType().GetMethod("Update", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(context, [false, 1]); contextsRetired = false; }
+                catch (TargetInvocationException error) when (error.InnerException is ObjectDisposedException) { }
             }
+            if (sortContexts.Count != 0) Console.WriteLine($"product-sort-context-close: count={sortContexts.Count}; retired={contextsRetired}");
             PumpDispatcher(TimeSpan.FromMilliseconds(200));
             if (owner is IDisposable lifetime) lifetime.Dispose();
             if (adapterModule != 0) NativeLibrary.Free(adapterModule);
             var registrationRemains = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(classKeyPath) is not null ||
                 Microsoft.Win32.Registry.CurrentUser.OpenSubKey(namespaceKeyPath) is not null;
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+            if (!contextsRetired) throw new InvalidOperationException("Closing product hosts did not retire sort contexts.");
             HostProbeForegroundGuard.EnsureUnchanged(foreground,
                 GetForegroundWindow(), "profile-owned multi-root Shell hosts");
             if (registrationRemains)
