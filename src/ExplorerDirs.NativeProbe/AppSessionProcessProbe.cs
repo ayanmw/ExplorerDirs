@@ -239,6 +239,11 @@ internal static class AppSessionProcessProbe
         }
         AwaitRows(2, "delete");
         Mark("delete-completed");
+        var files = additions.Select(directory => Path.Combine(Path.GetDirectoryName(directory)!, "external-file.txt")).ToArray();
+        foreach (var file in files) File.WriteAllBytes(file, new byte[37]);
+        AwaitRows(3, "file-create");
+        foreach (var file in files) File.Delete(file);
+        AwaitRows(2, "file-delete");
     }
 
     private static void VerifySession(SessionState expected, SessionState? actual)

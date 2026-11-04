@@ -5688,7 +5688,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                             ShellDeletedItemNotificationResult result;
                             try
                             {
-                                result = ShellDeletedItemNotification.NotifyDeletedFolder(folderView, deletedPath,
+                                result = ShellDeletedItemNotification.NotifyDeletedItem(folderView, deletedPath,
                                     _traceNativeUserMessages
                                         ? step => TraceShellSelectionRestore("delete-identity", step)
                                         : null, _folderSizeProfileClassId);

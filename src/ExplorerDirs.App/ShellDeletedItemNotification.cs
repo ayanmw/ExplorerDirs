@@ -10,7 +10,6 @@ internal enum ShellDeletedItemNotificationResult
     ItemsUnavailable,
     ItemUnavailable,
     ItemNotFound,
-    NotFolder,
     ShellFailure,
     Notified
 }
@@ -18,24 +17,25 @@ internal enum ShellDeletedItemNotificationResult
 internal static class ShellDeletedItemNotification
 {
     private const int MaxPath = 260;
-    private const uint ShellItemRemoved = 0x00000010;
+    private const uint ShellFolderRemoved = 0x00000010;
+    private const uint ShellFileRemoved = 0x00000004;
     private const uint PidlAndFlushNoWait = 0x00002000;
     private const uint FolderAttribute = 0x20000000;
     // A hidden 50k-item Shell view took about 260 ms to find one deleted path by scanning rows.
     private const int MaxIdentityScanViewItems = 512;
     private static readonly Guid ShellItemArrayId = new("B63EA76D-1F85-456F-A19C-48159EFA858B");
 
-    internal static bool ShouldNotifyPath(string path, bool isFolder) =>
-        isFolder && Path.IsPathFullyQualified(path) && path.Length < MaxPath;
+    internal static bool ShouldNotifyPath(string path) =>
+        Path.IsPathFullyQualified(path) && path.Length < MaxPath;
 
     internal static bool CanScanViewForDeletedFolder(int? viewItemCount, int? expectedViewItemCount, bool softRefresh = false) =>
         viewItemCount is > 0 and <= MaxIdentityScanViewItems &&
         (softRefresh || expectedViewItemCount is > 0 and <= MaxIdentityScanViewItems);
 
-    internal static ShellDeletedItemNotificationResult NotifyDeletedFolder(nint folderView, string path,
+    internal static ShellDeletedItemNotificationResult NotifyDeletedItem(nint folderView, string path,
         Action<string>? trace = null, Guid? providerClassId = null)
     {
-        if (folderView == 0 || !ShouldNotifyPath(path, isFolder: true)) return ShellDeletedItemNotificationResult.InvalidPath;
+        if (folderView == 0 || !ShouldNotifyPath(path)) return ShellDeletedItemNotificationResult.InvalidPath;
 
         nint items = 0;
         try
@@ -86,9 +86,9 @@ internal static class ShellDeletedItemNotification
                     uint attributes = 0;
                     var attributesResult = Measure($"attributes index={index}", trace,
                         () => At<Attributes>(item, 6)(item, FolderAttribute, out attributes));
-                    if (attributesResult < 0 ||
-                        (attributes & FolderAttribute) == 0)
-                        return ShellDeletedItemNotificationResult.NotFolder;
+                    if (attributesResult < 0)
+                        return ShellDeletedItemNotificationResult.ItemUnavailable;
+                    var removedEvent = (attributes & FolderAttribute) != 0 ? ShellFolderRemoved : ShellFileRemoved;
                     // Use the retained namespace identity; a deleted physical path
                     // cannot reconstruct its per-tab provider root and item metadata.
                     nint pidl = 0;
@@ -96,7 +96,7 @@ internal static class ShellDeletedItemNotification
                     {
                         if (SHGetIDListFromObject(item, out pidl) < 0 || pidl == 0)
                             return ShellDeletedItemNotificationResult.ItemUnavailable;
-                        SHChangeNotify(ShellItemRemoved, PidlAndFlushNoWait, pidl, IntPtr.Zero);
+                        SHChangeNotify(removedEvent, PidlAndFlushNoWait, pidl, IntPtr.Zero);
                         return ShellDeletedItemNotificationResult.Notified;
                     }
                     finally { if (pidl != 0) Marshal.FreeCoTaskMem(pidl); }

@@ -27,13 +27,13 @@ internal static class ShellDeleteNotificationBatchSmoke
             "the quiet-period drain returns the newest path and clears pending state");
         Check(batch.TryRecordForDispatch(@"C:\files\next-burst"),
             "a subsequent delete burst queues exactly one new handoff");
-        Check(ShellDeletedItemNotification.ShouldNotifyPath(@"C:\files\removed-folder", isFolder: true),
+        Check(ShellDeletedItemNotification.ShouldNotifyPath(@"C:\files\removed-folder"),
             "a confirmed folder path can use the RMDIR notification");
-        Check(!ShellDeletedItemNotification.ShouldNotifyPath(@"C:\files\removed-file.txt", isFolder: false),
-            "a file path is not sent as a RMDIR notification");
-        Check(!ShellDeletedItemNotification.ShouldNotifyPath(@"relative-folder", isFolder: true),
+        Check(ShellDeletedItemNotification.ShouldNotifyPath(@"C:\files\removed-file.txt"),
+            "a confirmed file path is eligible for a type-specific deletion notification");
+        Check(!ShellDeletedItemNotification.ShouldNotifyPath(@"relative-folder"),
             "relative folder paths are excluded from RMDIR notifications");
-        Check(!ShellDeletedItemNotification.ShouldNotifyPath(new string('x', 260), isFolder: true),
+        Check(!ShellDeletedItemNotification.ShouldNotifyPath(new string('x', 260)),
             "paths at or beyond MAX_PATH are excluded from RMDIR notifications");
         Check(ShellDeletedItemNotification.CanScanViewForDeletedFolder(512, 512),
             "deleted-folder identity scan is allowed at the bounded small-view limit");
