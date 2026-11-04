@@ -47,6 +47,7 @@ static std::mutex g_sizeSortContextMutex;
 static std::map<DWORD, std::weak_ptr<SizeSortContext>> g_sizeSortContexts;
 static DWORD g_nextSizeSortContext = 0;
 static volatile LONG g_sizeSortColumnClickCount = 0;
+static volatile LONG g_sizeSortShellPartition = 0;
 static std::shared_ptr<SizeSortContext> FindSizeSortContext(DWORD encoded)
 {
     std::lock_guard<std::mutex> lock(g_sizeSortContextMutex);
@@ -4014,7 +4015,7 @@ namespace
 #if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
                 const bool leftFolder = (leftChild->attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
                 const bool rightFolder = (rightChild->attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-                if (!CurrentMixedSizeSort() && leftFolder != rightFolder)
+                if (!InterlockedCompareExchange(&g_sizeSortShellPartition, 0, 0) && !CurrentMixedSizeSort() && leftFolder != rightFolder)
                 {
                     // Shell reverses CompareIDs for descending; compensate only the category
                     // boundary so folders remain first while each category follows the requested direction.
@@ -4148,6 +4149,13 @@ namespace
         HRESULT STDMETHODCALLTYPE GetAttributesOf(UINT count, PCUITEMID_CHILD_ARRAY items, SFGAOF* attributes) override
         {
             if (!attributes) return E_POINTER;
+#if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
+            if (count == 0 && InterlockedCompareExchange(&g_sizeSortShellPartition, 0, 0))
+            {
+                *attributes &= SFGAO_FOLDER | SFGAO_HASSUBFOLDER | SFGAO_FILESYSTEM | SFGAO_FILESYSANCESTOR;
+                return S_OK;
+            }
+#endif
             if (count == 0) { *attributes = SFGAO_FOLDER | SFGAO_HASSUBFOLDER; return S_OK; }
             if (!_inner) return E_UNEXPECTED;
             // IShellItem asks the namespace parent to classify path-marker PIDLs during session restore.
@@ -4379,7 +4387,8 @@ namespace
                 column == 3 ? relativePercentType : SHCOLSTATE_TYPE_STR);
 #if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
             // Keep Shell from applying an independent folder partition before our size policy.
-            if (column == 1) *state |= SHCOLSTATE_NOSORTBYFOLDERNESS;
+            if (column == 1 && (!InterlockedCompareExchange(&g_sizeSortShellPartition, 0, 0) || CurrentMixedSizeSort()))
+                *state |= SHCOLSTATE_NOSORTBYFOLDERNESS;
 #endif
             if (column == 1 && InterlockedCompareExchange(&g_syntheticCustomSizeColumnForProbe, 0, 0) &&
                 InterlockedCompareExchange(&g_syntheticSlowCustomSizeColumnForProbe, 0, 0))
@@ -6590,6 +6599,9 @@ extern "C" __declspec(dllexport) void WINAPI ReleaseDynamicSizeSortLeaseForProbe
     }
     delete owned;
 }
+
+extern "C" __declspec(dllexport) void WINAPI SetSizeSortShellPartitionForProbe(BOOL enabled)
+{ InterlockedExchange(&g_sizeSortShellPartition, enabled ? 1 : 0); }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSizeSortColumnClickCountForProbe()
 { return InterlockedCompareExchange(&g_sizeSortColumnClickCount, 0, 0); }

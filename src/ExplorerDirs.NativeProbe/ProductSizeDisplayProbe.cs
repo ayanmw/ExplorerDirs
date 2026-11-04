@@ -8,7 +8,7 @@ public static partial class SyntheticShellSortProbe
 {
     private static readonly List<StreamViewHost> ProductDisplayProcessLifetimeHosts = [];
     internal static int RunProductSizeDisplay(string adapterPath, bool explorerBrowser = false, bool rootControl = false,
-        FolderSizeSource source = FolderSizeSource.BuiltIn, bool sortPolicyExperiment = false, bool? encodedSortPolicy = null, bool columnStateSortPolicy = false, int encodedSortDirection = 1, bool dynamicSortPolicy = false, bool nativeSortEntrypoints = false, uint nativeSortMode = 4)
+        FolderSizeSource source = FolderSizeSource.BuiltIn, bool sortPolicyExperiment = false, bool? encodedSortPolicy = null, bool columnStateSortPolicy = false, int encodedSortDirection = 1, bool dynamicSortPolicy = false, bool nativeSortEntrypoints = false, uint nativeSortMode = 4, bool shellFolderPartition = false, bool reconcileSortCommands = false)
     {
         var fixture = Path.Combine(Path.GetTempPath(), "ExplorerDirs-ProductSizeDisplay-" + Guid.NewGuid().ToString("N"));
         nint root = 0, folder = 0, view = 0, parent = 0, browserPointer = 0, folderView = 0;
@@ -41,6 +41,9 @@ public static partial class SyntheticShellSortProbe
             diagnosticModule = NativeLibrary.Load(Path.GetFullPath(adapterPath));
             if (NativeLibrary.TryGetExport(diagnosticModule, "GetProductSyntheticEnumStarted", out var counter))
                 enumCounter = Marshal.GetDelegateForFunctionPointer<GetCounter>(counter);
+            if (shellFolderPartition)
+                Marshal.GetDelegateForFunctionPointer<SetSizePolicyFlag>(
+                    NativeLibrary.GetExport(diagnosticModule, "SetSizeSortShellPartitionForProbe"))(1);
             owner.SetFolderSizeSource(source, true);
             Console.WriteLine($"product-size-display-source: {source}");
             var mainIdentity = rootControl ? $"::{{{classId:D}}}" : CreatePathIdentityParsingName(classId, fixture);
@@ -178,10 +181,17 @@ public static partial class SyntheticShellSortProbe
                 if (FindListView(view) != listView) throw new InvalidOperationException("View mode replaced the observed list.");
                 Console.WriteLine($"product-size-sort-mode: mode={nativeSortMode}; same-list=True");
             }
+            if (reconcileSortCommands)
+            {
+                var selectedRow = Array.IndexOf(ReadColumnTextsForRows(listView, 0, 4), "file-2048.bin");
+                Check(At<SelectItem>(folderView, 15)(folderView, selectedRow, 0x1u | 0x4u | 0x10u));
+                Pump(50);
+            }
+            var policyDirection = 1;
             var headerMixed = false;
-            var publishPolicy = nativeSortEntrypoints ? Marshal.GetDelegateForFunctionPointer<SetDynamicSizePolicy>(
+            var publishPolicy = nativeSortEntrypoints && !shellFolderPartition && !reconcileSortCommands ? Marshal.GetDelegateForFunctionPointer<SetDynamicSizePolicy>(
                 NativeLibrary.GetExport(diagnosticModule, "SetDynamicSizeSortPolicyForProbe")) : null;
-            using var sortHeaderObserver = nativeSortEntrypoints
+            using var sortHeaderObserver = nativeSortEntrypoints && !shellFolderPartition && !reconcileSortCommands
                 ? new SizeSortHeaderObserver(SendMessageW(listView, 0x101F, 0, 0), sizeSubItem,
                     direction => publishPolicy!(sortContextLease, (headerMixed ? 1 : 0) | (direction < 0 ? 2 : 0))) : null;
             if (sortPolicyExperiment)
@@ -238,8 +248,28 @@ public static partial class SyntheticShellSortProbe
                             var result = command.InvokeCanonicalVerb(direction > 0 ? "sortascending" : "sortdescending");
                             if (result is null) throw new InvalidOperationException("Native size-sort direction verb is unavailable.");
                             Check(result.Value);
+                            if (reconcileSortCommands)
+                            {
+                                // This runs after native command dispatch, never inside a comparison.
+                                var actualSort = CaptureNativeSortColumns(folderView);
+                                if (actualSort.Length != 1 || actualSort[0].Key.PropertyId != 12)
+                                    throw new InvalidOperationException("Native command did not leave one size sort key.");
+                                Check(At<SetSizePolicy>(sortPolicy, 4)(sortPolicy,
+                                    (mixed ? 1 : 0) | (actualSort[0].Direction < 0 ? 2 : 0)));
+                                var correctionNeeded = !mixed && policyDirection != actualSort[0].Direction;
+                                policyDirection = actualSort[0].Direction;
+                                var correctionClock = Stopwatch.StartNew();
+                                if (correctionNeeded)
+                                {
+                                    Check(command.InvokeCanonicalVerb(policyDirection > 0 ? "sortdescending" : "sortascending")
+                                        ?? throw new InvalidOperationException("No opposite sort verb."));
+                                    Check(command.InvokeCanonicalVerb(policyDirection > 0 ? "sortascending" : "sortdescending")
+                                        ?? throw new InvalidOperationException("No saved sort verb."));
+                                }
+                                Console.WriteLine($"product-size-sort-reconcile: actual-direction={policyDirection}; mixed={mixed}; correction={correctionNeeded}; correction-ms={correctionClock.Elapsed.TotalMilliseconds:F3}; native-dispatch-returned=True");
+                            }
                         }
-                        if (nativeSortEntrypoints)
+                        if (nativeSortEntrypoints && !shellFolderPartition && !reconcileSortCommands)
                         {
                             Console.WriteLine($"product-size-sort-arrow-policy: updates={sortHeaderObserver!.Updates}; hr=0x{sortHeaderObserver.LastResult:X8}");
                             Check(sortHeaderObserver.LastResult);
@@ -268,6 +298,13 @@ public static partial class SyntheticShellSortProbe
                                 }
                             }
                             throw new InvalidOperationException("Folder/file size order disagrees with the selected mixed/separate policy.");
+                        }
+                        if (reconcileSortCommands)
+                        {
+                            var selectedRow = Array.IndexOf(sortedNames, "file-2048.bin");
+                            var selectedFlags = SendMessageW(listView, LvmGetItemState, selectedRow, (nint)(LvisSelected | LvisFocused)).ToInt64();
+                            if ((selectedFlags & (LvisSelected | LvisFocused)) != (LvisSelected | LvisFocused))
+                                throw new InvalidOperationException("Sort correction lost the selected/focused file.");
                         }
                         if (dynamicSortPolicy)
                         {
@@ -569,6 +606,7 @@ public static partial class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate long GetSizePolicyCount();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSizePolicyAttributes(nint self, uint count, [In, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] nint[] items, ref uint attributes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateDynamicSizePolicy(nint source, uint policy, out nint output, out nint lease);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void SetSizePolicyFlag(int value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetDynamicSizePolicy(nint lease, int policy);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ReleaseDynamicSizePolicy(nint lease);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateEncodedSizePolicy(nint source, int mixed, out nint output);

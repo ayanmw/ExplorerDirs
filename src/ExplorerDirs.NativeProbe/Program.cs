@@ -30,6 +30,12 @@ internal static class Program
             return RegisteredMultiRootPidlProbe.Run(volatileRegistration: true);
         if (args is ["--size-sort-stable-identity-child", var stableSortName, var stableSortPath])
             return SyntheticShellSortProbe.RunStableSortIdentityChild(stableSortName, stableSortPath);
+        if (args is ["--product-size-sort-reconcile-icons-private-desktop", var reconcileIconSortAdapter])
+            return PrivateDesktopShellProbe.RunProductSizeDisplay(reconcileIconSortAdapter, explorerBrowser: true, sortPolicyExperiment: true, dynamicSortPolicy: true, nativeSortEntrypoints: true, nativeSortMode: 1, reconcileSortCommands: true);
+        if (args is ["--product-size-sort-reconcile-list-private-desktop", var reconcileSortAdapter])
+            return PrivateDesktopShellProbe.RunProductSizeDisplay(reconcileSortAdapter, explorerBrowser: true, sortPolicyExperiment: true, dynamicSortPolicy: true, nativeSortEntrypoints: true, nativeSortMode: 3, reconcileSortCommands: true);
+        if (args is ["--product-size-sort-shell-partition-private-desktop", var shellPartitionAdapter])
+            return PrivateDesktopShellProbe.RunProductSizeDisplay(shellPartitionAdapter, explorerBrowser: true, sortPolicyExperiment: true, dynamicSortPolicy: true, nativeSortEntrypoints: true, nativeSortMode: 3, shellFolderPartition: true);
         if (args is ["--product-size-sort-entrypoints-list-private-desktop", var listSortAdapter])
             return PrivateDesktopShellProbe.RunProductSizeDisplay(listSortAdapter, explorerBrowser: true, sortPolicyExperiment: true, dynamicSortPolicy: true, nativeSortEntrypoints: true, nativeSortMode: 3);
         if (args is ["--product-size-sort-entrypoints-icons-private-desktop", var iconSortAdapter])
