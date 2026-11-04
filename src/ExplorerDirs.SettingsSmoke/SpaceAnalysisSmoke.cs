@@ -34,6 +34,19 @@ internal static class SpaceAnalysisSmoke
             SpaceTreemapLayout.Create([1], double.NaN, 100).Count != 0 ||
             SpaceTreemapLayout.Create([(decimal)ulong.MaxValue, (decimal)ulong.MaxValue], 200, 100).Count != 2)
             throw new Exception("Treemap zero/large size handling failed.");
+        foreach (var count in new[] { 149, 150, 151, 1_000_000 })
+        {
+            var entries = new CountingEntries(count);
+            var map = new SpaceAnalysisSnapshot("fixture", entries, count).CreateMapItems();
+            if (entries.Visited != Math.Min(count, 150) || map.Count != (count > 150 ? 151 : count) ||
+                map.Sum(item => item.Weight) != count ||
+                count > 150 && (map[^1].Entry is not null || map[^1].Weight != count - 150) ||
+                count <= 150 && map.Any(item => item.Entry is null))
+                throw new Exception("Map preparation must retain up to 150 identities and the exact remainder without scanning hidden rows.");
+        }
+        var emptyMap = new SpaceAnalysisSnapshot("fixture",
+            [new("zero", "zero", false, 0, "fixture"), new("unknown", "unknown", true, null, "fixture")], 0).CreateMapItems();
+        if (emptyMap.Count != 0) throw new Exception("Zero/unknown entries produced a positive map tile.");
         var root = Path.Combine(AppContext.BaseDirectory, "space-analysis-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Path.Combine(root, "child", "nested"));
         try
@@ -46,6 +59,10 @@ internal static class SpaceAnalysisSmoke
                 snapshot.Entries.Single(item => item.IsDirectory).Bytes != 7 ||
                 snapshot.Entries.Single(item => item.IsDirectory).Percentage != 35)
                 throw new Exception("Space analysis double-counted subtrees or calculated incorrect percentages.");
+            var realMap = snapshot.CreateMapItems();
+            if (realMap.Count != 2 || realMap[0].Weight != 13 || realMap[1].Weight != 7 ||
+                !ReferenceEquals(realMap[0].Entry, snapshot.Entries[0]) || realMap.Sum(item => item.Weight) != 20)
+                throw new Exception("Map preparation lost snapshot identity or changed real subtree totals.");
             var unavailable = new FolderSizeDataSource((_, _, _) => Task.FromResult(new IndexedSizePage(EverythingSizeStatus.IndexUnavailable, [])));
             var partial = await SpaceAnalysisSnapshot.ReadAsync(root, FolderSizeSource.Everything, CancellationToken.None, dataSource: unavailable);
             if (!partial.IsPartial || partial.KnownBytes != 13 || partial.Entries.Single(item => item.IsDirectory).Bytes.HasValue)
@@ -61,4 +78,23 @@ internal static class SpaceAnalysisSmoke
         }
         Console.WriteLine("Space analysis smoke: PASS (treemap area/overlap/bounds/large sizes; real subtree totals and percentages; unavailable values; cancellation; no UI)");
     }
+    private sealed class CountingEntries(int count) : IReadOnlyList<SpaceAnalysisEntry>
+    {
+        internal int Visited;
+        public int Count => count;
+        public SpaceAnalysisEntry this[int index]
+        {
+            get
+            {
+                if (++Visited > 150) throw new Exception("Map preparation visited beyond the 150 visible entries.");
+                return new(index.ToString(), index.ToString(), true, 1, "fixture");
+            }
+        }
+        public IEnumerator<SpaceAnalysisEntry> GetEnumerator()
+        {
+            for (var index = 0; index < count; index++) yield return this[index];
+        }
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
 }

@@ -178,16 +178,7 @@ internal sealed class SpaceAnalysisWindow : Window
     {
         _map.Children.Clear();
         if (_snapshot is null) return;
-        // Resizing redraws only 150 tiles: avoid copying every entry of a large analysis each time.
-        var shown = new List<(SpaceAnalysisEntry? Entry, decimal Weight)>(151);
-        decimal otherBytes = 0;
-        foreach (var entry in _snapshot.Entries)
-        {
-            if (entry.Bytes is not > 0) continue;
-            if (shown.Count < 150) shown.Add((entry, entry.Bytes.Value));
-            else otherBytes += entry.Bytes.Value;
-        }
-        if (otherBytes > 0) shown.Add((null, otherBytes));
+        var shown = _snapshot.CreateMapItems();
         var rectangles = SpaceTreemapLayout.Create(shown.Select(item => item.Weight).ToArray(), _map.ActualWidth, _map.ActualHeight);
         var palette = new[] { 0x376B91u, 0x657B3Cu, 0x86603Eu, 0x73598Eu, 0x337B75u, 0x99565Fu };
         foreach (var rectangle in rectangles)

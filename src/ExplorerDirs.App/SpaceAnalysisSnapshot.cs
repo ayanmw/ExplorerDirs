@@ -17,6 +17,23 @@ internal sealed record SpaceAnalysisSnapshot(string Path, IReadOnlyList<SpaceAna
 {
     internal bool IsPartial => Entries.Any(item => item.Bytes is null || item.Detail is not null);
 
+    internal IReadOnlyList<(SpaceAnalysisEntry? Entry, decimal Weight)> CreateMapItems()
+    {
+        var shown = new List<(SpaceAnalysisEntry? Entry, decimal Weight)>(151);
+        // ReadAsync stores descending sizes and the complete known total. Resizing the
+        // map must not enumerate a large snapshot again just to sum the hidden tail.
+        var otherBytes = KnownBytes;
+        foreach (var entry in Entries)
+        {
+            if (entry.Bytes is not > 0) break;
+            shown.Add((entry, entry.Bytes.Value));
+            otherBytes -= entry.Bytes.Value;
+            if (shown.Count == 150) break;
+        }
+        if (otherBytes > 0) shown.Add((null, otherBytes));
+        return shown;
+    }
+
     internal static async Task<SpaceAnalysisSnapshot> ReadAsync(string directory, FolderSizeSource source,
         CancellationToken cancellationToken, IProgress<KeyValuePair<string, FolderSizeValue>>? progress = null,
         FolderSizeDataSource? dataSource = null)
