@@ -35,6 +35,14 @@ try {
     foreach ($project in @('App', 'SettingsSmoke', 'HostProbe', 'NativeProbe')) {
         Invoke-BackgroundCheck ('build-' + $project) 'dotnet' @('build', "src/ExplorerDirs.$project/ExplorerDirs.$project.csproj", '-c', 'Release', '--no-restore')
     }
+    # Isolated migration ABI + pure lifetime checks; no browser, registration or fixture filesystem access.
+    Invoke-BackgroundCheck 'build-size-sort-context-experiment' 'pwsh' @('-NoProfile', '-File',
+        'src/ExplorerDirs.NativeProbe/build-product-shell-folder-adapter-diagnostics.ps1', '-SizeSortPolicyExperiment')
+    Invoke-BackgroundCheck 'managed-sort-context-lifecycle-smoke' 'dotnet' @('run', '--project',
+        'src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj', '-c', 'Release', '--no-build', '--',
+        '--managed-sort-context-lifecycle-smoke',
+        'src/ExplorerDirs.NativeProbe/bin/native-product-diagnostics-x64-sort-policy/ExplorerDirs.ShellNamespace.Diagnostics.dll',
+        'src/ExplorerDirs.NativeProbe/bin/native-product-x64/ExplorerDirs.ShellNamespace.dll')
     $settings = 'src/ExplorerDirs.SettingsSmoke/ExplorerDirs.SettingsSmoke.csproj'
     # Only early-dispatched, inspected flags belong here. The default SettingsSmoke suite is intentionally excluded.
     foreach ($flag in @('favorites-catalog-smoke', 'navigation-chrome-smoke', 'focus-traversal-smoke',

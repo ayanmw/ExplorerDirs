@@ -19,7 +19,8 @@ public static partial class SyntheticShellSortProbe
         var siblingLists = new List<(nint List, string Prefix)>();
         var displayBrowsers = new List<nint>();
         var displayBrowserViews = new List<nint>();
-        nint diagnosticModule = 0, sortContextLease = 0, peerSortLease = 0, peerFolderView = 0, peerList = 0;
+        nint diagnosticModule = 0, peerFolderView = 0, peerList = 0;
+        FolderSizeSortContext? sortContext = null, peerSortContext = null;
         GetCounter? enumCounter = null;
         ProfileShellNamespaceOwner? owner = null;
         StreamViewHost? host = null;
@@ -51,9 +52,8 @@ public static partial class SyntheticShellSortProbe
             Check(SHParseDisplayName(mainIdentity, 0, out root, 0, out _));
             if (dynamicSortPolicy)
             {
-                var prepare = Marshal.GetDelegateForFunctionPointer<CreateDynamicSizePolicy>(
-                    NativeLibrary.GetExport(diagnosticModule, "CreateDynamicSizeSortPidlForProbe"));
-                Check(prepare(root, 0, out var prepared, out sortContextLease));
+                if (!FolderSizeSortContext.TryCreate(Path.GetFullPath(adapterPath), root, false, 1,
+                    out sortContext, out var prepared)) throw new InvalidOperationException("Sort context capability is unavailable.");
                 Marshal.FreeCoTaskMem(root); root = prepared;
             }
             if (encodedSortPolicy is { } initialPolicy)
@@ -155,10 +155,12 @@ public static partial class SyntheticShellSortProbe
             if (dynamicSortPolicy)
             {
                 Check(SHParseDisplayName(mainIdentity, 0, out var peerRoot, 0, out _));
-                var prepare = Marshal.GetDelegateForFunctionPointer<CreateDynamicSizePolicy>(
-                    NativeLibrary.GetExport(diagnosticModule, "CreateDynamicSizeSortPidlForProbe"));
                 nint preparedPeer = 0;
-                try { Check(prepare(peerRoot, 3, out preparedPeer, out peerSortLease)); }
+                try
+                {
+                    if (!FolderSizeSortContext.TryCreate(Path.GetFullPath(adapterPath), peerRoot, true, -1,
+                        out peerSortContext, out preparedPeer)) throw new InvalidOperationException("Peer sort context capability is unavailable.");
+                }
                 finally { Marshal.FreeCoTaskMem(peerRoot); }
                 try
                 {
@@ -189,11 +191,9 @@ public static partial class SyntheticShellSortProbe
             }
             var policyDirection = 1;
             var headerMixed = false;
-            var publishPolicy = nativeSortEntrypoints && !shellFolderPartition && !reconcileSortCommands ? Marshal.GetDelegateForFunctionPointer<SetDynamicSizePolicy>(
-                NativeLibrary.GetExport(diagnosticModule, "SetDynamicSizeSortPolicyForProbe")) : null;
             using var sortHeaderObserver = nativeSortEntrypoints && !shellFolderPartition && !reconcileSortCommands
                 ? new SizeSortHeaderObserver(SendMessageW(listView, 0x101F, 0, 0), sizeSubItem,
-                    direction => publishPolicy!(sortContextLease, (headerMixed ? 1 : 0) | (direction < 0 ? 2 : 0))) : null;
+                    direction => { sortContext!.Update(headerMixed, direction); return 0; }) : null;
             if (sortPolicyExperiment)
             {
                 var sortPolicyId = new Guid("37A49964-E858-4A39-A411-D552E136921B");
@@ -564,12 +564,8 @@ public static partial class SyntheticShellSortProbe
             // Registration and fixture ownership are still cleaned explicitly.
             if (peerFolderView != 0) Marshal.Release(peerFolderView);
             owner?.Dispose();
-            if (peerSortLease != 0)
-                Marshal.GetDelegateForFunctionPointer<ReleaseDynamicSizePolicy>(
-                    NativeLibrary.GetExport(diagnosticModule, "ReleaseDynamicSizeSortLeaseForProbe"))(peerSortLease);
-            if (sortContextLease != 0)
-                Marshal.GetDelegateForFunctionPointer<ReleaseDynamicSizePolicy>(
-                    NativeLibrary.GetExport(diagnosticModule, "ReleaseDynamicSizeSortLeaseForProbe"))(sortContextLease);
+            peerSortContext?.Dispose();
+            sortContext?.Dispose();
             if (diagnosticModule != 0) NativeLibrary.Free(diagnosticModule);
             if (Directory.Exists(fixture)) Directory.Delete(fixture, true);
             foreach (var sibling in siblingFixtures)
@@ -605,10 +601,7 @@ public static partial class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CompareSizePolicyItems(nint self, nint column, nint left, nint right);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate long GetSizePolicyCount();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSizePolicyAttributes(nint self, uint count, [In, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] nint[] items, ref uint attributes);
-    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateDynamicSizePolicy(nint source, uint policy, out nint output, out nint lease);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void SetSizePolicyFlag(int value);
-    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetDynamicSizePolicy(nint lease, int policy);
-    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ReleaseDynamicSizePolicy(nint lease);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateEncodedSizePolicy(nint source, int mixed, out nint output);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSizePolicyDiagnostic(int index, [MarshalAs(UnmanagedType.LPWStr)] StringBuilder text, uint capacity);
 

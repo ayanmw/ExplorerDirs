@@ -13,6 +13,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="../ExplorerDirs.App/ShellViewRedrawLease.cs" Link="ShellViewRedrawLease.cs" />
+    <Compile Include="../ExplorerDirs.App/FolderSizeSortContext.cs" Link="FolderSizeSortContext.cs" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="System.IO" />

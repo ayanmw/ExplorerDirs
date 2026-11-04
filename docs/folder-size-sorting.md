@@ -134,3 +134,13 @@ sort-arrow-list.log 首次失败后，补齐产品列头标志的 sort-arrow-lis
 sort-reconcile-icons.log：图标模式六次切换完整行序、每步已选且聚焦文件保持、同路径 peer 独立、后续自动变化/分组/清理整项通过，隔离守卫干净，策略期间完整枚举断言为0；额外 verb 提交0.354/0.419/0.756 ms，仅为四行夹具提交时间，不代表排序完成时间或大目录性能。sort-reconcile-list-guarded.log 同样全部功能断言通过，但末尾 last-input 变化，进程退出1，整轮隔离不通过；保留失败，不因功能通过改记整项全绿。首轮列表对照也因相同输入守卫失败保留。
 
 新原型没有 header 观察器，不提前提供目标方向，列表/图标均走原生菜单命令。它目前是明确调用包装层的验证，未证明所有用户菜单分发都能被产品宿主覆盖；产品接线仍需消息/命令分发边界、重入导航代际与关闭生命周期保护。额外排序是否有可见闪烁及大目录开销未验证，不据小夹具毫秒值宣布体验达标。NativeProbe Release、显式 native 严格构建及diff检查通过。未更改产品宿主或发布。
+
+## 托管上下文生命周期适配层
+
+FolderSizeSortContext 已加入产品源码，提供候选ABI能力检测、创建、同上下文准备下一目录、原子策略更新和确定性释放。实例额外持有 native module 引用，在释放 native lease 后才释放 DLL；Prepare 返回独立的 caller-owned PIDL，不释放输入。同步锁保护 Update/Prepare/Dispose，重复 Dispose 安全，释放后拒绝继续调用。旧DLL缺任一候选导出时返回未支持，不持有句柄。更新不依赖本地策略缓存，避免同上下文的原生绑定改变策略后缓存失真。
+
+候选 CreateFolderSizeSortContext/PrepareFolderSizeSortLocation/SetFolderSizeSortPolicy/ReleaseFolderSizeSortContext 目前只由显式隔离构建导出。NativeProbe 链接同一产品源码，并用适配层替换原来的手工 lease 创建/清理；动态视图本轮全部功能断言通过，但前台/输入守卫变化，整轮退出1（managed-sort-context-dynamic.log），不记全绿。
+
+新 managed-sort-context-lifecycle-smoke 不创建浏览器/窗口、不注册namespace、不访问伪目录夹具：验证同路径两实例独立、跨目录准备仍共享策略、旧PIDL观察更新、非法方向不污染状态、重复释放、释放后调用拒绝、兄弟上下文继续可用及旧DLL能力缺失回退。managed-sort-context-lifecycle.log 通过；路径只是无IO编码输入，DLL加载本身仍有正常文件访问。
+
+后台总检加入隔离ABI严格构建与上述纯检查，共30项整轮通过：src/.state/background-checks/20261105-002725-7000d4f00a98429b9078a3254bc6ecb0/summary.json。此时源码为 f227743 加本批修改。常规产品DLL仍不启用候选ABI；适配层尚未绑定实际宿主导航、菜单或关闭流程，不声称产品生命周期已经覆盖。未发布。

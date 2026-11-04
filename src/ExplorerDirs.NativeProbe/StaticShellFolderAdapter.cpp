@@ -6603,6 +6603,43 @@ extern "C" __declspec(dllexport) void WINAPI ReleaseDynamicSizeSortLeaseForProbe
 extern "C" __declspec(dllexport) void WINAPI SetSizeSortShellPartitionForProbe(BOOL enabled)
 { InterlockedExchange(&g_sizeSortShellPartition, enabled ? 1 : 0); }
 
+// Candidate product ABI, available only in the isolated migration build for now.
+extern "C" __declspec(dllexport) HRESULT WINAPI CreateFolderSizeSortContext(
+    PCIDLIST_ABSOLUTE source, DWORD policy, PIDLIST_ABSOLUTE* output, void** lease)
+{ return CreateDynamicSizeSortPidlForProbe(source, policy, output, lease); }
+extern "C" __declspec(dllexport) HRESULT WINAPI PrepareFolderSizeSortLocation(
+    PCIDLIST_ABSOLUTE source, void* lease, PIDLIST_ABSOLUTE* output)
+{
+    if (!lease || !output) return E_INVALIDARG;
+    *output = nullptr;
+    const auto& state = *static_cast<std::shared_ptr<SizeSortContext>*>(lease);
+    return CreateSizeSortPolicyPidl(source, (state->id << 2) | state->policy.load(), output);
+}
+extern "C" __declspec(dllexport) HRESULT WINAPI SetFolderSizeSortPolicy(void* lease, DWORD policy)
+{ return SetDynamicSizeSortPolicyForProbe(lease, policy); }
+extern "C" __declspec(dllexport) void WINAPI ReleaseFolderSizeSortContext(void* lease)
+{ ReleaseDynamicSizeSortLeaseForProbe(lease); }
+
+extern "C" __declspec(dllexport) HRESULT WINAPI CreateSizeSortContextRootForProbe(PCWSTR path, PIDLIST_ABSOLUTE* output)
+{ return CreateSyntheticRootPathPidl(path, output); }
+extern "C" __declspec(dllexport) HRESULT WINAPI VerifySizeSortContextValueForProbe(PCIDLIST_ABSOLUTE root, DWORD expected)
+{
+    std::wstring path;
+    auto result = ReadSyntheticRootPathFromPidl(root, &path, true);
+    if (FAILED(result)) return result;
+    for (auto* part = reinterpret_cast<PCUIDLIST_RELATIVE>(root); !ILIsEmpty(part); part = ILNext(part))
+    {
+        if (part->mkid.cb < kSyntheticRootPathPidlHeaderSize + sizeof(DWORD)) continue;
+        const auto* header = reinterpret_cast<const SyntheticRootPathPidlItem*>(part);
+        if (header->magic != 0x32525044) continue;
+        DWORD encoded = 0;
+        CopyMemory(&encoded, reinterpret_cast<const BYTE*>(header) + kSyntheticRootPathPidlHeaderSize, sizeof(encoded));
+        const auto state = FindSizeSortContext(encoded);
+        return state && state->policy.load() == expected ? S_OK : E_FAIL;
+    }
+    return E_INVALIDARG;
+}
+
 extern "C" __declspec(dllexport) LONG WINAPI GetSizeSortColumnClickCountForProbe()
 { return InterlockedCompareExchange(&g_sizeSortColumnClickCount, 0, 0); }
 

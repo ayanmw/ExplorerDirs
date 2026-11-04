@@ -40,6 +40,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunProductSizeDisplay(listSortAdapter, explorerBrowser: true, sortPolicyExperiment: true, dynamicSortPolicy: true, nativeSortEntrypoints: true, nativeSortMode: 3);
         if (args is ["--product-size-sort-entrypoints-icons-private-desktop", var iconSortAdapter])
             return PrivateDesktopShellProbe.RunProductSizeDisplay(iconSortAdapter, explorerBrowser: true, sortPolicyExperiment: true, dynamicSortPolicy: true, nativeSortEntrypoints: true, nativeSortMode: 1);
+        if (args is ["--managed-sort-context-lifecycle-smoke", var contextAdapter, var oldContextAdapter])
+            return SyntheticShellSortProbe.RunManagedSortContextLifecycle(contextAdapter, oldContextAdapter);
         if (args is ["--product-size-sort-entrypoints-private-desktop", var sortEntrypointsAdapter])
             return PrivateDesktopShellProbe.RunProductSizeDisplay(sortEntrypointsAdapter, explorerBrowser: true, sortPolicyExperiment: true, dynamicSortPolicy: true, nativeSortEntrypoints: true);
         if (args is ["--product-size-sort-dynamic-private-desktop", var dynamicSortAdapter])
