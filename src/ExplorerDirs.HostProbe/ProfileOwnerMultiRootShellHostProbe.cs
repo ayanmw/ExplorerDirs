@@ -115,10 +115,10 @@ internal static class ProfileOwnerMultiRootShellHostProbe
         finally { _sortContextAdapter = null; }
     }
 
-    internal static int RunGroupedLargeForProbe(string adapterPath)
+    internal static int RunGroupedLargeForProbe(string adapterPath, int count)
     {
         _sortContextAdapter = Path.GetFullPath(adapterPath);
-        try { return Run(folderCount: 1025, diagnosticAdapter: false, initialSizeGrouping: true); }
+        try { return Run(folderCount: count, diagnosticAdapter: false, initialSizeGrouping: true); }
         finally { _sortContextAdapter = null; }
     }
 
@@ -493,6 +493,9 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                             throw new InvalidOperationException("Grouped refresh started before pending queries completed.");
                     }
                     finally { if (pendingView != 0) Marshal.Release(pendingView); }
+                    if (!VerifyBusyRecoveryTickForProbe())
+                        throw new InvalidOperationException("No enabled recovery timer was available for the reentrant Tick check.");
+                    Console.WriteLine("product-recovery-timer-reentry: busy-tick-keeps-next-schedule=True");
                     Console.WriteLine("product-pending-size-readiness: callbacks-held=True; nonblocking=True; pending-not-terminal=True; no-premature-refresh=True");
                     UnknownRelease.Set();
                 }
@@ -652,20 +655,23 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                     var sortReadyClock = Stopwatch.StartNew();
                     WaitUntil(() =>
                     {
+                        // Wait for the recovery handoff before sampling its post-refresh view.
+                        if ((long)hostType.GetField("_initialSortRecoveryActiveSerial", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)! != 0)
+                            return false;
                         // Poll the native row order cheaply while DefView sorts; read COM column values only after candidate order appears.
                         var nativeRows = readNativeRows.Invoke(null, [viewWindow])!;
                         var actualNames = (string[])nativeRows.GetType().GetField("Item2")!.GetValue(nativeRows)!;
                         if (!actualNames.SequenceEqual(expectedNames, StringComparer.OrdinalIgnoreCase)) return false;
                         paneValues[index] = (string[])readValues.Invoke(null, [hostType, host, expectedItemCount])!;
-                        return paneValues[index].Select(value => ulong.TryParse(value, out var bytes) ? bytes : ulong.MaxValue)
-                            .SequenceEqual(expectedOrder);
+                        if (!paneValues[index].Select(value => ulong.TryParse(value, out var bytes) ? bytes : ulong.MaxValue)
+                            .SequenceEqual(expectedOrder)) return false;
+                        // COM reads can pump native refresh; verify rows again in this same sample.
+                        var afterRows = readNativeRows.Invoke(null, [viewWindow])!;
+                        return ((string[])afterRows.GetType().GetField("Item2")!.GetValue(afterRows)!)
+                            .SequenceEqual(expectedNames, StringComparer.OrdinalIgnoreCase);
                     }, TimeSpan.FromSeconds(forceSortDeadline ? 5 : 75), $"Product pane {index + 1} did not restore its independent saved recursive-size sort.",
                         pollMilliseconds: 100);
                     paneSortReadyMilliseconds[index] = sortReadyClock.ElapsedMilliseconds;
-                    var nativeRows = readNativeRows.Invoke(null, [viewWindow])!;
-                    var namesAfterSort = (string[])nativeRows.GetType().GetField("Item2")!.GetValue(nativeRows)!;
-                    if (!namesAfterSort.SequenceEqual(expectedNames, StringComparer.OrdinalIgnoreCase))
-                        throw new InvalidOperationException($"Product pane {index + 1} Shell values sorted, but native ListView names disagreed with Shell row order: {namesAfterSort.Length} rows; first=[{string.Join('|', namesAfterSort.Take(5))}]; last=[{string.Join('|', namesAfterSort.TakeLast(5))}].");
                 }
                 catch (TimeoutException exception)
                 {
@@ -756,9 +762,22 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                         BindingFlags.Static | BindingFlags.NonPublic, null, [typeof(ulong)], null)!;
                     var expectedText = (index % 2 == 0 ? expectedSizes[index] : expectedSizes[index].Reverse())
                         .Select(bytes => (string)format.Invoke(null, [bytes])!).ToArray();
-                    WaitUntil(() => ShellProviderLocationProbe.ReadNativeListViewCells(nativeWindow, 3)
-                        .Select(row => row[1]).SequenceEqual(expectedText), TimeSpan.FromSeconds(10),
-                        "Large grouped startup has properties but incorrect native Size cells.");
+                    string[][] actualCells = [];
+                    try
+                    {
+                        WaitUntil(() =>
+                        {
+                            actualCells = ShellProviderLocationProbe.ReadNativeListViewCells(nativeWindow, 3);
+                            return actualCells.Select(row => row[1]).SequenceEqual(expectedText);
+                        }, TimeSpan.FromSeconds(10), "Large grouped startup has properties but incorrect native Size cells.");
+                    }
+                    catch (TimeoutException error)
+                    {
+                        var mismatch = string.Join("/", Enumerable.Range(0, Math.Min(actualCells.Length, expectedText.Length))
+                            .Where(row => actualCells[row][1] != expectedText[row]).Take(4)
+                            .Select(row => $"{row}:{actualCells[row][1]}=>{expectedText[row]}"));
+                        throw new InvalidOperationException($"Grouped Size cells: mismatches=[{mismatch}]; pane={index + 1}; rows={actualCells.Length}; first=[{string.Join("/", actualCells.Take(4).Select(row => string.Join("|", row)))}]; expected-first=[{string.Join("|", expectedText.Take(4))}].", error);
+                    }
                     var captured = hostType.GetMethod("CaptureViewState")!.Invoke(host, null)!;
                     if (captured.GetType().GetProperty("GroupKey")!.GetValue(captured) is null)
                         throw new InvalidOperationException("Large grouped startup lost its saved group.");
@@ -1336,6 +1355,38 @@ internal static class ProfileOwnerMultiRootShellHostProbe
         }).ToArray();
         if (!flags.SequenceEqual([mixed, mixed, false]))
             throw new InvalidOperationException("Actual host settings did not preserve copy/default policies through INI reload.");
+    }
+
+    private static bool VerifyBusyRecoveryTickForProbe()
+    {
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
+        foreach (var field in typeof(Dispatcher).GetFields(flags))
+        {
+            if (field.GetValue(Dispatcher.CurrentDispatcher) is not System.Collections.IEnumerable timers) continue;
+            foreach (var timer in timers.OfType<DispatcherTimer>().ToArray())
+            foreach (var timerField in typeof(DispatcherTimer).GetFields(flags))
+            {
+                if (!timer.IsEnabled || timerField.GetValue(timer) is not Delegate callbacks) continue;
+                foreach (var callback in callbacks.GetInvocationList())
+                {
+                    var closure = callback.Target;
+                    var running = closure?.GetType().GetField("recoveryTickRunning", flags);
+                    if (running?.GetValue(closure) is not false) continue;
+                    // Execute the actual production handler with its async body marked busy,
+                    // representing a nested Tick after that body scheduled another attempt.
+                    running.SetValue(closure, true);
+                    try
+                    {
+                        callback.DynamicInvoke(timer, EventArgs.Empty);
+                        if (!timer.IsEnabled)
+                            throw new InvalidOperationException("Reentrant busy Tick stopped the pending recovery schedule.");
+                    }
+                    finally { running.SetValue(closure, false); }
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static bool ExpireSortReadinessClockForProbe()

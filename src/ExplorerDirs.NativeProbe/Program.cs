@@ -14,6 +14,8 @@ internal static class Program
     [STAThread]
     static int Main(string[] args)
     {
+        if (args is ["--product-grouped-four-pane-host-large-private-desktop", var groupedCountHost, var groupedCountAdapter, var groupedCountText] && int.TryParse(groupedCountText, out var groupedCount) && groupedCount > 2)
+            return PrivateDesktopShellProbe.RunProductGroupedLargeHost(groupedCountHost, groupedCountAdapter, groupedCount);
         if (args is ["--product-grouped-four-pane-host-large-private-desktop", var groupedRegularHost, var groupedRegularAdapter])
             return PrivateDesktopShellProbe.RunProductGroupedLargeHost(groupedRegularHost, groupedRegularAdapter);
         if (args is ["--product-grouped-four-pane-host-large-private-desktop", var groupedLargeHost])

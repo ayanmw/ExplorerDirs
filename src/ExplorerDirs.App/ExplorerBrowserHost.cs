@@ -3487,8 +3487,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         }
         timer.Tick += async (_, _) =>
         {
-            timer.Stop();
+            // A nested Tick must not cancel a retry armed by the still-running async body.
             if (recoveryTickRunning) return;
+            timer.Stop();
             recoveryTickRunning = true;
             try { await RunRecoveryTick(); }
             finally { recoveryTickRunning = false; }

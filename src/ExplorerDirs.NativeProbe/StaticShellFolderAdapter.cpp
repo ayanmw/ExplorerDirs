@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
+#include <cmath>
 #include <functional>
 #include <memory>
 #include <map>
@@ -2279,8 +2280,11 @@ namespace
         }
         else
         {
-            formatted << std::fixed << std::setprecision(decimalPlaces)
-                << (static_cast<double>(bytes) / static_cast<double>(divisor));
+            // Match ByteSizeFormatter's half-away custom decimal formatting rather
+            // than letting iostream round exact midpoints to an even last digit.
+            const auto scale = std::pow(10.0, static_cast<int>(decimalPlaces));
+            const auto rounded = std::round((static_cast<double>(bytes) / static_cast<double>(divisor)) * scale) / scale;
+            formatted << std::fixed << std::setprecision(decimalPlaces) << rounded;
         }
         auto number = formatted.str();
         const auto decimalPoint = number.find(L'.');
@@ -7601,6 +7605,11 @@ extern "C" ED_PROBE_EXPORT HRESULT WINAPI RunSyntheticFolderTreeContractSmoke(PC
         };
         const auto fixedKilobytesExpected = localizedExpected(L"1205.6 KB");
         const bool fixedKilobytesDisplayed = displaysSizeText(fixedKilobytesExpected.c_str());
+        InterlockedExchange(&g_syntheticSizeDisplayDecimalsForProbe, 2);
+        InterlockedExchange64(&g_syntheticChildSizeOverride, 20096); // Exactly 19.625 KB.
+        const auto midpointKilobytesExpected = localizedExpected(L"19.63 KB");
+        const bool midpointKilobytesDisplayed = displaysSizeText(midpointKilobytesExpected.c_str());
+        InterlockedExchange64(&g_syntheticChildSizeOverride, 1234567);
         InterlockedExchange(&g_syntheticSizeDisplayDecimalsForProbe, 0);
         const bool wholeKilobytesDisplayed = displaysSizeText(L"1206 KB");
         InterlockedExchange(&g_syntheticSizeDisplayDecimalsForProbe, 3);
@@ -7625,7 +7634,7 @@ extern "C" ED_PROBE_EXPORT HRESULT WINAPI RunSyntheticFolderTreeContractSmoke(PC
         InterlockedExchange(&g_syntheticHumanSizeTextForProbe, 0);
         InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 0);
         InterlockedExchange64(&g_syntheticChildSizeOverride, -1);
-        if (!fixedKilobytesDisplayed || !wholeKilobytesDisplayed || !preciseKilobytesDisplayed ||
+        if (!fixedKilobytesDisplayed || !midpointKilobytesDisplayed || !wholeKilobytesDisplayed || !preciseKilobytesDisplayed ||
             !fixedMegabytesDisplayed || !groupedBytesDisplayed || !formattedSizePropertyRemainsRaw)
         { CoTaskMemFree(item); result = E_FAIL; goto cleanup; }
         VARIANT sizeValue{};
