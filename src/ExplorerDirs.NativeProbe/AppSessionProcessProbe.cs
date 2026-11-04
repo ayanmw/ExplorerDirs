@@ -103,6 +103,7 @@ internal static class AppSessionProcessProbe
                     return readings.Length == 4 && readings.All(item => item.Rows == 2) &&
                         readings.Any(item => item.Grouped == 1);
                 }, TimeSpan.FromSeconds(60), "Full app views/grouping did not become ready.");
+                VerifyExternalDirectoryChanges(window, child, expected, pass);
                 if (pass == 0)
                 {
                     if (!GetWindowRect(window, out var bounds)) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -177,6 +178,49 @@ internal static class AppSessionProcessProbe
         typeof(ProfileShellNamespaceOwner).GetMethod("DeleteOwnedRegistration", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!
             .Invoke(null, [identity.Value, native, profile]);
         Console.WriteLine($"app-session-process-registration-cleanup: profile-identity={identity}; ownership-checked=True");
+    }
+
+    private static void VerifyExternalDirectoryChanges(nint window, ProcessInfo child, SessionState session, int pass)
+    {
+        var additions = session.Panes.Select((tabs, pane) => Path.Combine(
+            tabs[session.ActiveTabIndices![pane]].Path, "external-notification-fixture")).ToArray();
+        var grouped = VisibleFileViews(window).Where(list => Message(list, 0x10AF) == 1).ToArray();
+        if (grouped.Length != 1) throw new InvalidOperationException("Expected exactly one grouped pane before external changes.");
+        var transientEmptySamples = 0;
+        void AwaitRows(int count, string stage)
+        {
+            var elapsed = Stopwatch.StartNew();
+            string? lastState = null;
+            Wait(() =>
+            {
+                EnsureRunning(child);
+                var lists = VisibleFileViews(window);
+                var counts = lists.Select(list => Message(list, 0x1004)).ToArray();
+                if (counts.Any(rows => rows == 0)) transientEmptySamples++;
+                var state = $"counts={string.Join('|', counts)}; grouped={string.Join('|', grouped.Select(list => Message(list, 0x10AF)))}";
+                if (state != lastState)
+                {
+                    Console.WriteLine($"app-external-change-state: stage={stage}; {state}");
+                    lastState = state;
+                }
+                return lists.Count == 4 && counts.All(rows => rows == count) &&
+                    grouped.All(list => Message(list, 0x10AF) == 1);
+            }, TimeSpan.FromSeconds(15), $"External {stage} did not update all four panes while retaining grouping.");
+            Console.WriteLine($"app-external-change: pass={pass + 1}; stage={stage}; rows-per-pane={count}; ms={elapsed.ElapsedMilliseconds}; transient-empty-samples={transientEmptySamples}; grouped-pane-preserved=True");
+        }
+        // Mutate only fresh test roots created above, without commands or input to the App.
+        foreach (var directory in additions)
+        {
+            Directory.CreateDirectory(directory);
+            File.WriteAllBytes(Path.Combine(directory, "data.bin"), new byte[64]);
+        }
+        AwaitRows(3, "create");
+        foreach (var directory in additions)
+        {
+            File.Delete(Path.Combine(directory, "data.bin"));
+            Directory.Delete(directory);
+        }
+        AwaitRows(2, "delete");
     }
 
     private static void VerifySession(SessionState expected, SessionState? actual)
