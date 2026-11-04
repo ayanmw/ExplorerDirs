@@ -436,8 +436,8 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                     string[] replayNames = [];
                     try
                     {
-                    WaitUntil(() =>
-                    {
+                        WaitUntil(() =>
+                        {
                         var rows = readNativeRows.Invoke(null, [replayWindow])!;
                         replayNames = (string[])rows.GetType().GetField("Item2")!.GetValue(rows)!;
                         return replayNames.SequenceEqual(index % 2 == 0 ? new[] { "folder-small", "folder-large" } : new[] { "folder-large", "folder-small" });
@@ -445,11 +445,13 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                     }
                     catch (TimeoutException error)
                     {
-                        throw new InvalidOperationException($"Persisted native rows: pane={index + 1}; names={string.Join('|', replayNames)}; groups={string.Join('|', ShellProviderLocationProbe.ReadNativeGroupIds(replayWindow))}; saved-group={expected.GetType().GetProperty("GroupKey")!.GetValue(expected)}.", error);
+                        throw new InvalidOperationException($"Persisted native rows: pane={index + 1}; names={string.Join('|', replayNames)}; groups={string.Join('|', ShellProviderLocationProbe.ReadNativeGroupIds(replayWindow))}; saved-group={expected.GetType().GetProperty("GroupKey")!.GetValue(expected)}; recovery={hostType.GetProperty("InitialSortRecoveryStatus", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(hosts[index])}.", error);
                     }
 
-                    WaitUntil(() =>
+                    try
                     {
+                        WaitUntil(() =>
+                        {
                         var actual = hostType.GetMethod("CaptureViewState")!.Invoke(hosts[index], null)!;
                         var type = actual.GetType();
                         return new[] { "Mode", "IconSize", "MixedSizeSort", "GroupKey", "GroupAscending" }
@@ -459,6 +461,12 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                             ((System.Collections.IEnumerable)type.GetProperty("DisplayColumns")!.GetValue(actual)!).Cast<object>()
                                 .SequenceEqual(((System.Collections.IEnumerable)type.GetProperty("DisplayColumns")!.GetValue(expected)!).Cast<object>());
                     }, TimeSpan.FromSeconds(10), $"Replayed host {index + 1} did not restore its persisted view settings.");
+                    }
+                    catch (TimeoutException error)
+                    {
+                        var actual = hostType.GetMethod("CaptureViewState")!.Invoke(hosts[index], null)!;
+                        throw new InvalidOperationException($"Persisted setting mismatch: actual={System.Text.Json.JsonSerializer.Serialize(actual, actual.GetType())}; expected={System.Text.Json.JsonSerializer.Serialize(expected, expected.GetType())}; recovery={hostType.GetProperty("InitialSortRecoveryStatus", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(hosts[index])}.", error);
+                    }
                 }
                 Console.WriteLine("product-persisted-view-settings: four-hosts=True; mode-icon-sort-group-mixed-columns=True; native-initial-row-order=True");
             }
