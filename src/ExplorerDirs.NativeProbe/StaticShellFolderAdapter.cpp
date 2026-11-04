@@ -39,9 +39,19 @@
 
 extern "C" ED_PROBE_EXPORT void WINAPI ResetSyntheticSortCounters();
 
+// Product contexts share the validated implementation; probe-only exports remain diagnostic.
+#if defined(EXPLORERDIRS_SIZE_SORT_CONTEXTS) && !defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
+#define EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT
+#endif
+#if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS) || defined(EXPLORERDIRS_NATIVEPROBE)
+#define ED_SORT_PROBE_EXPORT __declspec(dllexport)
+#else
+#define ED_SORT_PROBE_EXPORT
+#endif
+
 #if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
 static HRESULT CreateSizeSortPolicyPidl(PCIDLIST_ABSOLUTE source, DWORD policy, PIDLIST_ABSOLUTE* output);
-// Experiment leases own context lifetime; directory bindings only share that context.
+// Per-tab leases own context lifetime; directory bindings only share that context.
 struct SizeSortContext { std::atomic<DWORD> policy{0}; DWORD id = 0; };
 static std::mutex g_sizeSortContextMutex;
 static std::map<DWORD, std::weak_ptr<SizeSortContext>> g_sizeSortContexts;
@@ -6550,11 +6560,11 @@ static HRESULT CreateSizeSortPolicyPidl(
     return S_OK;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI CreateSizeSortPolicyPidlForProbe(
+extern "C" ED_SORT_PROBE_EXPORT HRESULT WINAPI CreateSizeSortPolicyPidlForProbe(
     PCIDLIST_ABSOLUTE source, DWORD policy, PIDLIST_ABSOLUTE* output)
 { return CreateSizeSortPolicyPidl(source, policy, output); }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI CreateDynamicSizeSortPidlForProbe(
+extern "C" ED_SORT_PROBE_EXPORT HRESULT WINAPI CreateDynamicSizeSortPidlForProbe(
     PCIDLIST_ABSOLUTE source, DWORD policy, PIDLIST_ABSOLUTE* output, void** lease)
 {
     if (!output || !lease || policy > 3) return E_INVALIDARG;
@@ -6583,13 +6593,13 @@ extern "C" __declspec(dllexport) HRESULT WINAPI CreateDynamicSizeSortPidlForProb
     }
     catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
 }
-extern "C" __declspec(dllexport) HRESULT WINAPI SetDynamicSizeSortPolicyForProbe(void* lease, DWORD policy)
+extern "C" ED_SORT_PROBE_EXPORT HRESULT WINAPI SetDynamicSizeSortPolicyForProbe(void* lease, DWORD policy)
 {
     if (!lease || policy > 3) return E_INVALIDARG;
     static_cast<std::shared_ptr<SizeSortContext>*>(lease)->get()->policy.store(policy);
     return S_OK;
 }
-extern "C" __declspec(dllexport) void WINAPI ReleaseDynamicSizeSortLeaseForProbe(void* lease)
+extern "C" ED_SORT_PROBE_EXPORT void WINAPI ReleaseDynamicSizeSortLeaseForProbe(void* lease)
 {
     auto* owned = static_cast<std::shared_ptr<SizeSortContext>*>(lease);
     if (!owned) return;
@@ -6600,10 +6610,10 @@ extern "C" __declspec(dllexport) void WINAPI ReleaseDynamicSizeSortLeaseForProbe
     delete owned;
 }
 
-extern "C" __declspec(dllexport) void WINAPI SetSizeSortShellPartitionForProbe(BOOL enabled)
+extern "C" ED_SORT_PROBE_EXPORT void WINAPI SetSizeSortShellPartitionForProbe(BOOL enabled)
 { InterlockedExchange(&g_sizeSortShellPartition, enabled ? 1 : 0); }
 
-// Candidate product ABI, available only in the isolated migration build for now.
+// Product ABI; old adapters without these entries remain capability-detected.
 extern "C" __declspec(dllexport) HRESULT WINAPI CreateFolderSizeSortContext(
     PCIDLIST_ABSOLUTE source, DWORD policy, PIDLIST_ABSOLUTE* output, void** lease)
 { return CreateDynamicSizeSortPidlForProbe(source, policy, output, lease); }
@@ -6642,9 +6652,9 @@ extern "C" __declspec(dllexport) HRESULT WINAPI SetFolderSizeSortPolicy(void* le
 extern "C" __declspec(dllexport) void WINAPI ReleaseFolderSizeSortContext(void* lease)
 { ReleaseDynamicSizeSortLeaseForProbe(lease); }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI CreateSizeSortContextRootForProbe(PCWSTR path, PIDLIST_ABSOLUTE* output)
+extern "C" ED_SORT_PROBE_EXPORT HRESULT WINAPI CreateSizeSortContextRootForProbe(PCWSTR path, PIDLIST_ABSOLUTE* output)
 { return CreateSyntheticRootPathPidl(path, output); }
-extern "C" __declspec(dllexport) HRESULT WINAPI VerifySizeSortContextValueForProbe(PCIDLIST_ABSOLUTE root, DWORD expected)
+extern "C" ED_SORT_PROBE_EXPORT HRESULT WINAPI VerifySizeSortContextValueForProbe(PCIDLIST_ABSOLUTE root, DWORD expected)
 {
     std::wstring path;
     auto result = ReadSyntheticRootPathFromPidl(root, &path, true);
@@ -6662,10 +6672,10 @@ extern "C" __declspec(dllexport) HRESULT WINAPI VerifySizeSortContextValueForPro
     return E_INVALIDARG;
 }
 
-extern "C" __declspec(dllexport) LONG WINAPI GetSizeSortColumnClickCountForProbe()
+extern "C" ED_SORT_PROBE_EXPORT LONG WINAPI GetSizeSortColumnClickCountForProbe()
 { return InterlockedCompareExchange(&g_sizeSortColumnClickCount, 0, 0); }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI VerifySizeSortPolicyPidlForProbe()
+extern "C" ED_SORT_PROBE_EXPORT HRESULT WINAPI VerifySizeSortPolicyPidlForProbe()
 {
     // Leases must isolate same-path identities and remove registry entries on release.
     PIDLIST_ABSOLUTE contextRoot = nullptr, firstRoot = nullptr, secondRoot = nullptr;

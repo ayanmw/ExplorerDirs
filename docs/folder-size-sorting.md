@@ -265,3 +265,18 @@ sort-mode-details-ready.log整项通过：详细信息原生菜单四种策略/�
 详细信息首轮sort-mode-details-header.log在策略校验读到pending时错误地按失败处理。ReadSettledOrder现仅在该正反策略对照中等待非null；仍要求正确策略true、相反策略false，行数变化/退休专用对照仍要求立即返回null，不改变产品的三态语义。产品实现本批无变化。
 
 边界：以上为单真实宿主加跨目录历史的隔离入口，不替代可见菜单动画、物理列头/键盘、DPI与大目录成本验收。鼠标列头已验证，不扩大为所有键盘触发路径。常规DLL能力激活和混合选项入口仍待实现，temp.86不发布。本批构建/定向用例通过，不宣称重跑30项总检。
+
+
+### 2026-11-05 常规开发构建启用上下文
+
+常规native构建加入EXPLORERDIRS_SIZE_SORT_CONTEXTS，复用已验证实现；五个产品上下文导出启用。隔离ForProbe入口改按诊断/NativeProbe条件导出，常规DLL九个已知排序探针入口全部检查为缺失。构建参数同步进BuildIdentity元数据。旧能力回退夹具改用不启用context的常规诊断DLL，保持真正缺少产品ABI的负对照；没有删除兼容检查。
+
+新增产品ABI正反对照：product-context-abi-red.log在旧常规DLL明确失败（未启用context）；product-context-abi-green.log及最终后台门槛通过产品创建、所有权、跨目录准备、策略更新、释放和无探针导出检查。纯检查无浏览器/注册/夹具目录访问，DLL加载有正常文件IO。
+
+常规DLL定向模式product-sort-mode-1/2/3/6/8.log分别通过大图标、小图标、列表、平铺、内容的分类/混合升降序及实际模式读回。初轮mode4原生菜单四组合通过但列头选区失败；product-header-finish.log即使等待恢复finish后选区仍为空，故属于真实保留问题，不能归因于仅等待不足。
+
+修正：列头动作前及上下文菜单打开前保留选择身份，原生命令的input版本继承该快照；普通选择输入使之失效。命令后校正在同一browser/代际/input匹配时将快照所有权交给恢复，不在排序清空选区后再首次读取。取消菜单/无需校正/失效/拆除均释放；getter重入后重新校验，不继续读取旧视图。product-header-selection.log及最终product-context-final-header.log验证真实大小列头双向、所有策略组合、选中folder-small保持和守卫通过。
+
+product-context-four-hosts.log常规DLL真实四宿主历史/排序/数值/选区焦点/上下文关闭整项通过；最终product-context-final-input.log常规四宿主连续选择、后续用户排序及整个回归/隔离守卫通过。最终30项后台整轮通过：src/.state/background-checks/20261105-032331-2f33a59d21d34671be0e7278771fad63/summary.json。后补的定向入口/快照门槛不扩大为可见UI验收。
+
+范围：现在只启用src常规开发构建能力，不覆盖releases。文件夹组的混合选项菜单、实际点击/复制/重启链路及集中可见验收仍待完成。最早的“常规DLL故意不含ABI”阶段说明由本节更新，不再作为当前事实。

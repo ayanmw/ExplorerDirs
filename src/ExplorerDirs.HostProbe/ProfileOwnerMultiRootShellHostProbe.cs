@@ -743,7 +743,8 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 }
 
                 sortPolicyModule = NativeLibrary.Load(_sortContextAdapter!);
-                var verifyPolicy = Marshal.GetDelegateForFunctionPointer<VerifyProbePolicy>(NativeLibrary.GetExport(sortPolicyModule, "VerifySizeSortContextValueForProbe"));
+                VerifyProbePolicy? verifyPolicy = NativeLibrary.TryGetExport(sortPolicyModule, "VerifySizeSortContextValueForProbe", out var verifyAddress)
+                    ? Marshal.GetDelegateForFunctionPointer<VerifyProbePolicy>(verifyAddress) : null;
                 foreach (var mixed in new[] { true, false })
                 foreach (var direction in new[] { 1, -1 })
                 {
@@ -753,7 +754,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                     requestedSort.SetValue(Activator.CreateInstance(sort.GetType(), [sortKey, direction]), 0);
                     hostType.GetMethod("UpdateFolderSizeSortPolicy", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(host, [requestedSort]);
                     var expectedPolicy = (mixed ? 1u : 0u) | (direction < 0 ? 2u : 0u);
-                    Marshal.ThrowExceptionForHR(verifyPolicy(sortPolicyRoot, expectedPolicy));
+                    if (verifyPolicy is not null) Marshal.ThrowExceptionForHR(verifyPolicy(sortPolicyRoot, expectedPolicy));
                     var nextMenu = hostType.GetMethod("OpenFileCommandMenu", BindingFlags.Instance | BindingFlags.NonPublic, null, [typeof(bool), typeof(bool)], null)!.Invoke(host, [true, true])!;
                     try
                     {
@@ -788,7 +789,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                                 Console.WriteLine("product-user-sort-compare: " + text);
                             }
                         }
-                        throw new InvalidOperationException($"Policy row failure: mixed={mixed}; direction={direction}; policy-verify=0x{verifyPolicy(sortPolicyRoot, expectedPolicy):X8}; actual={string.Join('|', actualPolicyNames)}; values={string.Join('|', (string[])readValues.Invoke(null, [hostType, host, 3])!)}", error);
+                        throw new InvalidOperationException($"Policy row failure: mixed={mixed}; direction={direction}; policy-verify=0x{(verifyPolicy is null ? "not-exported" : verifyPolicy(sortPolicyRoot, expectedPolicy).ToString("X8"))}; actual={string.Join('|', actualPolicyNames)}; values={string.Join('|', (string[])readValues.Invoke(null, [hostType, host, 3])!)}", error);
                     }
                     var policyView = (nint)hostType.GetMethod("GetFolderView2Pointer", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(host, null)!;
                     try
@@ -821,12 +822,15 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                             if (!((string[])rows.GetType().GetField("Item2")!.GetValue(rows)!).SequenceEqual(expectedHeaderNames)) return false;
                             var headerState = hostType.GetMethod("CaptureViewState")!.Invoke(host, null)!;
                             var headerSort = ((System.Collections.IEnumerable)headerState.GetType().GetProperty("SortColumns")!.GetValue(headerState)!).Cast<object>().Single();
-                            return (int)headerSort.GetType().GetProperty("Direction")!.GetValue(headerSort)! == headerDirection &&
+                            var recoveryTrace = (string)hostType.GetProperty("InitialSortRecoveryStatus", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)!;
+                            var recoveryFinished = recoveryTrace.LastIndexOf(":finish", StringComparison.Ordinal) >
+                                recoveryTrace.LastIndexOf(":scheduled", StringComparison.Ordinal);
+                            return (int)headerSort.GetType().GetProperty("Direction")!.GetValue(headerSort)! == headerDirection && recoveryFinished &&
                                 !(bool)hostType.GetProperty("ViewCaptureFailed")!.GetValue(host)!;
                         }, TimeSpan.FromSeconds(8), $"Native size header click did not retain folder-first direction {headerDirection}.");
                         var afterHeaderSelection = readSelection.Invoke(null, [window])!;
                         if (!((string[])afterHeaderSelection.GetType().GetField("Item1")!.GetValue(afterHeaderSelection)!).SequenceEqual(["folder-small"]))
-                            throw new InvalidOperationException("Header reconciliation lost the selected file identity.");
+                            throw new InvalidOperationException($"Header reconciliation lost the selected file identity: [{string.Join('|', (string[])afterHeaderSelection.GetType().GetField("Item1")!.GetValue(afterHeaderSelection)!)}]; trace={hostType.GetProperty("InitialSortRecoveryStatus", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)}");
                         Console.WriteLine($"product-user-sort-header: direction={headerDirection}; actual-row-order=True; selected-folder-preserved=True");
                     }
                 }

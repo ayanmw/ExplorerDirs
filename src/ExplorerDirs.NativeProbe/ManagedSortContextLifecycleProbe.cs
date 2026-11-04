@@ -3,7 +3,7 @@ using ExplorerDirs.App;
 
 public static partial class SyntheticShellSortProbe
 {
-    internal static int RunManagedSortContextLifecycle(string adapterPath, string legacyAdapterPath)
+    internal static int RunManagedSortContextLifecycle(string adapterPath, string legacyAdapterPath, string? productAdapterPath = null)
     {
         adapterPath = Path.GetFullPath(adapterPath);
         var module = NativeLibrary.Load(adapterPath);
@@ -49,6 +49,35 @@ public static partial class SyntheticShellSortProbe
             if (verify(firstLocation, 2) >= 0) throw new InvalidOperationException("Retired context remained registered.");
             second!.Update(false, 1);
             Check(verify(secondLocation, 0));
+            if (productAdapterPath is not null)
+            {
+                var productModule = NativeLibrary.Load(Path.GetFullPath(productAdapterPath));
+                FolderSizeSortContext? product = null;
+                nint productLocation = 0, nextProductLocation = 0;
+                try
+                {
+                    foreach (var name in new[] { "CreateSizeSortPolicyPidlForProbe", "CreateDynamicSizeSortPidlForProbe", "SetDynamicSizeSortPolicyForProbe",
+                        "ReleaseDynamicSizeSortLeaseForProbe", "SetSizeSortShellPartitionForProbe", "CreateSizeSortContextRootForProbe",
+                        "VerifySizeSortContextValueForProbe", "GetSizeSortColumnClickCountForProbe", "VerifySizeSortPolicyPidlForProbe" })
+                        if (NativeLibrary.TryGetExport(productModule, name, out _))
+                            throw new InvalidOperationException($"Product adapter exposed a probe-only entry point: {name}.");
+                    if (!FolderSizeSortContext.TryCreate(productAdapterPath, root, false, 1, out product, out productLocation))
+                        throw new InvalidOperationException("Product adapter did not enable per-tab sort contexts.");
+                    if (!product!.Contains(productLocation) || product.Contains(root))
+                        throw new InvalidOperationException("Product context did not preserve its location ownership.");
+                    product.Update(true, -1);
+                    nextProductLocation = product.Prepare(nextRoot);
+                    if (!product.Contains(nextProductLocation)) throw new InvalidOperationException("Product context lost cross-directory ownership.");
+                    Console.WriteLine("Product sort context ABI: PASS (enabled, probe exports absent, update, navigation identity, release; no window)");
+                }
+                finally
+                {
+                    product?.Dispose();
+                    if (productLocation != 0) Marshal.FreeCoTaskMem(productLocation);
+                    if (nextProductLocation != 0) Marshal.FreeCoTaskMem(nextProductLocation);
+                    NativeLibrary.Free(productModule);
+                }
+            }
             Console.WriteLine("Managed sort context lifecycle: PASS (same-path isolation, cross-directory reuse, existing identities, invalid direction, legacy capabilities, idempotent disposal, post-disposal rejection, sibling survives; no fixture IO/registry/window)");
             return 0;
         }

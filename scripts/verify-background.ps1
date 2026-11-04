@@ -42,6 +42,7 @@ try {
         'src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj', '-c', 'Release', '--no-build', '--',
         '--managed-sort-context-lifecycle-smoke',
         'src/ExplorerDirs.NativeProbe/bin/native-product-diagnostics-x64-sort-policy/ExplorerDirs.ShellNamespace.Diagnostics.dll',
+        'src/ExplorerDirs.NativeProbe/bin/native-product-diagnostics-x64/ExplorerDirs.ShellNamespace.Diagnostics.dll',
         'src/ExplorerDirs.NativeProbe/bin/native-product-x64/ExplorerDirs.ShellNamespace.dll')
     $settings = 'src/ExplorerDirs.SettingsSmoke/ExplorerDirs.SettingsSmoke.csproj'
     # Only early-dispatched, inspected flags belong here. The default SettingsSmoke suite is intentionally excluded.

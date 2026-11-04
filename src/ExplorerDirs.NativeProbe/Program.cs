@@ -40,6 +40,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunProductSizeDisplay(listSortAdapter, explorerBrowser: true, sortPolicyExperiment: true, dynamicSortPolicy: true, nativeSortEntrypoints: true, nativeSortMode: 3);
         if (args is ["--product-size-sort-entrypoints-icons-private-desktop", var iconSortAdapter])
             return PrivateDesktopShellProbe.RunProductSizeDisplay(iconSortAdapter, explorerBrowser: true, sortPolicyExperiment: true, dynamicSortPolicy: true, nativeSortEntrypoints: true, nativeSortMode: 1);
+        if (args is ["--managed-sort-context-lifecycle-smoke", var diagnosticContextAdapter, var legacyContextAdapter, var productContextAdapter])
+            return SyntheticShellSortProbe.RunManagedSortContextLifecycle(diagnosticContextAdapter, legacyContextAdapter, productContextAdapter);
         if (args is ["--managed-sort-context-lifecycle-smoke", var contextAdapter, var oldContextAdapter])
             return SyntheticShellSortProbe.RunManagedSortContextLifecycle(contextAdapter, oldContextAdapter);
         if (args is ["--product-size-sort-entrypoints-private-desktop", var sortEntrypointsAdapter])
@@ -73,7 +75,7 @@ internal static class Program
         if (args is ["--product-sort-retry-host-private-desktop", var retryHostProbe, var retryHostAdapter])
             return PrivateDesktopShellProbe.RunProductSortRetryHost(retryHostProbe, retryHostAdapter);
         if (args is ["--product-user-sort-host-private-desktop", var modeHostProbe, var modeHostAdapter, var requestedSortMode] &&
-            uint.TryParse(requestedSortMode, out var sortMode) && sortMode is 1 or 3 or 4)
+            uint.TryParse(requestedSortMode, out var sortMode) && sortMode is 1 or 2 or 3 or 4 or 6 or 8)
             return PrivateDesktopShellProbe.RunProductUserSortHost(modeHostProbe, modeHostAdapter, sortMode);
         if (args is ["--product-user-sort-host-private-desktop", var userSortHostProbe, var userSortHostAdapter])
             return PrivateDesktopShellProbe.RunProductUserSortHost(userSortHostProbe, userSortHostAdapter);

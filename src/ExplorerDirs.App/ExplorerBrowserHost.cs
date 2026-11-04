@@ -243,6 +243,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private int _folderSizeSortDirection = 1;
     private DispatcherOperation? _nativeSortReconciliation;
     private bool _nativeSortReconciliationDeferred;
+    private (long Generation, long InputVersion, ShellViewSelectionSnapshot Snapshot)? _nativeSortCommandSelection;
+    private bool _capturingNativeSortSelection;
     internal bool IsFolderSizeProvider => _nativeDirectoryIdentity is { } identity &&
         QdrShellPathCodec.TryGetProviderPath(identity, _folderSizeProfileClassId, out _);
 
@@ -286,6 +288,45 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         _folderSizeSortDirection = direction;
     }
 
+    private void ClearNativeSortCommandSelection()
+    {
+        _nativeSortCommandSelection?.Snapshot.Dispose();
+        _nativeSortCommandSelection = null;
+    }
+
+    // Native header sorting can empty selection before post-command correction starts.
+    // Preserve the pre-gesture identity; discard it on unrelated input or view retirement.
+    private void CaptureNativeSortCommandSelection()
+    {
+        if (_capturingNativeSortSelection || _folderSizeSortContext is null || _browser is null || !IsFolderSizeProvider) return;
+        var browser = _browser;
+        var generation = _viewReadiness.Generation;
+        var inputVersion = Interlocked.Read(ref _nativeUserInputVersion);
+        if (_nativeSortCommandSelection is { } pending && pending.Generation == generation) return;
+        ClearNativeSortCommandSelection();
+        _capturingNativeSortSelection = true;
+        nint view = 0;
+        try
+        {
+            view = GetFolderView2Pointer();
+            if (view == 0 || !ReferenceEquals(browser, _browser) || generation != _viewReadiness.Generation ||
+                inputVersion != Interlocked.Read(ref _nativeUserInputVersion)) return;
+            var snapshot = ShellViewSelectionSnapshot.Capture(view);
+            if (snapshot is null) return;
+            if (!ReferenceEquals(browser, _browser) || generation != _viewReadiness.Generation || inputVersion != Interlocked.Read(ref _nativeUserInputVersion))
+            {
+                snapshot.Dispose();
+                return;
+            }
+            _nativeSortCommandSelection = (generation, inputVersion, snapshot);
+        }
+        finally
+        {
+            if (view != 0) Marshal.Release(view);
+            _capturingNativeSortSelection = false;
+        }
+    }
+
     private void QueueNativeSortReconciliation()
     {
         if (_folderSizeSortContext is null || _browser is null || !IsFolderSizeProvider) return;
@@ -304,10 +345,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 _nativeSortReconciliationDeferred = true;
                 return;
             }
-            var view = GetFolderView2Pointer();
-            if (view == 0) return;
+            var selection = _nativeSortCommandSelection;
+            _nativeSortCommandSelection = null;
+            nint view = 0;
             try
             {
+                view = GetFolderView2Pointer();
+                if (view == 0 || !Current()) return;
                 var source = new NativeViewStateSource(view);
                 if (source.GetSortColumnCount(out var count) < 0 || !Current() || count != 1 ||
                     source.GetSortColumns(count, out var sorts) < 0 || !Current() ||
@@ -319,13 +363,25 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 if (!Current() || saved.MixedSizeSort || saved.GroupKey is not null) return;
                 // The original Shell sort used the previous direction's category compensation.
                 // Reuse the bounded native recovery, with its selection and input protections.
-                ScheduleInitialVirtualSort(sorts[0], Current);
+                ShellViewSelectionSnapshot? preserved = null;
+                if (selection is { } candidate && candidate.Generation == generation &&
+                    candidate.InputVersion == Interlocked.Read(ref _nativeUserInputVersion))
+                {
+                    preserved = candidate.Snapshot;
+                    selection = null;
+                }
+                RecordInitialSortRecovery($"native-sort-selection-preserved:{preserved?.SelectedCount}");
+                ScheduleInitialVirtualSort(sorts[0], Current, preserved);
             }
             catch (COMException error)
             {
                 if (Current()) MenuError?.Invoke(this, error.Message);
             }
-            finally { Marshal.Release(view); }
+            finally
+            {
+                selection?.Snapshot.Dispose();
+                if (view != 0) Marshal.Release(view);
+            }
         }));
     }
 
@@ -2938,15 +2994,15 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         finally { Marshal.Release(view); }
     }
 
-    private void ScheduleInitialVirtualSort(SortColumnState sort, Func<bool> isCurrent)
+    private void ScheduleInitialVirtualSort(SortColumnState sort, Func<bool> isCurrent, ShellViewSelectionSnapshot? selectionToPreserve = null)
     {
-        if (!isCurrent()) return;
+        if (!isCurrent()) { selectionToPreserve?.Dispose(); return; }
         var traceSerial = ++_initialSortRecoverySerial;
         ReleaseInitialVirtualSortRedrawLease();
         EndInitialSortTransient(_initialSortTransientOwner);
         var oppositeApplied = false;
         var savedApplied = false;
-        ShellViewSelectionSnapshot? initialSortSelection = null;
+        ShellViewSelectionSnapshot? initialSortSelection = selectionToPreserve;
         string? initialSortSelectionReadiness = null;
         var readinessWait = Stopwatch.StartNew();
         var expectedInputVersion = Interlocked.Read(ref _nativeUserInputVersion);
@@ -3219,7 +3275,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 {
                     try
                     {
-                        initialSortSelection = ShellViewSelectionSnapshot.Capture(sortView);
+                        initialSortSelection ??= ShellViewSelectionSnapshot.Capture(sortView);
                         if ((initialSortSelection is null || initialSortSelection.SelectedCount == 0) &&
                             _lastNativeSelection is { SelectedCount: > 0 } cachedSelection &&
                             _lastNativeSelectionNavigationVersion == _viewReadiness.NavigationVersion &&
@@ -4452,11 +4508,16 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         _lastNativeSelectionPath = null;
     }
 
-    private void NoteNativeUserInput(IntPtr inputHwnd = default)
+    private void NoteNativeUserInput(IntPtr inputHwnd = default) => NoteNativeUserInputCore(inputHwnd, preserveSortSelection: false);
+
+    private void NoteNativeUserInputCore(IntPtr inputHwnd, bool preserveSortSelection)
     {
         CancelNaturalUpdateSelectionVerification();
         CancelDeferredRefreshSelectionRestore(restartDirectoryMonitor: true);
         var inputVersion = Interlocked.Increment(ref _nativeUserInputVersion);
+        if (preserveSortSelection && _nativeSortCommandSelection is { } pendingSelection && pendingSelection.Generation == _viewReadiness.Generation)
+            _nativeSortCommandSelection = (pendingSelection.Generation, inputVersion, pendingSelection.Snapshot);
+        else ClearNativeSortCommandSelection();
         PreserveInitialSortInput(inputVersion, inputHwnd);
         if (_pendingFileOperationFocusRestore is { } pendingRestore)
         {
@@ -6046,6 +6107,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private void DetachViewWindow()
     {
+        ClearNativeSortCommandSelection();
         _nativeSortReconciliation?.Abort();
         _nativeSortReconciliation = null;
         _nativeSortReconciliationDeferred = false;
@@ -6080,7 +6142,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 message is 0x0100 or 0x0104 or 0x0111 or 0x0201 or 0x0202 or 0x0203 or 0x0204 or 0x0207)
                 // Explicit native commands may change sorting; they must cancel recovery,
                 // rather than being treated as a selection gesture to restore afterward.
-                NoteNativeUserInput(message == 0x0111 ? IntPtr.Zero : hwnd);
+            {
+                if (message == 0x0201 && IsColumnHeaderInputWindow(hwnd)) CaptureNativeSortCommandSelection();
+                NoteNativeUserInputCore(message == 0x0111 ? IntPtr.Zero : hwnd,
+                    preserveSortSelection: message == 0x0111 || IsColumnHeaderInputWindow(hwnd));
+            }
             if (message == 0x020A && (wParam.ToInt64() & 0x0008) != 0 && CtrlWheelHandler is { } wheelHandler)
             {
                 var delta = unchecked((short)(wParam.ToInt64() >> 16));
@@ -6233,7 +6299,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         // WM_ENTERMENULOOP through our view subclass. Observe the dispatch before
         // Shell can create/show its popup, and balance it even on failure.
         var contextDispatch = message is 0x007B or 0x0205; // WM_CONTEXTMENU / WM_RBUTTONUP
-        if (contextDispatch) NativeShellTheme.BeginMenu(hwnd);
+        if (contextDispatch)
+        {
+            CaptureNativeSortCommandSelection();
+            NativeShellTheme.BeginMenu(hwnd);
+        }
         IntPtr result;
         try { result = DefSubclassProc(hwnd, message, wParam, lParam); }
         finally { if (contextDispatch) NativeShellTheme.EndMenu(); }

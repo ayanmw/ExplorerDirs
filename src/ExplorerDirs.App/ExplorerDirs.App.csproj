@@ -52,7 +52,7 @@
       <AssemblyMetadata Include="BuildPublishSingleFile" Value="$(PublishSingleFile)" />
       <AssemblyMetadata Include="BuildPublishTrimmed" Value="$(PublishTrimmed)" />
       <AssemblyMetadata Include="BuildPublishReadyToRun" Value="$(PublishReadyToRun)" />
-      <AssemblyMetadata Include="NativeBuildParameters" Value="MSVC x64 $(Configuration): $(_NativeCompilerFlags); /EHsc /W4 /WX; link /Brepro; EXPLORERDIRS_PROVIDER_VIEW_NOTIFICATIONS, EXPLORERDIRS_FOLDER_SIZE_DISPLAY" />
+      <AssemblyMetadata Include="NativeBuildParameters" Value="MSVC x64 $(Configuration): $(_NativeCompilerFlags); /EHsc /W4 /WX; link /Brepro; EXPLORERDIRS_PROVIDER_VIEW_NOTIFICATIONS, EXPLORERDIRS_FOLDER_SIZE_DISPLAY, EXPLORERDIRS_SIZE_SORT_CONTEXTS" />
       <AssemblyMetadata Include="BuildTags" Value="$(BuildTags)" />
     </ItemGroup>
   </Target>
