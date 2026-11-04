@@ -851,6 +851,33 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                     Console.WriteLine($"product-user-sort-policy-switch: mixed={mixed}; direction={direction}; names={string.Join('|', expectedNames)}");
                 }
 
+                if (_userSortMode == 3 && !_hideSortSizeColumn)
+                {
+                    var setGroup = hostType.GetMethod("TrySetGroup", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    if (!(bool)setGroup.Invoke(host, [sortKey, true, new Func<bool>(() => true)])!)
+                        throw new InvalidOperationException("Could not enable grouping for mixed-policy preservation.");
+                    WaitUntil(() =>
+                    {
+                        var state = hostType.GetMethod("CaptureViewState")!.Invoke(host, null)!;
+                        return Equals(state.GetType().GetProperty("GroupKey")!.GetValue(state), sortKey);
+                    }, TimeSpan.FromSeconds(5), "Native size grouping did not become observable.");
+                    foreach (var mixed in new[] { true, false })
+                    {
+                        WaitUntil(() => (bool)hostType.GetProperty("CanSetMixedSizeSort", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)!,
+                            TimeSpan.FromSeconds(5), "Grouped mixed-policy setting was not ready.");
+                        var beforeSerial = (long)hostType.GetField("_initialSortRecoverySerial", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)!;
+                        if (!(bool)hostType.GetMethod("SetMixedSizeSort", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(host, [mixed])!)
+                            throw new InvalidOperationException("Grouped mixed-policy update was rejected.");
+                        var groupedState = hostType.GetMethod("CaptureViewState")!.Invoke(host, null)!;
+                        if (!Equals(groupedState.GetType().GetProperty("GroupKey")!.GetValue(groupedState), sortKey) ||
+                            !Equals(groupedState.GetType().GetProperty("MixedSizeSort")!.GetValue(groupedState), mixed) ||
+                            (long)hostType.GetField("_initialSortRecoverySerial", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)! != beforeSerial)
+                            throw new InvalidOperationException($"Grouped policy update mismatch: group={groupedState.GetType().GetProperty("GroupKey")!.GetValue(groupedState)}; mixed={groupedState.GetType().GetProperty("MixedSizeSort")!.GetValue(groupedState)}; expected={mixed}; before-serial={beforeSerial}; after-serial={hostType.GetField("_initialSortRecoverySerial", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)}.");
+                        VerifyMixedPolicyReload(appAssembly, Path.Combine(profile, $"grouped-mixed-{mixed}.ini"), folders[0], groupedState, mixed);
+                    }
+                    Console.WriteLine("product-grouped-mixed-option: group-preserved=True; ungrouped-recovery=False; ini-copy-default=True");
+                }
+
                 if (_userSortMode == 4)
                 {
                     var header = (nint)typeof(ShellProviderLocationProbe).GetMethod("FindSortHeader", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, [window])!;
