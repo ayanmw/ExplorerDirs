@@ -133,3 +133,13 @@
 另作有界分段实验：沿用身份匹配算法，每32行或约8ms让出Dispatcher，按监视代际取消、同代际单个worker串行，整批收集身份后再通知。普通构建 `src/.state/app-incremental-delete-513.log` 目录删除通过，但普通文件删除超时，未达到整项标准；未声称早退/中途取消的原生生命周期已验证。下一步区分分段时条目数组变化、任务退休及最终通知结果。
 
 完整未通过实现与合同尝试保存在Git跟踪的 `src/ExplorerDirs.NativeProbe/experiments/incremental-delete-repair.patch`，未接入默认编译；默认App和SettingsSmoke已恢复已验证实现。不降低成功标准，不发布预览。NativeProbe保留大目录目录/文件/突发用例与显式大目录adapter组合诊断入口，默认关闭额外名称观察。
+
+## 失败行清单与旧目录重新加入证据（2026-11-05）
+
+NativeProbe在断言超时之后才读取最多2048行名称，打印非filler条目及前后计数；不参与等待条件、不重试断言，避免观察把失败变成通过。已完全移除自动名称查找观察，即使显式adapter诊断也不自动调用LVM_FINDITEM。
+
+`app-incremental-stages-run.log` 的分段数组实验首进程目录/文件/突发阶段通过，第二进程后续创建失败。`app-large-inventory-run.log` 捕获数组扫描ItemNotFound时，视图仍有external-notification-fixture；任务日志current=True，不能归因为任务退休。后续改为IFolderView.Item原始PIDL、所属IShellFolder的缓存解析名称和类型，避免重建IShellItem；`app-raw-view-delete-run.log` 四窗格均找到原始目录身份并通知，仍有残留。原始视图分段版本保存在Git实验补丁 `src/ExplorerDirs.NativeProbe/experiments/raw-view-incremental-delete.patch`，未接入默认编译。
+
+单变量原生枚举标志对照：只让实际NOENUMREFRESH保持关闭，应用软刷新策略仍开启。`src/.state/app-native-reconcile-control-1025.log` 先记录目录删除恢复1027项，随后文件创建等待1028项失败；失败行清单显示新external-file.txt已存在，多出的却是前一步已移除的external-notification-fixture（两窗格1029项）。因此“文件创建没同步”的计数表象实际包含旧目录重新加入。再撤销缺失目录的SFGAO_FOLDER回退，`app-native-reconcile-missing-1025.log` 仍重复该表象，不能把标志或类型回退当作已证实的完整根因。
+
+两项原生/标志控制均已撤回；正常产品保持此前已验证源码。下一步追踪迟到的枚举输出和大小更新通知，与删除/重新出现阶段对齐。标准CompareIDs文档核对及诊断只观察到CANONICALONLY/name比较，未据此修改比较器。现阶段不再把“发出RMDIR”当成行最终移除完成证据，不发布预览。

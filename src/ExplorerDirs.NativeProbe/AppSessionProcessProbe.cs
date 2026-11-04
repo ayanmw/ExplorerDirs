@@ -205,23 +205,47 @@ internal static class AppSessionProcessProbe
             count += fillerCount;
             var elapsed = Stopwatch.StartNew();
             string? lastState = null;
-            Wait(() =>
+            try
             {
-                EnsureRunning(child);
-                var lists = VisibleFileViews(window);
-                var counts = lists.Select(list => Message(list, 0x1004)).ToArray();
-                if (counts.Any(rows => rows == 0)) transientEmptySamples++;
-                var state = $"counts={string.Join('|', counts)}; grouped={string.Join('|', grouped.Select(list => Message(list, 0x10AF)))}";
-                if (state != lastState)
+                Wait(() =>
                 {
-                    if (fillerCount > 0 && stage == "delete" && tracePath is not null)
-                        Console.WriteLine($"app-native-find-state: indices={string.Join('|', lists.Select(list => OwnedAppListText.Find(child.Process, child.ProcessId, list, "external-notification-fixture")))}");
-                    Console.WriteLine($"app-external-change-state: stage={stage}; {state}");
-                    lastState = state;
+                    EnsureRunning(child);
+                    var lists = VisibleFileViews(window);
+                    var counts = lists.Select(list => Message(list, 0x1004)).ToArray();
+                    if (counts.Any(rows => rows == 0)) transientEmptySamples++;
+                    var state = $"counts={string.Join('|', counts)}; grouped={string.Join('|', grouped.Select(list => Message(list, 0x10AF)))}";
+                    if (state != lastState)
+                    {
+                        Console.WriteLine($"app-external-change-state: stage={stage}; {state}");
+                        lastState = state;
+                    }
+                    return lists.Count == 4 && counts.All(rows => rows == count) &&
+                        grouped.All(list => Message(list, 0x10AF) == 1);
+                }, TimeSpan.FromSeconds(15), $"External {stage} did not update all four panes while retaining grouping.");
+            }
+            catch (TimeoutException)
+            {
+                // Failure-only observation cannot turn a pending assertion into a pass.
+                if (fillerCount > 0)
+                {
+                    foreach (var list in VisibleFileViews(window))
+                    {
+                        try
+                        {
+                            var before = Message(list, 0x1004);
+                            var names = new List<string>();
+                            for (var row = 0; row < Math.Min(before, 2048); row++)
+                            {
+                                var name = OwnedAppListText.Read(child.Process, child.ProcessId, list, row, 0);
+                                if (!name.StartsWith("filler-", StringComparison.Ordinal)) names.Add(name);
+                            }
+                            Console.WriteLine($"app-failed-row-inventory: stage={stage};hwnd=0x{list:X};before={before};after={Message(list, 0x1004)};non-filler={string.Join('|', names)}");
+                        }
+                        catch (Exception error) { Console.WriteLine($"app-failed-row-inventory-error: {error.GetType().Name}"); }
+                    }
                 }
-                return lists.Count == 4 && counts.All(rows => rows == count) &&
-                    grouped.All(list => Message(list, 0x10AF) == 1);
-            }, TimeSpan.FromSeconds(15), $"External {stage} did not update all four panes while retaining grouping.");
+                throw;
+            }
             Console.WriteLine($"app-external-change: pass={pass + 1}; stage={stage}; rows-per-pane={count}; ms={elapsed.ElapsedMilliseconds}; transient-empty-samples={transientEmptySamples}; grouped-pane-preserved=True");
         }
         void AwaitFileRow(string name, ulong bytes, string stage, string? forbiddenName = null)
