@@ -642,10 +642,22 @@ internal static class PaneTabTransferProbe
         Ensure(pins.Length == 1 && (string)pins[0].GetType().GetProperty("Path", InstanceMembers)!.GetValue(pins[0])! == nextPath,
             "pinned metadata agrees with the settled session directory");
         paneType.GetMethod("TogglePinned", InstanceMembers)!.Invoke(source, [state]);
+        var sourceBrowser = stateType.GetProperty("Browser", InstanceMembers)!.GetValue(state)!;
+        var savedView = sourceBrowser.GetType().GetField("_viewState", InstanceMembers)!.GetValue(sourceBrowser)!;
+        savedView.GetType().GetProperty("MixedSizeSort", InstanceMembers)!.SetValue(savedView, true);
+        void CheckMixedPolicy(object tab, bool expected, string operation)
+        {
+            var tabState = ((TabItem)tab).Tag!;
+            var tabBrowser = tabState.GetType().GetProperty("Browser", InstanceMembers)!.GetValue(tabState)!;
+            var tabView = tabBrowser.GetType().GetMethod("CachedViewState", InstanceMembers)!.Invoke(tabBrowser, null)!;
+            Ensure((bool)tabView.GetType().GetProperty("MixedSizeSort", InstanceMembers)!.GetValue(tabView)! == expected,
+                operation + " preserves the expected per-tab mixed sort policy");
+        }
         paneType.GetField("_newTabUsesCurrentFolder", InstanceMembers)!.SetValue(source, true);
         paneType.GetMethod("NewTab", InstanceMembers)!.Invoke(source, null);
         Ensure(ReadBrowserPath(tabs.SelectedItem!) == nextPath,
             "new-tab current-folder mode follows the settled directory");
+        CheckMixedPolicy(tabs.SelectedItem!, false, "new tab");
         tabs.SelectedItem = original;
         paneType.GetMethod("FocusAddress", InstanceMembers)!.Invoke(source, null);
         Ensure(Path.TrimEndingDirectorySeparator(address.Text) == Path.TrimEndingDirectorySeparator(nextPath),
@@ -653,11 +665,13 @@ internal static class PaneTabTransferProbe
         paneType.GetMethod("DuplicateCurrentTab", InstanceMembers)!.Invoke(source, null);
         Ensure(ReadBrowserPath(tabs.SelectedItem!) == nextPath,
             "duplicating before notice delivery opens the settled directory");
+        CheckMixedPolicy(tabs.SelectedItem!, true, "duplicate");
         Ensure((bool)paneType.GetMethod("CopyTabFrom", InstanceMembers)!.Invoke(destination, [state, null, true])!,
             "cross-pane copy accepts the settled tab");
         var targetTabs = (TabControl)paneType.GetField("Tabs", InstanceMembers)!.GetValue(destination)!;
         Ensure(ReadBrowserPath(targetTabs.SelectedItem!) == nextPath,
             "cross-pane copy also opens the settled directory");
+        CheckMixedPolicy(targetTabs.SelectedItem!, true, "cross-pane copy");
         paneType.GetMethod("CloseTab", InstanceMembers)!.Invoke(source, [state]);
         paneType.GetMethod("ReopenClosedTab", InstanceMembers)!.Invoke(source, null);
         Ensure(ReadBrowserPath(tabs.SelectedItem!) == nextPath,

@@ -7,7 +7,7 @@ internal static class ViewCaptureGenerationSmoke
     internal static void Run()
     {
         var key = new PropertyKeyState(Guid.NewGuid(), 1);
-        var cached = new ViewState(4, 16, [new(key, -1)], key, false, [new(key, 200)]);
+        var cached = new ViewState(4, 16, [new(key, -1)], key, false, [new(key, 200)]) { MixedSizeSort = true };
         foreach (var changedStep in new[] { "mode", "count", "sorts", "group", "display" })
         {
             var readiness = new ShellViewReadiness();
@@ -37,7 +37,7 @@ internal static class ViewCaptureGenerationSmoke
             source.ReadStep = null;
             captured = ShellViewStateCapture.Capture(cached, source, out complete,
                 () => generation == readiness.Generation);
-            Check(complete && captured.Mode == 3, "a stable subsequent visit can capture normally");
+            Check(complete && captured.Mode == 3 && captured.MixedSizeSort, "a stable subsequent visit can capture normally");
         }
         var readCount = 0;
         var staleSource = new FakeShellViewStateSource { ReadStep = _ => readCount++ };

@@ -9,6 +9,12 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 
+if (args is ["--mixed-size-sort-session-smoke"])
+{
+    ExplorerDirs.SettingsSmoke.MixedSizeSortSessionSmoke.Run();
+    return;
+}
+
 if (args is ["--item-counts-smoke"])
 {
     ShellItemCountsSmoke.Run();
@@ -793,7 +799,7 @@ var shellSessionState = state with
 var shellSessionText = SessionStore.Render(shellSessionState);
 var shellSessionRoundTrip = SessionStore.Parse(shellSessionText);
 Check(shellSessionRoundTrip?.Panes[0][0].Path == "shell:RecycleBinFolder" &&
-      shellSessionText.Contains("FormatVersion=14", StringComparison.Ordinal),
+      shellSessionText.Contains("FormatVersion=15", StringComparison.Ordinal),
     "supported Shell parsing identities round-trip in the existing session format");
 
 try
@@ -898,7 +904,7 @@ try
         "duplicated view has an independent column layout snapshot");
     var columnIni = Path.Combine(root, "columns.ini");
     var columnStore = new SessionStore(columnIni, Path.Combine(root, "missing-columns.json"));
-    var legacyColumns = SessionStore.Render(state).Replace("FormatVersion=14", "FormatVersion=1")
+    var legacyColumns = SessionStore.Render(state).Replace("FormatVersion=15", "FormatVersion=1")
         .Replace("DefaultIconSize=-1" + Environment.NewLine, "")
         .Replace("DisplayColumnCount=0" + Environment.NewLine, "");
     File.WriteAllText(columnIni, legacyColumns);
@@ -907,9 +913,9 @@ try
         "v1 loads without damage warning and leaves the Shell column defaults alone");
     columnStore.Save(oldColumnsState);
     columnStore.Save(oldColumnsState);
-    var upgradeBackups = Directory.GetFiles(root, "columns.ini.before-v14-*.bak");
+    var upgradeBackups = Directory.GetFiles(root, "columns.ini.before-v15-*.bak");
     Check(upgradeBackups.Length == 1 && File.ReadAllText(upgradeBackups[0]) == legacyColumns &&
-        File.ReadAllText(columnIni).Contains("FormatVersion=14"), "v1 migration keeps exactly one original snapshot");
+        File.ReadAllText(columnIni).Contains("FormatVersion=15"), "v1 migration keeps exactly one original snapshot");
     foreach (var damaged in new[]
     {
         columnsProfile.Replace("DisplayColumnCount=2", "DisplayColumnCount=1"),
@@ -1899,7 +1905,7 @@ try
         "invalid INI is preserved before overwrite");
 
     var futureIni = Path.Combine(root, "future.ini");
-    var futureProfile = completeProfile.Replace("FormatVersion=14", "FormatVersion=15", StringComparison.Ordinal);
+    var futureProfile = completeProfile.Replace("FormatVersion=15", "FormatVersion=16", StringComparison.Ordinal);
     File.WriteAllText(futureIni, futureProfile);
     var futureStore = new SessionStore(futureIni, Path.Combine(root, "missing-legacy.json"));
     Check(futureStore.Load() is null && futureStore.LoadWarning is not null,
@@ -1913,8 +1919,8 @@ try
     Check(File.ReadAllText(futureIni) == futureProfile, "newer format stays untouched");
 
     var duplicateFutureIni = Path.Combine(root, "duplicate-future.ini");
-    var duplicateFutureProfile = completeProfile.Replace("FormatVersion=14",
-        "FormatVersion=15" + Environment.NewLine + "FormatVersion=14", StringComparison.Ordinal);
+    var duplicateFutureProfile = completeProfile.Replace("FormatVersion=15",
+        "FormatVersion=16" + Environment.NewLine + "FormatVersion=15", StringComparison.Ordinal);
     File.WriteAllText(duplicateFutureIni, duplicateFutureProfile);
     var duplicateFutureStore = new SessionStore(duplicateFutureIni, Path.Combine(root, "missing-legacy.json"));
     Check(duplicateFutureStore.Load() is null && duplicateFutureStore.LoadWarning is not null,

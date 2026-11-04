@@ -92,3 +92,13 @@ dotnet run --project src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.cspro
 整轮动态六次排序、同路径 peer、后续自动变化与选区、清理通过，前台/输入守卫干净，5 宿主销毁后残留列表 HWND=0。初始测试曾因 GUID 大小写差异误报名称不符，已记录实际文本确认后修正比较，不改产品身份。上述证明稳定文本与物理数据对象可跨进程使用，不证明原始临时 PIDL 可跨进程传递，也没有验证原生属性页/第三方菜单全部格式或真实浏览器前进后退。产品入口必须继续使用稳定路径，临时 PIDL 不可直接持久化。
 
 本批仅增加探针，NativeProbe Release 编译与最终 diff 检查通过；产品源码未改，未覆盖 temp.86。下一步核对应用现有导航/状态采集使用稳定名称的路径，并设计新视图生命周期接线。
+
+## 标签配置接线：INI v15
+
+ViewState 新增默认 false 的 MixedSizeSort init 属性，保留原六参数构造合同；Copy/record with 保留策略，ShellViewStateCapture 从真实 Shell 采集模式/列时继续保留应用自己的策略。原先尝试新增位置构造参数触发旧反射探针失败，最终采用附加属性避免改变构造合同，未跳过原探针。
+
+会话格式升至15，逐标签写 MixedSizeSort；v1～14 默认 false，v15 缺失或非法值不算完整快照，未来格式保护保留，升级前备份。版本升级是为了旧应用看到新会话时拒绝覆盖，不能让旧版悄悄丢弃新策略。QDR 自有扩展沿用 SessionStore，因此保留开关；纯 Q-Dir 基础状态不虚构其策略字段，缺省独立排序。
+
+新 mixed-size-sort-session-smoke 覆盖默认/复制/同路径独立/旧版本/缺失非法/未来格式/实际保存及新 store 重读/备份和采集代际保护；QdrExportSmoke 增加扩展开关及无扩展回退断言。未挂载生产 Pane 的 pane-tab-copy-order 新增新标签默认 false、复制与跨窗格复制继承 true 的实测断言，无 HWND/Shell 视图。日志 mixed-sort-session.log、mixed-sort-tab-copy.log。
+
+后台总检扩至28项，完整通过：src/.state/background-checks/20261104-234720-c02fb62cb7734e0fbb03c35585815e57/summary.json；随后新增 Pane 断言单独重建执行通过。记录的是本批提交前源码，不是已发布载荷。菜单尚未开放，原生实验尚未接入产品宿主，未覆盖 temp.86 或用户配置。

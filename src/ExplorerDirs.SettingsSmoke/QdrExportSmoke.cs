@@ -10,7 +10,7 @@ internal static class QdrExportSmoke
         QdrProviderPathSmoke.Run();
         var key = new PropertyKeyState(Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 10);
         var typeKey = new PropertyKeyState(Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 4);
-        var view = new ViewState(1, 96, [new(key, -1)], key, false, [new(key, 240)]);
+        var view = new ViewState(1, 96, [new(key, -1)], key, false, [new(key, 240)]) { MixedSizeSort = true };
         var state = new SessionState(5, 3,
             [[new(@"C:\中文 & a=b", view, quickFilter: new QuickFilterSettings("*.txt;*.md", false, true,
                   [new ColumnValueFilter(typeKey, ["TXT 文件", "BIN 文件"])]), previewPaneVisible: true),
@@ -18,6 +18,15 @@ internal static class QdrExportSmoke
              [new(@"Z:\offline", view, new QuickFilterSettings("*.csv", false, false))], [new(@"\\server\share", view)],
              [new(@"C:\hidden", view)]], 2, [1, 0, 0, 0], PaneTreeVisibility: [true, false, true, false],
             TreeDisplayMode: TreeDisplayMode.Shared);
+        var sortingText = QdrExporter.Render(state, []);
+        var sortingImport = QdrImporter.Parse(sortingText, (value, _) => value);
+        Check(sortingImport.ExtendedState?.Panes[0][0].View.MixedSizeSort == true &&
+              sortingImport.ExtendedState.Panes[0][1].View.MixedSizeSort == false,
+            "QDR extension preserves independent mixed size sorting policies");
+        var sortingBase = string.Join('\n', sortingText.Split('\n').Where(line =>
+            !line.StartsWith(QdrExporter.Prefix, StringComparison.OrdinalIgnoreCase)));
+        Check(QdrImporter.Parse(sortingBase, (value, _) => value).Panes.SelectMany(pane => pane)
+            .All(tab => !tab.View.MixedSizeSort), "Q-Dir base without our extension defaults to separate sorting");
         var opaqueState = state with
         {
             QdrOpaqueMetadata = new QdrOpaqueMetadata(

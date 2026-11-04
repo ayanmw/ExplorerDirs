@@ -30,6 +30,8 @@ internal sealed record ViewState(
     bool GroupAscending,
     IReadOnlyList<DisplayColumnState>? DisplayColumns = null)
 {
+    public bool MixedSizeSort { get; init; }
+
     public static ViewState Default(uint mode = 4, int iconSize = -1) =>
         new(mode, ViewStyle.NativeIconSize(mode, iconSize), [], null, true);
     public ViewState Copy() => this with
@@ -157,7 +159,7 @@ internal sealed record SessionState(int Layout, uint DefaultViewMode, List<List<
 internal sealed class SessionStore
 {
     internal const int MaximumTabsPerPane = 100;
-    private const int CurrentFormatVersion = 14;
+    private const int CurrentFormatVersion = 15;
     private const int MaximumColumnFiltersPerTab = 16;
     private const int MaximumColumnFilterValueLength = 512;
     private const int MaximumColumnFilterPayloadLength = 128 * 1024;
@@ -350,6 +352,7 @@ internal sealed class SessionStore
                 builder.AppendLine($"Path={tab.Path}");
                 builder.AppendLine($"ViewMode={tab.View.Mode}");
                 builder.AppendLine($"IconSize={tab.View.IconSize}");
+                builder.AppendLine($"MixedSizeSort={tab.View.MixedSizeSort}");
                 builder.AppendLine($"DisplayColumnCount={tab.View.DisplayColumns?.Count ?? 0}");
                 if (tab.View.DisplayColumns is { } displayColumns)
                     for (var columnIndex = 0; columnIndex < displayColumns.Count; columnIndex++)
@@ -527,7 +530,10 @@ internal sealed class SessionStore
                     ascending = true;
                 }
                 var columns = ColumnLayout.Parse(values, version >= 2, ref complete);
-                var view = new ViewState(mode, iconSize, sorts, group, ascending, columns);
+                if (version >= 15 && !values.ContainsKey("MixedSizeSort")) complete = false;
+                var mixedSizeSort = version >= 15
+                    ? ReadOptionalBool(values, "MixedSizeSort", false, ref complete) : false;
+                var view = new ViewState(mode, iconSize, sorts, group, ascending, columns) { MixedSizeSort = mixedSizeSort };
                 var previewPaneVisible = version >= 7
                     ? ReadOptionalBool(values, "PreviewPaneVisible", false, ref complete) : false;
                 var detailsPaneVisible = version >= 8

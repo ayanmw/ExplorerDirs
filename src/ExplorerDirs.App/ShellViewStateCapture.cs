@@ -34,6 +34,6 @@ internal static class ShellViewStateCapture
 
         complete = true;
         return new ViewState(mode, iconSize, sorts.ToArray(), group, ascending,
-            (columnResult == 1 ? cached.DisplayColumns : columns)?.ToArray());
+            (columnResult == 1 ? cached.DisplayColumns : columns)?.ToArray()) { MixedSizeSort = cached.MixedSizeSort };
     }
 }
