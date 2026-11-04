@@ -6509,8 +6509,8 @@ static HRESULT CreateSizeSortPolicyPidl(
 }
 
 extern "C" __declspec(dllexport) HRESULT WINAPI CreateSizeSortPolicyPidlForProbe(
-    PCIDLIST_ABSOLUTE source, BOOL mixed, PIDLIST_ABSOLUTE* output)
-{ return CreateSizeSortPolicyPidl(source, mixed ? 1 : 0, output); }
+    PCIDLIST_ABSOLUTE source, DWORD policy, PIDLIST_ABSOLUTE* output)
+{ return CreateSizeSortPolicyPidl(source, policy, output); }
 
 extern "C" __declspec(dllexport) HRESULT WINAPI VerifySizeSortPolicyPidlForProbe()
 {

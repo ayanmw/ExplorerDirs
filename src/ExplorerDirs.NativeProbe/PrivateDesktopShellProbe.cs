@@ -49,8 +49,8 @@ internal static class PrivateDesktopShellProbe
     internal static int RunHostFilter() => Run("host-filter", ShellViewHostFilterProbe.RunForPrivateDesktop);
 
     internal static int RunProductSizeDisplay(string adapterPath, bool explorerBrowser = false, bool rootControl = false,
-        ExplorerDirs.App.FolderSizeSource source = ExplorerDirs.App.FolderSizeSource.BuiltIn, bool sortPolicyExperiment = false, bool? encodedSortPolicy = null, bool columnStateSortPolicy = false) => Run("product-size-display",
-        () => SyntheticShellSortProbe.RunProductSizeDisplay(adapterPath, explorerBrowser, rootControl, source, sortPolicyExperiment, encodedSortPolicy, columnStateSortPolicy), TimeSpan.FromSeconds(30), initializeOle: true);
+        ExplorerDirs.App.FolderSizeSource source = ExplorerDirs.App.FolderSizeSource.BuiltIn, bool sortPolicyExperiment = false, bool? encodedSortPolicy = null, bool columnStateSortPolicy = false, int encodedSortDirection = 1) => Run("product-size-display",
+        () => SyntheticShellSortProbe.RunProductSizeDisplay(adapterPath, explorerBrowser, rootControl, source, sortPolicyExperiment, encodedSortPolicy, columnStateSortPolicy, encodedSortDirection), TimeSpan.FromSeconds(30), initializeOle: true);
 
     internal static int RunProductFourPaneHost(string hostProbePath, bool large = false, bool observeNotifications = true, bool forceSortDeadline = false) => Run("product-four-pane-host",
         () => ProductFourPaneHostProbe.Run(hostProbePath, large, observeNotifications, forceSortDeadline), TimeSpan.FromSeconds(large ? 180 : forceSortDeadline ? 90 : 60), initializeOle: true);

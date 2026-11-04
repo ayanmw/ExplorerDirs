@@ -47,3 +47,20 @@ dotnet run --project src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.cspro
 公开 IColumnManager 状态对照：SetColumnInfo 返回 S_OK，但请求状态 0x5 后 GetColumnInfo 仍读到 0x1。保留失败断言，日志 sort-policy-column-state-readback-final.log；该次初始大小、单项补值、F5 和列重排先通过，失败发生在混合策略写回检查。前台/输入守卫干净，四个宿主销毁后存活列表 HWND=0。故不采用仅调用 SetColumnInfo 即宣称已支持的方案。
 
 清理后后台总检 27 项通过：src/.state/background-checks/20261104-225059-b5799d51aa194301ad94d91e2c892ec2/summary.json（源码为 7796e50 加本批未提交修改）。普通产品重新构建 SHA256 为 36730EAA8DB30C3DB89ECFE015845C530D8E336FC32390B3D9C5ADC7D73EC174，不能再沿用前批哈希不变的结论；普通根解析辅助函数也有源码调整，排序策略本身仍受实验宏隔离。未进行可见 UI 验收，未覆盖预览。
+
+## 显式方向输入后的真实行序验证
+
+隔离导出现在接收完整 policy 位（混合位+降序位），不再将方向位作为 BOOL 折叠为混合。探针在创建主视图前传入固定方向，每轮仅断言对应方向；不据此宣称同一视图动态切换已完成。
+
+四种模式的主视图完整行序均匹配：
+
+| 模式 | 实际字节顺序及类别 | 日志 |
+| --- | --- | --- |
+| 独立升序 | 目录0、目录25600、目录40960、文件2048 | sort-direction-asc.log |
+| 独立降序 | 目录40960、目录25600、目录0、文件2048 | sort-direction-desc.log |
+| 混合升序 | 目录0、文件2048、目录25600、目录40960 | sort-direction-mixed-asc.log |
+| 混合降序 | 目录40960、目录25600、文件2048、目录0 | sort-direction-mixed-desc.log |
+
+日志均在 src/.state；四轮前台与输入守卫干净。独立升/降及混合降整项通过（包含更新、F5、列重排、来源切换、自动通知和清理）；混合升序虽然行序通过，但后续自动变化丢失选中位，整项失败，不能算全绿。失败与先前独立探针现象一致，仍需完整产品宿主对照，不改低断言。
+
+实验 DLL 严格编译、NativeProbe Release 编译及 PIDL 无窗口 smoke 通过。还缺：同一视图动态方向/策略变化、同路径多标签身份隔离、实际产品接线及便携配置；不覆盖 temp.86。

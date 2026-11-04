@@ -8,7 +8,7 @@ public static partial class SyntheticShellSortProbe
 {
     private static readonly List<StreamViewHost> ProductDisplayProcessLifetimeHosts = [];
     internal static int RunProductSizeDisplay(string adapterPath, bool explorerBrowser = false, bool rootControl = false,
-        FolderSizeSource source = FolderSizeSource.BuiltIn, bool sortPolicyExperiment = false, bool? encodedSortPolicy = null, bool columnStateSortPolicy = false)
+        FolderSizeSource source = FolderSizeSource.BuiltIn, bool sortPolicyExperiment = false, bool? encodedSortPolicy = null, bool columnStateSortPolicy = false, int encodedSortDirection = 1)
     {
         var fixture = Path.Combine(Path.GetTempPath(), "ExplorerDirs-ProductSizeDisplay-" + Guid.NewGuid().ToString("N"));
         nint root = 0, folder = 0, view = 0, parent = 0, browserPointer = 0, folderView = 0;
@@ -50,7 +50,7 @@ public static partial class SyntheticShellSortProbe
             {
                 var prepare = Marshal.GetDelegateForFunctionPointer<CreateEncodedSizePolicy>(
                     NativeLibrary.GetExport(diagnosticModule, "CreateSizeSortPolicyPidlForProbe"));
-                Check(prepare(root, initialPolicy ? 1 : 0, out var prepared));
+                Check(prepare(root, (initialPolicy ? 1 : 0) | (encodedSortDirection < 0 ? 2 : 0), out var prepared));
                 Marshal.FreeCoTaskMem(root); root = prepared;
                 Console.WriteLine($"product-size-sort-policy-root: encoded=True; mixed={initialPolicy}");
             }
@@ -150,7 +150,7 @@ public static partial class SyntheticShellSortProbe
                     Check(At<GetSizePolicyFolder>(folderView, 5)(folderView, in ShellFolder2Id, out policyFolder));
                     if (!columnStateSortPolicy) Check(Marshal.QueryInterface(policyFolder, in sortPolicyId, out sortPolicy));
                     foreach (var mixed in encodedSortPolicy is { } encoded ? new[] { encoded } : columnStateSortPolicy ? new[] { true, false, true } : new[] { false, true, false })
-                    foreach (var direction in new[] { 1, -1 })
+                    foreach (var direction in encodedSortPolicy.HasValue ? new[] { encodedSortDirection } : new[] { 1, -1 })
                     {
                         if (columnStateSortPolicy) Check(SetSizeSortColumnStateForProbe(folderView, mixed));
                         else Check(At<SetSizePolicy>(sortPolicy, 3)(sortPolicy, mixed ? 1 : 0));
