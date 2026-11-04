@@ -10,7 +10,7 @@ using Microsoft.Win32.SafeHandles;
 // Only processes created here are queried/closed; no input injection or Shell restart.
 internal static class AppSessionProcessProbe
 {
-    internal static int Run(string preparedRun, bool softRefresh = true, bool settleExternalChanges = false)
+    internal static int Run(string preparedRun, bool softRefresh = true, bool settleExternalChanges = false, string? adapterOverride = null)
     {
         preparedRun = Path.GetFullPath(preparedRun);
         using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(preparedRun, "preparation.json")));
@@ -33,6 +33,12 @@ internal static class AppSessionProcessProbe
             var target = Path.Combine(app, relative);
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             File.Copy(file, target);
+        }
+        if (adapterOverride is not null)
+        {
+            adapterOverride = Path.GetFullPath(adapterOverride);
+            File.Copy(adapterOverride, Path.Combine(app, "ExplorerDirs.ShellNamespace.dll"), overwrite: true);
+            Console.WriteLine($"app-session-adapter-override: path={adapterOverride}; sha256={Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(adapterOverride)))}; run={run}");
         }
         var profile = Path.Combine(app, "profile");
         Directory.CreateDirectory(profile);
@@ -103,7 +109,7 @@ internal static class AppSessionProcessProbe
                     return readings.Length == 4 && readings.All(item => item.Rows == 2) &&
                         readings.Any(item => item.Grouped == 1);
                 }, TimeSpan.FromSeconds(60), "Full app views/grouping did not become ready.");
-                VerifyExternalDirectoryChanges(window, child, expected, pass, settleExternalChanges);
+                VerifyExternalDirectoryChanges(window, child, expected, pass, settleExternalChanges, adapterOverride is null ? null : Path.Combine(app, "ExplorerDirs.ShellNamespace.dll.size-trace.log"));
                 if (pass == 0)
                 {
                     if (!GetWindowRect(window, out var bounds)) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -180,7 +186,7 @@ internal static class AppSessionProcessProbe
         Console.WriteLine($"app-session-process-registration-cleanup: profile-identity={identity}; ownership-checked=True");
     }
 
-    private static void VerifyExternalDirectoryChanges(nint window, ProcessInfo child, SessionState session, int pass, bool settleExternalChanges)
+    private static void VerifyExternalDirectoryChanges(nint window, ProcessInfo child, SessionState session, int pass, bool settleExternalChanges, string? tracePath)
     {
         if (settleExternalChanges)
         {
@@ -213,19 +219,26 @@ internal static class AppSessionProcessProbe
             }, TimeSpan.FromSeconds(15), $"External {stage} did not update all four panes while retaining grouping.");
             Console.WriteLine($"app-external-change: pass={pass + 1}; stage={stage}; rows-per-pane={count}; ms={elapsed.ElapsedMilliseconds}; transient-empty-samples={transientEmptySamples}; grouped-pane-preserved=True");
         }
+        void Mark(string stage)
+        {
+            if (tracePath is not null) File.AppendAllText(tracePath, $"{Environment.TickCount64} probe-phase={stage} pass={pass + 1}\n");
+        }
         // Mutate only fresh test roots created above, without commands or input to the App.
+        Mark("before-create");
         foreach (var directory in additions)
         {
             Directory.CreateDirectory(directory);
             File.WriteAllBytes(Path.Combine(directory, "data.bin"), new byte[64]);
         }
         AwaitRows(3, "create");
+        Mark("before-delete");
         foreach (var directory in additions)
         {
             File.Delete(Path.Combine(directory, "data.bin"));
             Directory.Delete(directory);
         }
         AwaitRows(2, "delete");
+        Mark("delete-completed");
     }
 
     private static void VerifySession(SessionState expected, SessionState? actual)

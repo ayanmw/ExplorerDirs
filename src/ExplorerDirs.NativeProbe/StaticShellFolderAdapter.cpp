@@ -106,6 +106,10 @@ namespace
     {
         // Opt-in isolated-build evidence only. Bound synchronous diagnostic IO and never
         // log full browsing paths; normal product builds compile this body out.
+#if defined(EXPLORERDIRS_NOTIFICATION_TRACE_EXPERIMENT)
+        if (strcmp(stage, "physical-view-event") && strcmp(stage, "provider-view-forwarded") &&
+            (strcmp(stage, "view-callback") || code != SFVM_FSNOTIFY)) return;
+#endif
         static volatile LONG entries = 0;
         if (InterlockedIncrement(&entries) > 4096) return;
         HMODULE module = nullptr;

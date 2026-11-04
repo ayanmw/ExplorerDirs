@@ -56,3 +56,11 @@
 当前发布门槛新增明确反例：软刷新下的真实外部目录删除没有逐项移除。下一步定位 native backing→provider 删除身份通知以及托管删除补偿路径，不通过自动完整枚举掩盖问题。预览不覆盖。
 
 后续删除对照：`app-delete-pidl-only.log`（条目绝对PIDL通知）、`app-delete-pidl-and-delta.log`（PIDL+保留差量）均仍删除失败，两项产品尝试均已撤回。原产品载荷的 `app-delete-settle-control.log` 在实际视图就绪后再等待3秒才执行外部变化，同样删除失败，排除仅因探针紧接启动操作的解释。保留显式 `--settle-external-changes` 对照参数，默认路径仍不等待，避免削弱原有启动边界覆盖。下一步需要直接获取通知阶段证据，不把这些反例记录为已修复。
+
+## 通知链阶段证据（2026-11-05）
+
+新增独立 `build-product-shell-folder-adapter.ps1 -NotificationTrace`，输出专属 `native-product-x64-notification-trace`，保留普通产品编译参数/导出，仅在诊断编译中启用既有有界日志，并筛选物理事件、provider转发和FSNOTIFY回调。完整进程探针支持显式 `--adapter <dll>`，仅复制到新测试副本，记录实际覆盖DLL SHA256；创建/删除阶段写入同一boot tick时间轴，不更改已准备载荷。
+
+`src/.state/app-delete-phase-trace.log` 仍复现删除超时；对应 `src/.state/app-session-process/e4f0ffcd69f1408896ca7d4f097588b2/app/ExplorerDirs.ShellNamespace.dll.size-trace.log`：before-create=375839375；随后四个实例均记录物理UPDATEDIR(0x2000)、provider转发及FSNOTIFY回调；before-delete=375840312，此后直到超时未记录新的物理/provider/回调事件。无逐项RMDIR。因而本次不是已经收到逐项删除后仅行身份匹配失败；需要继续观察托管watcher和补偿计时器是否启动/收到删除/执行。先前“删除通知被合并为UPDATEDIR”的推断尚不能由该日志证实：已抓到的UPDATEDIR位于创建阶段，不把其误归到删除阶段。
+
+诊断DLL SHA256=288101F17E0A284920DC6E08446E1F51B6C00F7329473EF7ECADF536CAE99A3E。该产物不是正常产品验证或发布；普通产品DLL未被诊断构建覆盖，测试隔离清理通过，默认软刷新删除目标仍未完成。

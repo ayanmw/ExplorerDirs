@@ -1,4 +1,4 @@
-param([ValidateSet('Debug', 'Release')][string]$Configuration = 'Release')
+param([ValidateSet('Debug', 'Release')][string]$Configuration = 'Release', [switch]$NotificationTrace)
 
 $ErrorActionPreference = 'Stop'
 
@@ -6,6 +6,10 @@ $outputDirectory = Join-Path $PSScriptRoot 'bin\native-product-x64'
 # Keep configurations separate so an incremental Debug build cannot replace the release DLL.
 if ($Configuration -eq 'Debug') { $outputDirectory += '-debug' }
 $compilerFlags = if ($Configuration -eq 'Debug') { '/Od /D_DEBUG /MDd' } else { '/O2 /DNDEBUG /MD' }
+if ($NotificationTrace) {
+    $outputDirectory += '-notification-trace'
+    $compilerFlags += ' /DEXPLORERDIRS_SIZE_TRACE_EXPERIMENT /DEXPLORERDIRS_NOTIFICATION_TRACE_EXPERIMENT'
+}
 $source = Join-Path $PSScriptRoot 'StaticShellFolderAdapter.cpp'
 $definition = Join-Path $PSScriptRoot 'ProductShellFolderAdapter.def'
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
