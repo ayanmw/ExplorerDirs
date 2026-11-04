@@ -223,6 +223,7 @@ public static partial class SyntheticShellSortProbe
             Check(At<RefreshView>(view, 8)(view));
             WaitForSizes("reenabled");
             Check(ShellFolderViewOptions.SetNoEnumRefresh(folderView, true));
+            using var selectionMessages = new SelectionMessageObserver(listView);
             var anchor = Array.IndexOf(ReadColumnTextsForRows(listView, 0, 4), "file-2048.bin");
             // Establish selection through the Shell contract, not just list paint state.
             Check(At<SelectItem>(folderView, 15)(folderView, anchor, 0x1u | 0x4u | 0x10u));
@@ -370,10 +371,22 @@ public static partial class SyntheticShellSortProbe
 
             void TraceAnchor(string stage)
             {
+                selectionMessages.Drain(stage);
                 var count = SendMessageW(listView, LvmGetItemCount, 0, 0).ToInt32();
                 var index = Array.IndexOf(ReadColumnTextsForRows(listView, 0, count), "file-2048.bin");
                 Check(At<GetDisplayFolderFlags>(folderView, 25)(folderView, out var flags));
-                Console.WriteLine($"product-size-display-anchor: stage={stage}; index={index}; flags=0x{flags:X}; state=0x{SendMessageW(listView, LvmGetItemState, index, (nint)(LvisSelected | LvisFocused)).ToInt64():X}");
+                // Compare Shell identity state with list paint state before changing recovery code.
+                // External insertion can reorder rows, so always resolve the anchor by name.
+                Check(At<GetSizePolicyItem>(folderView, 6)(folderView, index, out var identity));
+                uint shellState;
+                try { Check(At<GetDisplaySelectionState>(folderView, 33)(folderView, identity, out shellState)); }
+                finally { Marshal.FreeCoTaskMem(identity); }
+                var selected = new List<string>();
+                var names = ReadColumnTextsForRows(listView, 0, count);
+                for (var row = 0; row < count; row++)
+                    if ((SendMessageW(listView, LvmGetItemState, row, (nint)LvisSelected).ToInt64() & LvisSelected) != 0)
+                        selected.Add(names[row]);
+                Console.WriteLine($"product-size-display-anchor: stage={stage}; index={index}; flags=0x{flags:X}; state=0x{SendMessageW(listView, LvmGetItemState, index, (nint)(LvisSelected | LvisFocused)).ToInt64():X}; shell-state=0x{shellState:X}; selected=[{string.Join('|', selected)}]");
             }
 
             void WaitForSizes(string stage)
@@ -453,6 +466,7 @@ public static partial class SyntheticShellSortProbe
     private delegate int SetSizePolicy(nint self, int mixed);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int GetSizePolicyMenu(nint self, uint flags, in Guid iid, out nint context);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetDisplaySelectionState(nint self, nint item, out uint state);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSizePolicyItem(nint self, int index, out nint item);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CompareSizePolicyItems(nint self, nint column, nint left, nint right);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate long GetSizePolicyCount();

@@ -64,3 +64,9 @@ dotnet run --project src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.cspro
 日志均在 src/.state；四轮前台与输入守卫干净。独立升/降及混合降整项通过（包含更新、F5、列重排、来源切换、自动通知和清理）；混合升序虽然行序通过，但后续自动变化丢失选中位，整项失败，不能算全绿。失败与先前独立探针现象一致，仍需完整产品宿主对照，不改低断言。
 
 实验 DLL 严格编译、NativeProbe Release 编译及 PIDL 无窗口 smoke 通过。还缺：同一视图动态方向/策略变化、同路径多标签身份隔离、实际产品接线及便携配置；不覆盖 temp.86。
+
+## 自动变化选区对照
+
+增加探针内的 Shell GetSelectionState 与逐行选择状态对照，按名称重新定位目标而不沿用插入前索引。selection-shell-state-1.log 复现：新增前 list=0x3/Shell=0x11，新增后 list=0x1/Shell=0x10，selected=[]，焦点保留但真实选区已丢，不是纯绘制残留；该轮隔离守卫通过，原断言仍失败。
+
+增加仅探针使用的有界消息观察器（128 条/阶段，溢出计数），回调不打印、不反查 Shell，阶段结束再输出；观察列表消息及父窗口 LVN_ITEMCHANGED，销毁前撤 subclass。selection-notification-observer-2.log 整项通过，但新增/删除期间明确先全局取消选择、恢复焦点、再恢复选择；这提供时序证据，不是修复。观察器接入后多轮通过不能消除先前失败，可能有观测时序影响。下一步对照未观察与完整宿主恢复路径，分辨恢复遗漏或异步完成采样边界。未修改产品选择策略，未发布。
