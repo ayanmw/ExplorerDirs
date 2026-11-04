@@ -13,6 +13,14 @@ internal static class ProfileOwnerMultiRootShellHostProbe
     private const int LargeFolderCount = 500;
 
     private static string? _sortContextAdapter;
+    private static bool _inputDuringSort;
+    internal static int RunInputDuringSortForProbe(string adapterPath)
+    {
+        _inputDuringSort = true;
+        try { return RunWithSortContextForProbe(adapterPath); }
+        finally { _inputDuringSort = false; }
+    }
+
     internal static int RunWithSortContextForProbe(string adapterPath)
     {
         _sortContextAdapter = Path.GetFullPath(adapterPath);
@@ -192,6 +200,43 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                             throw new InvalidOperationException("Capture cached the initial recovery's temporary descending direction.");
                         if (!(bool)hostType.GetProperty("ViewCaptureFailed", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!.GetValue(hosts[0])!)
                             throw new InvalidOperationException("Temporary recovery capture was reported as complete.");
+                        if (_inputDuringSort)
+                        {
+                            // Exercise a gesture against actual rows, not the preceding native asynchronous sort's empty interval.
+                            var inputReadyRows = readNativeRows.Invoke(null, [(nint)hostViewWindow.GetValue(hosts[0])!])!;
+                            if ((int)inputReadyRows.GetType().GetField("Item1")!.GetValue(inputReadyRows)! == 0) return;
+                            transientCaptureTimer.Stop();
+                            // Record native rows before and after input completion; direction alone cannot prove gesture readiness.
+                            var beforeInputRows = readNativeRows.Invoke(null, [(nint)hostViewWindow.GetValue(hosts[0])!])!;
+                            Console.WriteLine($"sort-input-boundary: before={beforeInputRows}");
+                            hostType.GetMethod("NoteNativeUserInput", BindingFlags.Instance | BindingFlags.NonPublic)!
+                                .Invoke(hosts[0], [(nint)hostViewWindow.GetValue(hosts[0])!]);
+                            object?[] afterInput = [1, null];
+                            if ((int)sourceType.GetMethod("GetSortColumns")!.Invoke(reader, afterInput)! < 0 ||
+                                afterInput[1] is not System.Collections.IEnumerable afterColumns ||
+                                (int)afterColumns.Cast<object>().Single().GetType().GetProperty("Direction")!.GetValue(afterColumns.Cast<object>().Single())! != 1)
+                                throw new InvalidOperationException("User input left the temporary descending sort active.");
+                            var afterInputRows = readNativeRows.Invoke(null, [(nint)hostViewWindow.GetValue(hosts[0])!])!;
+                            Console.WriteLine($"sort-input-boundary: after={afterInputRows}");
+                            selectItem.Invoke(null, [hostType, hosts[0], Path.Combine(folders[0], "folder-large")]);
+                            PumpDispatcher(TimeSpan.FromMilliseconds(350));
+                            var selection = readSelection.Invoke(null, [(nint)hostViewWindow.GetValue(hosts[0])!])!;
+                            if (!((string[])selection.GetType().GetField("Item1")!.GetValue(selection)!).SequenceEqual(["folder-large"]))
+                                throw new InvalidOperationException("Recovery overwrote the subsequent user's selection.");
+                            var invokeSort = hostType.GetMethod("InvokeVirtualSortVerb", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                            hostType.GetMethod("NoteNativeUserInput", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(hosts[0], [nint.Zero]);
+                            if (!(bool)invokeSort.Invoke(hosts[0], ["sortdescending", new Func<bool>(() => true)])!)
+                                throw new InvalidOperationException("Subsequent user sort command failed.");
+                            PumpDispatcher(TimeSpan.FromMilliseconds(350));
+                            var userView = hostType.GetMethod("CaptureViewState")!.Invoke(hosts[0], null)!;
+                            var userSort = ((System.Collections.IEnumerable)userView.GetType().GetProperty("SortColumns")!.GetValue(userView)!).Cast<object>().Single();
+                            if ((int)userSort.GetType().GetProperty("Direction")!.GetValue(userSort)! != -1)
+                                throw new InvalidOperationException("Retired recovery overwrote the subsequent user sort.");
+                            if (!(bool)invokeSort.Invoke(hosts[0], ["sortascending", new Func<bool>(() => true)])!)
+                                throw new InvalidOperationException("Could not restore the normal test baseline.");
+                            hostType.GetMethod("CaptureViewState")!.Invoke(hosts[0], null);
+                            Console.WriteLine("product-initial-sort-input: completed-before-input=True; new-selection-retained=True; later-user-sort-retained=True");
+                        }
                         transientCaptureObserved = true;
                         transientCaptureTimer.Stop();
                         Console.WriteLine("product-initial-sort-transient-capture: native-descending=True; cached-ascending=True; incomplete=True");
