@@ -10,7 +10,7 @@ using Microsoft.Win32.SafeHandles;
 // Only processes created here are queried/closed; no input injection or Shell restart.
 internal static class AppSessionProcessProbe
 {
-    internal static int Run(string preparedRun, bool softRefresh = true, bool settleExternalChanges = false, string? adapterOverride = null)
+    internal static int Run(string preparedRun, bool softRefresh = true, bool settleExternalChanges = false, string? adapterOverride = null, int fillerCount = 0)
     {
         preparedRun = Path.GetFullPath(preparedRun);
         using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(preparedRun, "preparation.json")));
@@ -56,6 +56,8 @@ internal static class AppSessionProcessProbe
                     Directory.CreateDirectory(child);
                     File.WriteAllBytes(Path.Combine(child, "data.bin"), new byte[size]);
                 }
+                for (var filler = 0; filler < fillerCount; filler++)
+                    File.WriteAllBytes(Path.Combine(directory, $"filler-{filler:D5}.txt"), new byte[1024]);
                 var view = new ViewState(4, 16, [new(key, pane % 2 == 0 ? 1 : -1)], pane == 1 ? key : null, true,
                     [new(new(key.FormatId, 10), 240), new(key, 160), new(new(key.FormatId, 4), 140)])
                     { MixedSizeSort = pane % 2 != 0 };
@@ -106,10 +108,10 @@ internal static class AppSessionProcessProbe
                         Console.WriteLine($"app-session-readiness: pass={pass + 1}; {readiness}");
                         lastReadiness = readiness;
                     }
-                    return readings.Length == 4 && readings.All(item => item.Rows == 2) &&
+                    return readings.Length == 4 && readings.All(item => item.Rows == 2 + fillerCount) &&
                         readings.Any(item => item.Grouped == 1);
                 }, TimeSpan.FromSeconds(60), "Full app views/grouping did not become ready.");
-                VerifyExternalDirectoryChanges(window, child, expected, pass, settleExternalChanges, adapterOverride is null ? null : Path.Combine(app, "ExplorerDirs.ShellNamespace.dll.size-trace.log"));
+                VerifyExternalDirectoryChanges(window, child, expected, pass, settleExternalChanges, fillerCount, adapterOverride is null ? null : Path.Combine(app, "ExplorerDirs.ShellNamespace.dll.size-trace.log"));
                 if (pass == 0)
                 {
                     if (!GetWindowRect(window, out var bounds)) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -162,7 +164,7 @@ internal static class AppSessionProcessProbe
         }
         File.WriteAllText(Path.Combine(run, "result.json"), JsonSerializer.Serialize(new
         {
-            Passed = true, Pids = pids, Placement = expectedPlacement,
+            Passed = true, Pids = pids, Placement = expectedPlacement, FillerCount = fillerCount,
             Scope = "Full executable two-process lifecycle on never-switched Desktop; no visible/input acceptance",
             PreparedSourceCommit = manifest.RootElement.GetProperty("SourceCommit").GetString()
         }, new JsonSerializerOptions { WriteIndented = true }));
@@ -186,7 +188,7 @@ internal static class AppSessionProcessProbe
         Console.WriteLine($"app-session-process-registration-cleanup: profile-identity={identity}; ownership-checked=True");
     }
 
-    private static void VerifyExternalDirectoryChanges(nint window, ProcessInfo child, SessionState session, int pass, bool settleExternalChanges, string? tracePath)
+    private static void VerifyExternalDirectoryChanges(nint window, ProcessInfo child, SessionState session, int pass, bool settleExternalChanges, int fillerCount, string? tracePath)
     {
         if (settleExternalChanges)
         {
@@ -200,6 +202,7 @@ internal static class AppSessionProcessProbe
         var transientEmptySamples = 0;
         void AwaitRows(int count, string stage)
         {
+            count += fillerCount;
             var elapsed = Stopwatch.StartNew();
             string? lastState = null;
             Wait(() =>
@@ -211,6 +214,8 @@ internal static class AppSessionProcessProbe
                 var state = $"counts={string.Join('|', counts)}; grouped={string.Join('|', grouped.Select(list => Message(list, 0x10AF)))}";
                 if (state != lastState)
                 {
+                    if (fillerCount > 0 && stage == "delete")
+                        Console.WriteLine($"app-native-find-state: indices={string.Join('|', lists.Select(list => OwnedAppListText.Find(child.Process, child.ProcessId, list, "external-notification-fixture")))}");
                     Console.WriteLine($"app-external-change-state: stage={stage}; {state}");
                     lastState = state;
                 }
@@ -274,6 +279,7 @@ internal static class AppSessionProcessProbe
         }
         AwaitRows(2, "delete");
         Mark("delete-completed");
+        if (fillerCount > 0) return; // Large-view case covers directory notifications and full-process persistence.
         var files = additions.Select(directory => Path.Combine(Path.GetDirectoryName(directory)!, "external-file.txt")).ToArray();
         foreach (var file in files) File.WriteAllBytes(file, new byte[37]);
         AwaitRows(3, "file-create");

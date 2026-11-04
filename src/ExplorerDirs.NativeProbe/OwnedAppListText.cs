@@ -49,6 +49,32 @@ internal static class OwnedAppListText
         }
     }
 
+    internal static int Find(nint process, uint processId, nint list, string name)
+    {
+        GetWindowThreadProcessId(list, out var owner);
+        if (owner != processId || IntPtr.Size != 8) throw new InvalidOperationException("Expected owned x64 App list.");
+        // x64 LVFINDINFOW: flags@0, psz@8, lParam@16, POINT@24, vkDirection@32.
+        var text = Encoding.Unicode.GetBytes(name + "\0");
+        var data = new byte[40 + text.Length];
+        var memory = VirtualAllocEx(process, 0, (nuint)data.Length, 0x3000, 4);
+        if (memory == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+        var dispatched = false;
+        var completed = false;
+        try
+        {
+            BitConverter.GetBytes(2u).CopyTo(data, 0);
+            BitConverter.GetBytes((long)memory + 40).CopyTo(data, 8);
+            text.CopyTo(data, 40);
+            if (!WriteProcessMemory(process, memory, data, (nuint)data.Length, out var written) || written != (nuint)data.Length)
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            dispatched = true;
+            completed = SendMessageTimeoutW(list, 0x1053, -1, memory, 0x22, 1000, out var index) != 0;
+            if (!completed) throw new TimeoutException("Owned App list name search did not finish.");
+            return unchecked((int)index);
+        }
+        finally { if (!dispatched || completed) VirtualFreeEx(process, memory, 0, 0x8000); }
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct ListItem
     {
