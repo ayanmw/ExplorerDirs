@@ -14,6 +14,8 @@ internal static class Program
     [STAThread]
     static int Main(string[] args)
     {
+        if (args is ["--product-notification-capture-smoke", var captureAdapter])
+            return ProductNotificationCaptureProbe.Run(captureAdapter);
         if (args.Length == 2 && args[0] == "--inspect-qdr-viewstate")
             return QdrViewStateProbe.Run(args[1]);
         if (args.Length == 1 && args[0] == "--virtual-zip-color-rules")

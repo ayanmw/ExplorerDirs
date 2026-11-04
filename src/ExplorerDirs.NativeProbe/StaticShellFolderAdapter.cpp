@@ -2024,45 +2024,83 @@ namespace
     volatile LONG g_productNotificationIdentityCaptureEnabled = 1;
     volatile LONG g_productNotificationFlushForProbe = 0;
     volatile LONG g_productNotificationDelayMsForProbe = 0;
-    std::mutex g_productAsyncItemNotificationIdentityMutex;
-    std::vector<std::wstring> g_productAsyncItemNotificationIdentities;
+    // Notification callbacks must not bind Shell folders merely to produce diagnostic text.
+    // Keep bounded immutable PIDL snapshots; resolve names only when the probe reads them.
+    class ProductNotificationIdentityCapture
+    {
+        std::mutex _mutex;
+        std::vector<std::vector<BYTE>> _items;
+        size_t _payload = 0;
+        volatile LONG _dropped = 0;
+    public:
+        void Record(PCIDLIST_ABSOLUTE pidl)
+        {
+            if (!pidl) return;
+            const auto length = static_cast<size_t>(ILGetSize(pidl));
+            try
+            {
+                std::lock_guard<std::mutex> lock(_mutex);
+                if (_items.size() >= 32768 || length > 16 * 1024 * 1024 - _payload)
+                {
+                    InterlockedIncrement(&_dropped);
+                    return;
+                }
+                const auto* bytes = reinterpret_cast<const BYTE*>(pidl);
+                _items.emplace_back(bytes, bytes + length);
+                _payload += length;
+            }
+            catch (const std::bad_alloc&) { InterlockedIncrement(&_dropped); }
+        }
+
+        LONG Count()
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            return static_cast<LONG>(_items.size());
+        }
+
+        LONG Dropped() { return InterlockedCompareExchange(&_dropped, 0, 0); }
+
+        HRESULT Read(LONG index, LPWSTR buffer, UINT capacity)
+        {
+            if (!buffer || capacity == 0) return E_INVALIDARG;
+            buffer[0] = L'\0';
+            PIDLIST_ABSOLUTE snapshot = nullptr;
+            {
+                std::lock_guard<std::mutex> lock(_mutex);
+                if (index < 0 || static_cast<size_t>(index) >= _items.size()) return E_BOUNDS;
+                snapshot = ILCloneFull(reinterpret_cast<PCIDLIST_ABSOLUTE>(_items[static_cast<size_t>(index)].data()));
+            }
+            if (!snapshot) return E_OUTOFMEMORY;
+            LPWSTR parsingName = nullptr;
+            const auto resolved = SHGetNameFromIDList(snapshot, SIGDN_DESKTOPABSOLUTEPARSING, &parsingName);
+            CoTaskMemFree(snapshot);
+            const auto result = FAILED(resolved) ? resolved :
+                (parsingName ? StringCchCopyW(buffer, capacity, parsingName) : E_FAIL);
+            CoTaskMemFree(parsingName);
+            return result;
+        }
+    };
+    ProductNotificationIdentityCapture g_productAsyncItemNotificationIdentities;
     volatile LONG g_productViewItemNotificationCallbacks = 0;
     volatile LONG g_productViewNotificationsUseSyntheticRoot = 1;
     volatile LONG g_productViewGetNotifyCalls = 0;
     volatile LONG g_productViewGetNotifyEventMask = 0;
-    std::mutex g_productViewItemNotificationIdentityMutex;
-    std::vector<std::wstring> g_productViewItemNotificationIdentities;
+    ProductNotificationIdentityCapture g_productViewItemNotificationIdentities;
     std::mutex g_productViewNotifyRootMutex;
     std::wstring g_productViewNotifyRootIdentity;
 
     void RecordProductAsyncItemNotificationIdentity(PCIDLIST_ABSOLUTE itemPidl)
     {
-        if (!InterlockedCompareExchange(&g_productNotificationIdentityCaptureEnabled, 0, 0)) return;
-        LPWSTR parsingName = nullptr;
-        if (FAILED(SHGetNameFromIDList(itemPidl, SIGDN_DESKTOPABSOLUTEPARSING, &parsingName)) || !parsingName) return;
-        try
-        {
-            std::lock_guard<std::mutex> lock(g_productAsyncItemNotificationIdentityMutex);
-            g_productAsyncItemNotificationIdentities.emplace_back(parsingName);
-        }
-        catch (...) {}
-        CoTaskMemFree(parsingName);
+        if (InterlockedCompareExchange(&g_productNotificationIdentityCaptureEnabled, 0, 0))
+            g_productAsyncItemNotificationIdentities.Record(itemPidl);
     }
 
     void RecordProductViewItemNotificationIdentity(PCIDLIST_ABSOLUTE itemPidl)
     {
-        if (!InterlockedCompareExchange(&g_productNotificationIdentityCaptureEnabled, 0, 0)) return;
-        if (!itemPidl) return;
-        LPWSTR parsingName = nullptr;
-        if (FAILED(SHGetNameFromIDList(itemPidl, SIGDN_DESKTOPABSOLUTEPARSING, &parsingName)) || !parsingName) return;
-        try
-        {
-            std::lock_guard<std::mutex> lock(g_productViewItemNotificationIdentityMutex);
-            g_productViewItemNotificationIdentities.emplace_back(parsingName);
-        }
-        catch (...) {}
-        CoTaskMemFree(parsingName);
+        if (InterlockedCompareExchange(&g_productNotificationIdentityCaptureEnabled, 0, 0))
+            g_productViewItemNotificationIdentities.Record(itemPidl);
     }
+
 #endif
     // Product notifications target the completed folder row so Shell can refresh that value directly.
 #if defined(EXPLORERDIRS_NATIVEPROBE)
@@ -6328,6 +6366,32 @@ extern "C" HRESULT WINAPI ConfigureShellNamespaceRoot(
 }
 
 #if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
+// No view/window: exercise capture ownership, deferred names, bounds and overflow independently.
+extern "C" HRESULT WINAPI RunProductNotificationIdentityCaptureSmoke()
+{
+    ProductNotificationIdentityCapture capture;
+    PIDLIST_ABSOLUTE desktop = nullptr;
+    auto result = SHGetKnownFolderIDList(FOLDERID_Desktop, 0, nullptr, &desktop);
+    if (FAILED(result)) return result;
+    LPWSTR expected = nullptr;
+    result = SHGetNameFromIDList(desktop, SIGDN_DESKTOPABSOLUTEPARSING, &expected);
+    if (FAILED(result)) { CoTaskMemFree(desktop); return result; }
+    for (int index = 0; index < 32769; ++index) capture.Record(desktop);
+    CoTaskMemFree(desktop);
+    WCHAR first[32768] = {}, last[32768] = {}, tiny[1] = {};
+    result = capture.Read(0, first, ARRAYSIZE(first));
+    if (SUCCEEDED(result)) result = capture.Read(32767, last, ARRAYSIZE(last));
+    const bool passed = SUCCEEDED(result) && expected &&
+        wcscmp(first, expected) == 0 && wcscmp(last, expected) == 0 &&
+        capture.Count() == 32768 && capture.Dropped() == 1 &&
+        capture.Read(-1, first, ARRAYSIZE(first)) == E_BOUNDS &&
+        capture.Read(32768, first, ARRAYSIZE(first)) == E_BOUNDS &&
+        capture.Read(0, nullptr, 1) == E_INVALIDARG &&
+        FAILED(capture.Read(0, tiny, ARRAYSIZE(tiny)));
+    CoTaskMemFree(expected);
+    return passed ? S_OK : E_FAIL;
+}
+
 extern "C" LONG WINAPI GetProductAsyncItemNotificationAttempts()
 { return InterlockedCompareExchange(&g_productAsyncItemNotificationAttempts, 0, 0); }
 
@@ -6348,16 +6412,15 @@ extern "C" LONG WINAPI GetProductAsyncDirectoryNotificationAttempts()
 
 extern "C" LONG WINAPI GetProductAsyncItemNotificationIdentityCount()
 {
-    std::lock_guard<std::mutex> lock(g_productAsyncItemNotificationIdentityMutex);
-    return static_cast<LONG>(g_productAsyncItemNotificationIdentities.size());
+    return g_productAsyncItemNotificationIdentities.Count();
 }
+
+extern "C" LONG WINAPI GetProductAsyncItemNotificationIdentityDroppedCount()
+{ return g_productAsyncItemNotificationIdentities.Dropped(); }
 
 extern "C" HRESULT WINAPI GetProductAsyncItemNotificationIdentity(LONG index, LPWSTR buffer, UINT capacity)
 {
-    if (!buffer || capacity == 0) return E_INVALIDARG;
-    std::lock_guard<std::mutex> lock(g_productAsyncItemNotificationIdentityMutex);
-    if (index < 0 || static_cast<size_t>(index) >= g_productAsyncItemNotificationIdentities.size()) return E_BOUNDS;
-    return StringCchCopyW(buffer, capacity, g_productAsyncItemNotificationIdentities[static_cast<size_t>(index)].c_str());
+    return g_productAsyncItemNotificationIdentities.Read(index, buffer, capacity);
 }
 
 extern "C" LONG WINAPI GetProductViewItemNotificationCallbackCount()
@@ -6452,16 +6515,15 @@ extern "C" void WINAPI SetProductViewNotificationsUseSyntheticRoot(BOOL enabled)
 
 extern "C" LONG WINAPI GetProductViewItemNotificationIdentityCount()
 {
-    std::lock_guard<std::mutex> lock(g_productViewItemNotificationIdentityMutex);
-    return static_cast<LONG>(g_productViewItemNotificationIdentities.size());
+    return g_productViewItemNotificationIdentities.Count();
 }
+
+extern "C" LONG WINAPI GetProductViewItemNotificationIdentityDroppedCount()
+{ return g_productViewItemNotificationIdentities.Dropped(); }
 
 extern "C" HRESULT WINAPI GetProductViewItemNotificationIdentity(LONG index, LPWSTR buffer, UINT capacity)
 {
-    if (!buffer || capacity == 0) return E_INVALIDARG;
-    std::lock_guard<std::mutex> lock(g_productViewItemNotificationIdentityMutex);
-    if (index < 0 || static_cast<size_t>(index) >= g_productViewItemNotificationIdentities.size()) return E_BOUNDS;
-    return StringCchCopyW(buffer, capacity, g_productViewItemNotificationIdentities[static_cast<size_t>(index)].c_str());
+    return g_productViewItemNotificationIdentities.Read(index, buffer, capacity);
 }
 #endif
 

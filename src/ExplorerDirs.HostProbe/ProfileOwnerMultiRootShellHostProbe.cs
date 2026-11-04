@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
@@ -438,6 +439,30 @@ internal static class ProfileOwnerMultiRootShellHostProbe
         // Those scan counters increment only in NATIVEPROBE builds. Their zero
         // exports in the product diagnostic DLL are not measured absence of IO.
         long Read64(string name) => Marshal.GetDelegateForFunctionPointer<GetCounter64>(NativeLibrary.GetExport(module, name))();
+        int Read32(string name) => Marshal.GetDelegateForFunctionPointer<GetCounter32>(NativeLibrary.GetExport(module, name))();
+        var capturedAsync = Read32("GetProductAsyncItemNotificationIdentityCount");
+        var capturedView = Read32("GetProductViewItemNotificationIdentityCount");
+        var droppedAsync = Read32("GetProductAsyncItemNotificationIdentityDroppedCount");
+        var droppedView = Read32("GetProductViewItemNotificationIdentityDroppedCount");
+        if (droppedAsync != 0 || droppedView != 0)
+            throw new InvalidOperationException($"Notification identity capture is incomplete: dropped async={droppedAsync}, view={droppedView}.");
+        // Resolve samples only after the value/sort timings, so identity verification cannot perturb them.
+        var resolvedIdentities = 0;
+        void VerifyCapturedNames(int count, string getterExport)
+        {
+            if (count == 0) return;
+            var getter = Marshal.GetDelegateForFunctionPointer<GetNotificationIdentity>(NativeLibrary.GetExport(module, getterExport));
+            foreach (var index in new[] { 0, count / 2, count - 1 }.Distinct())
+            {
+                var name = new StringBuilder(32768);
+                Marshal.ThrowExceptionForHR(getter(index, name, (uint)name.Capacity));
+                if (string.IsNullOrWhiteSpace(name.ToString()))
+                    throw new InvalidOperationException("Captured notification PIDL did not resolve to a parsing name.");
+                resolvedIdentities++;
+            }
+        }
+        VerifyCapturedNames(capturedAsync, "GetProductAsyncItemNotificationIdentity");
+        VerifyCapturedNames(capturedView, "GetProductViewItemNotificationIdentity");
         var comparisons = Read64("GetProductRecursiveCompareCount");
         var samples = Read64("GetProductRecursiveCompareTimingSamples");
         var sampledTicks = Read64("GetProductRecursiveCompareSampledTicks");
@@ -446,7 +471,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
         var fastMisses = Read64("GetProductRecursiveCompareFastPathMisses");
         var meanMicroseconds = samples > 0 ? sampledTicks * 1_000_000.0 / Stopwatch.Frequency / samples : 0;
         var maximumMicroseconds = maximumTicks * 1_000_000.0 / Stopwatch.Frequency;
-        return FormattableString.Invariant($"entries={snapshots};payload={payload};hits={hits};misses={misses};evictions={evictions};compare-count={comparisons};compare-samples={samples};sampled-mean-us={meanMicroseconds:F2};sampled-max-us={maximumMicroseconds:F2};size-fast-hits={fastHits};size-fast-misses={fastMisses};scan-counters=unavailable-in-product-diagnostics");
+        return FormattableString.Invariant($"entries={snapshots};payload={payload};hits={hits};misses={misses};evictions={evictions};compare-count={comparisons};compare-samples={samples};sampled-mean-us={meanMicroseconds:F2};sampled-max-us={maximumMicroseconds:F2};size-fast-hits={fastHits};size-fast-misses={fastMisses};captured-notification-identities={capturedAsync}/{capturedView};resolved-notification-name-samples={resolvedIdentities};dropped-notification-identities={droppedAsync}/{droppedView};scan-counters=unavailable-in-product-diagnostics");
     }
 
     private static void WaitUntil(Func<bool> condition, TimeSpan timeout, string message, int pollMilliseconds = 20)
@@ -486,6 +511,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ConfigureCacheCapacity(int capacity);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void SetProductCompareTraceEnabled(int enabled);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void SetProductNotificationIdentityCaptureEnabled(int enabled);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetNotificationIdentity(int index, [MarshalAs(UnmanagedType.LPWStr)] StringBuilder buffer, uint capacity);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCounter32();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate long GetCounter64();
 

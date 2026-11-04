@@ -1525,6 +1525,10 @@ internal static class ShellProviderLocationProbe
         if (!NativeLibrary.TryGetExport(adapter, countExport, out var countAddress) ||
             !NativeLibrary.TryGetExport(adapter, identityExport, out var identityAddress))
             return [];
+        // A bounded diagnostic log must never silently masquerade as a complete notification trace.
+        if (NativeLibrary.TryGetExport(adapter, identityExport + "DroppedCount", out var droppedAddress) &&
+            Marshal.GetDelegateForFunctionPointer<GetCounter>(droppedAddress)() != 0)
+            throw new InvalidOperationException("Notification identity trace overflowed; captured names are incomplete.");
         var count = Marshal.GetDelegateForFunctionPointer<GetCounter>(countAddress)();
         var getIdentity = Marshal.GetDelegateForFunctionPointer<GetProductAsyncItemNotificationIdentity>(identityAddress);
         var identities = new string[count];

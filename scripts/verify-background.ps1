@@ -29,7 +29,7 @@ try {
     $sourceStatus = @(& git status --porcelain)
     if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect source status.' }
 
-    foreach ($adapter in @('static-shell-folder-adapter', 'product-shell-folder-adapter')) {
+    foreach ($adapter in @('static-shell-folder-adapter', 'product-shell-folder-adapter', 'product-shell-folder-adapter-diagnostics')) {
         Invoke-BackgroundCheck ('build-' + $adapter) 'pwsh' @('-NoProfile', '-File', "src/ExplorerDirs.NativeProbe/build-$adapter.ps1")
     }
     foreach ($project in @('App', 'SettingsSmoke', 'HostProbe', 'NativeProbe')) {
@@ -53,6 +53,8 @@ try {
     Invoke-BackgroundCheck 'folder-navigation-provider-callbacks' 'dotnet' @('run', '--project', $hostProject, '-c', 'Release', '--no-build', '--',
         '--folder-navigation-provider-callbacks', 'src/ExplorerDirs.NativeProbe/bin/native-product-x64/ExplorerDirs.ShellNamespace.dll')
     $nativeProject = 'src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj'
+    Invoke-BackgroundCheck 'product-notification-capture-smoke' 'dotnet' @('run', '--project', $nativeProject, '-c', 'Release', '--no-build', '--',
+        '--product-notification-capture-smoke', 'src/ExplorerDirs.NativeProbe/bin/native-product-diagnostics-x64/ExplorerDirs.ShellNamespace.Diagnostics.dll')
     foreach ($flag in @('synthetic-shell-folder-tree-smoke', 'synthetic-async-on-demand-recursive-size-column-smoke')) {
         Invoke-BackgroundCheck $flag 'dotnet' @('run', '--project', $nativeProject, '-c', 'Release', '--no-build', '--', "--$flag")
     }
