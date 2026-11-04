@@ -875,6 +875,48 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                             throw new InvalidOperationException($"Grouped policy update mismatch: group={groupedState.GetType().GetProperty("GroupKey")!.GetValue(groupedState)}; mixed={groupedState.GetType().GetProperty("MixedSizeSort")!.GetValue(groupedState)}; expected={mixed}; before-serial={beforeSerial}; after-serial={hostType.GetField("_initialSortRecoverySerial", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)}.");
                         VerifyMixedPolicyReload(appAssembly, Path.Combine(profile, $"grouped-mixed-{mixed}.ini"), folders[0], groupedState, mixed);
                     }
+                    foreach (var mixed in new[] { true, false })
+                    foreach (var direction in new[] { 1, -1 })
+                    {
+                        if (!(bool)setGroup.Invoke(host, [sortKey, true, new Func<bool>(() => true)])!)
+                            throw new InvalidOperationException("Could not regroup for policy transition.");
+                        WaitUntil(() =>
+                        {
+                            var state = hostType.GetMethod("CaptureViewState")!.Invoke(host, null)!;
+                            return Equals(state.GetType().GetProperty("GroupKey")!.GetValue(state), sortKey);
+                        }, TimeSpan.FromSeconds(5), "Regrouping did not become observable.");
+                        if (!(bool)hostType.GetMethod("SetMixedSizeSort", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(host, [mixed])!)
+                            throw new InvalidOperationException("Grouped transition policy was rejected.");
+                        var groupedMenu = hostType.GetMethod("OpenFileCommandMenu", BindingFlags.Instance | BindingFlags.NonPublic, null, [typeof(bool), typeof(bool)], null)!.Invoke(host, [true, true])!;
+                        try
+                        {
+                            var result = (int)groupedMenu.GetType().GetMethod("InvokeCanonicalVerb", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(groupedMenu, [direction > 0 ? "sortascending" : "sortdescending"])!;
+                            Marshal.ThrowExceptionForHR(result);
+                        }
+                        finally { ((IDisposable)groupedMenu).Dispose(); }
+                        if (!(bool)setGroup.Invoke(host, [null, true, new Func<bool>(() => true)])!)
+                            throw new InvalidOperationException("Could not clear native grouping after policy changes.");
+                        string[] expected = mixed
+                            ? direction > 0 ? ["folder-small", "file-middle.bin", "folder-large"] : ["folder-large", "file-middle.bin", "folder-small"]
+                            : direction > 0 ? ["folder-small", "folder-large", "file-middle.bin"] : ["folder-large", "folder-small", "file-middle.bin"];
+                        string transitionState = "not-read";
+                        try
+                        {
+                            WaitUntil(() =>
+                        {
+                            var state = hostType.GetMethod("CaptureViewState")!.Invoke(host, null)!;
+                            var rows = readNativeRows.Invoke(null, [window])!;
+                            var names = (string[])rows.GetType().GetField("Item2")!.GetValue(rows)!;
+                            transitionState = $"group={state.GetType().GetProperty("GroupKey")!.GetValue(state)}; names={string.Join('|', names)}";
+                            return state.GetType().GetProperty("GroupKey")!.GetValue(state) is null && names.SequenceEqual(expected);
+                        }, TimeSpan.FromSeconds(8), $"Ungroup transition failed: mixed={mixed}; direction={direction}.");
+                        }
+                        catch (TimeoutException error)
+                        {
+                            throw new InvalidOperationException($"Ungroup transition state: {transitionState}; mixed={mixed}; direction={direction}.", error);
+                        }
+                        Console.WriteLine($"product-ungroup-policy: mixed={mixed}; direction={direction}; native-row-order=True");
+                    }
                     Console.WriteLine("product-grouped-mixed-option: group-preserved=True; ungrouped-recovery=False; ini-copy-default=True");
                 }
 
