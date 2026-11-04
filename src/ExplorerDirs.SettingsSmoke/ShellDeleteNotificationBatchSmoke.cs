@@ -13,20 +13,34 @@ internal static class ShellDeleteNotificationBatchSmoke
         Check(batch.TakeForDispatcher() == @"C:\files\last-folder",
             "the dispatcher receives the latest path for one Shell identity lookup");
 
-        Check(!batch.TryTakeLatestAfterQuietPeriod(TimeSpan.FromMilliseconds(250), out _),
+        Check(!batch.TryTakeAfterQuietPeriod(TimeSpan.FromMilliseconds(250), out _),
             "a delete burst waits for the full quiet period");
         Thread.Sleep(150);
         Check(!batch.TryRecordForDispatch(@"C:\files\last-folder-updated"),
             "a new delete during the quiet period reuses the pending handoff");
         Thread.Sleep(160);
-        Check(!batch.TryTakeLatestAfterQuietPeriod(TimeSpan.FromMilliseconds(250), out _),
+        Check(!batch.TryTakeAfterQuietPeriod(TimeSpan.FromMilliseconds(250), out _),
             "a new delete restarts the quiet period without another dispatcher callback");
         Thread.Sleep(120);
-        Check(batch.TryTakeLatestAfterQuietPeriod(TimeSpan.FromMilliseconds(250), out var latest) &&
-              latest == @"C:\files\last-folder-updated",
-            "the quiet-period drain returns the newest path and clears pending state");
+        Check(batch.TryTakeAfterQuietPeriod(TimeSpan.FromMilliseconds(250), out var latest) &&
+              latest.SequenceEqual(new[] { @"C:\files\first.txt", @"C:\files\middle.txt", @"C:\files\last-folder", @"C:\files\last-folder-updated" }),
+            "the quiet-period drain preserves all distinct deleted paths and clears pending state");
         Check(batch.TryRecordForDispatch(@"C:\files\next-burst"),
             "a subsequent delete burst queues exactly one new handoff");
+        var duplicates = new ShellDeleteNotificationBatch();
+        Check(duplicates.TryRecordForDispatch(@"C:\files\same.txt") &&
+              !duplicates.TryRecordForDispatch(@"c:\FILES\SAME.txt") &&
+              duplicates.TryTakeAfterQuietPeriod(TimeSpan.Zero, out var unique) && unique.Count == 1,
+            "case-insensitive duplicate events share one retained path and one handoff");
+        var bounded = new ShellDeleteNotificationBatch();
+        var handoffs = 0;
+        for (var index = 0; index < ShellDeleteNotificationBatch.MaximumPendingPaths + 17; index++)
+            if (bounded.TryRecordForDispatch($@"C:\files\{index}.txt")) handoffs++;
+        Check(handoffs == 1, "overflow still queues only one dispatcher handoff");
+        Check(bounded.TryTakeAfterQuietPeriod(TimeSpan.Zero, out var retained) &&
+              retained.Count == ShellDeleteNotificationBatch.MaximumPendingPaths &&
+              retained[0] == @"C:\files\17.txt" && retained[^1] == @"C:\files\528.txt",
+            "overflow retains the newest bounded distinct paths without unbounded memory");
         Check(ShellDeletedItemNotification.ShouldNotifyPath(@"C:\files\removed-folder"),
             "a confirmed folder path can use the RMDIR notification");
         Check(ShellDeletedItemNotification.ShouldNotifyPath(@"C:\files\removed-file.txt"),

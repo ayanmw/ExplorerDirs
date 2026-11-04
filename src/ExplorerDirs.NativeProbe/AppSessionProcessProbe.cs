@@ -244,6 +244,11 @@ internal static class AppSessionProcessProbe
         AwaitRows(3, "file-create");
         foreach (var file in files) File.Delete(file);
         AwaitRows(2, "file-delete");
+        var burstFiles = files.SelectMany(file => Enumerable.Range(0, 3).Select(index => file + $".burst-{index}")).ToArray();
+        foreach (var file in burstFiles) File.WriteAllBytes(file, new byte[19]);
+        AwaitRows(5, "file-burst-create");
+        foreach (var file in burstFiles) File.Delete(file);
+        AwaitRows(2, "file-burst-delete");
     }
 
     private static void VerifySession(SessionState expected, SessionState? actual)

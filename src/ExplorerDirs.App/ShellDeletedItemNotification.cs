@@ -11,7 +11,8 @@ internal enum ShellDeletedItemNotificationResult
     ItemUnavailable,
     ItemNotFound,
     ShellFailure,
-    Notified
+    Notified,
+    PartiallyNotified
 }
 
 internal static class ShellDeletedItemNotification
@@ -32,11 +33,14 @@ internal static class ShellDeletedItemNotification
         viewItemCount is > 0 and <= MaxIdentityScanViewItems &&
         (softRefresh || expectedViewItemCount is > 0 and <= MaxIdentityScanViewItems);
 
-    internal static ShellDeletedItemNotificationResult NotifyDeletedItem(nint folderView, string path,
+    internal static ShellDeletedItemNotificationResult NotifyDeletedItems(nint folderView, IReadOnlyList<string> paths,
         Action<string>? trace = null, Guid? providerClassId = null)
     {
-        if (folderView == 0 || !ShouldNotifyPath(path)) return ShellDeletedItemNotificationResult.InvalidPath;
-
+        if (folderView == 0 || paths.Count == 0 || paths.Any(path => !ShouldNotifyPath(path)))
+            return ShellDeletedItemNotificationResult.InvalidPath;
+        var remaining = new HashSet<string>(paths.Select(Path.GetFullPath), StringComparer.OrdinalIgnoreCase);
+        var notified = 0;
+        var failure = ShellDeletedItemNotificationResult.ItemNotFound;
         nint items = 0;
         try
         {
@@ -57,7 +61,8 @@ internal static class ShellDeletedItemNotification
                 if (itemResult < 0 || item == 0)
                 {
                     if (item != 0) Marshal.Release(item);
-                    return ShellDeletedItemNotificationResult.ItemUnavailable;
+                    failure = ShellDeletedItemNotificationResult.ItemUnavailable;
+                    continue;
                 }
                 try
                 {
@@ -74,20 +79,25 @@ internal static class ShellDeletedItemNotification
                     if (nameResult < 0 || name == 0)
                     {
                         if (name != 0) Marshal.FreeCoTaskMem(name);
-                        return ShellDeletedItemNotificationResult.ItemUnavailable;
+                        failure = ShellDeletedItemNotificationResult.ItemUnavailable;
+                        continue;
                     }
                     string itemPath;
                     try { itemPath = Marshal.PtrToStringUni(name) ?? string.Empty; }
                     finally { Marshal.FreeCoTaskMem(name); }
                     if (QdrShellPathCodec.TryGetProviderPath(itemPath, providerClassId, out var physicalPath))
                         itemPath = physicalPath;
-                    if (!string.Equals(Path.GetFullPath(itemPath), path, StringComparison.OrdinalIgnoreCase)) continue;
+                    itemPath = Path.GetFullPath(itemPath);
+                    if (!remaining.Contains(itemPath)) continue;
 
                     uint attributes = 0;
                     var attributesResult = Measure($"attributes index={index}", trace,
                         () => At<Attributes>(item, 6)(item, FolderAttribute, out attributes));
                     if (attributesResult < 0)
-                        return ShellDeletedItemNotificationResult.ItemUnavailable;
+                    {
+                        failure = ShellDeletedItemNotificationResult.ItemUnavailable;
+                        continue;
+                    }
                     var removedEvent = (attributes & FolderAttribute) != 0 ? ShellFolderRemoved : ShellFileRemoved;
                     // Use the retained namespace identity; a deleted physical path
                     // cannot reconstruct its per-tab provider root and item metadata.
@@ -95,15 +105,20 @@ internal static class ShellDeletedItemNotification
                     try
                     {
                         if (SHGetIDListFromObject(item, out pidl) < 0 || pidl == 0)
-                            return ShellDeletedItemNotificationResult.ItemUnavailable;
+                        {
+                            failure = ShellDeletedItemNotificationResult.ItemUnavailable;
+                            continue;
+                        }
                         SHChangeNotify(removedEvent, PidlAndFlushNoWait, pidl, IntPtr.Zero);
-                        return ShellDeletedItemNotificationResult.Notified;
+                        remaining.Remove(itemPath);
+                        notified++;
+                        if (remaining.Count == 0) return ShellDeletedItemNotificationResult.Notified;
                     }
                     finally { if (pidl != 0) Marshal.FreeCoTaskMem(pidl); }
                 }
                 finally { Marshal.Release(item); }
             }
-            return ShellDeletedItemNotificationResult.ItemNotFound;
+            return notified > 0 ? ShellDeletedItemNotificationResult.PartiallyNotified : failure;
         }
         catch (COMException) { return ShellDeletedItemNotificationResult.ShellFailure; }
         catch (ArgumentException) { return ShellDeletedItemNotificationResult.InvalidPath; }

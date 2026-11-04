@@ -5654,7 +5654,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                             _directoryChangeDeleteNotificationTimer = null;
                             return;
                         }
-                        if (!batch.TryTakeLatestAfterQuietPeriod(TimeSpan.FromMilliseconds(250), out var deletedPath))
+                        if (!batch.TryTakeAfterQuietPeriod(TimeSpan.FromMilliseconds(250), out var deletedPaths))
                         {
                             if (batch.TakeForDispatcher() is not null)
                                 timer.Start();
@@ -5665,7 +5665,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                         _directoryChangeDeleteNotificationTimer = null;
                         var monitorRequest = CaptureCurrentDirectoryMonitorRequest(version);
                         var expectedCount = _directoryChangeBatch?.ExpectedCountAfterChanges;
-                        if (deletedPath is null || monitorRequest is null || _browser is null ||
+                        if (deletedPaths.Count == 0 || monitorRequest is null || _browser is null ||
                             (!_softRefresh && expectedCount is null))
                             return;
                         if (!ShellDirectoryMonitorCountRead.TryRead(ReadDirectoryMonitorItemCount,
@@ -5688,14 +5688,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                             ShellDeletedItemNotificationResult result;
                             try
                             {
-                                result = ShellDeletedItemNotification.NotifyDeletedItem(folderView, deletedPath,
+                                result = ShellDeletedItemNotification.NotifyDeletedItems(folderView, deletedPaths,
                                     _traceNativeUserMessages
                                         ? step => TraceShellSelectionRestore("delete-identity", step)
                                         : null, _folderSizeProfileClassId);
                             }
                             finally { _directoryDeleteNotificationTiming.Stop(notificationStartedAt); }
                             _directoryChangeLastFolderDeleteNotificationResult = result.ToString();
-                            if (result == ShellDeletedItemNotificationResult.Notified)
+                            if (result is ShellDeletedItemNotificationResult.Notified or ShellDeletedItemNotificationResult.PartiallyNotified)
                                 Interlocked.Increment(ref _directoryChangeNativeFolderDeleteNotifications);
                         }
                         finally { Marshal.Release(folderView); }
