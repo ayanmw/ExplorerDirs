@@ -214,7 +214,7 @@ internal static class AppSessionProcessProbe
                 var state = $"counts={string.Join('|', counts)}; grouped={string.Join('|', grouped.Select(list => Message(list, 0x10AF)))}";
                 if (state != lastState)
                 {
-                    if (fillerCount > 0 && stage == "delete")
+                    if (fillerCount > 0 && stage == "delete" && tracePath is not null)
                         Console.WriteLine($"app-native-find-state: indices={string.Join('|', lists.Select(list => OwnedAppListText.Find(child.Process, child.ProcessId, list, "external-notification-fixture")))}");
                     Console.WriteLine($"app-external-change-state: stage={stage}; {state}");
                     lastState = state;
@@ -279,7 +279,7 @@ internal static class AppSessionProcessProbe
         }
         AwaitRows(2, "delete");
         Mark("delete-completed");
-        if (fillerCount > 0) return; // Large-view case covers directory notifications and full-process persistence.
+
         var files = additions.Select(directory => Path.Combine(Path.GetDirectoryName(directory)!, "external-file.txt")).ToArray();
         foreach (var file in files) File.WriteAllBytes(file, new byte[37]);
         AwaitRows(3, "file-create");
@@ -290,6 +290,7 @@ internal static class AppSessionProcessProbe
         AwaitRows(5, "file-burst-create");
         foreach (var file in burstFiles) File.Delete(file);
         AwaitRows(2, "file-burst-delete");
+        if (fillerCount > 0) return; // Large mode covers directory/file/burst changes; row-text cases remain separate.
         // Ordinary file rows retain Explorer's KB display rounding. Use whole KB
         // values so replacement metadata is distinguishable in the actual cells.
         foreach (var file in files) File.WriteAllBytes(file, new byte[37 * 1024]);

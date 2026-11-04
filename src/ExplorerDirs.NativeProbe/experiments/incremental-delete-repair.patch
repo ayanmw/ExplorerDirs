@@ -1,0 +1,153 @@
+diff --git a/src/ExplorerDirs.App/ExplorerBrowserHost.cs b/src/ExplorerDirs.App/ExplorerBrowserHost.cs
+index e156c81..1740f74 100644
+--- a/src/ExplorerDirs.App/ExplorerBrowserHost.cs
++++ b/src/ExplorerDirs.App/ExplorerBrowserHost.cs
+@@ -210,0 +211 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
++    private long _activeDeleteRepairVersion = -1;
+@@ -5656,0 +5658,5 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
++                        if (_activeDeleteRepairVersion == version)
++                        {
++                            timer.Start();
++                            return;
++                        }
+@@ -5676 +5682 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
+-                        if (!ShellDeletedItemNotification.CanScanViewForDeletedFolder(actualCount, expectedCount, _softRefresh))
++                        if (!ShellDeletedItemNotification.CanScanViewForDeletedFolder(actualCount, expectedCount, _softRefresh, incremental: true))
+@@ -5685,17 +5691,2 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
+-                        try
+-                        {
+-                            var notificationStartedAt = _traceNativeUserMessages ? _directoryDeleteNotificationTiming.Start() : 0;
+-                            ShellDeletedItemNotificationResult result;
+-                            try
+-                            {
+-                                result = ShellDeletedItemNotification.NotifyDeletedItems(folderView, deletedPaths,
+-                                    _traceNativeUserMessages
+-                                        ? step => TraceShellSelectionRestore("delete-identity", step)
+-                                        : null, _folderSizeProfileClassId);
+-                            }
+-                            finally { _directoryDeleteNotificationTiming.Stop(notificationStartedAt); }
+-                            _directoryChangeLastFolderDeleteNotificationResult = result.ToString();
+-                            if (result is ShellDeletedItemNotificationResult.Notified or ShellDeletedItemNotificationResult.PartiallyNotified)
+-                                Interlocked.Increment(ref _directoryChangeNativeFolderDeleteNotifications);
+-                        }
+-                        finally { Marshal.Release(folderView); }
++                        _activeDeleteRepairVersion = version;
++                        _ = CompleteDeletedItemRepairAsync(folderView, deletedPaths, monitorRequest, queue, version);
+@@ -5718,0 +5710,31 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
++    private async Task CompleteDeletedItemRepairAsync(nint folderView, IReadOnlyList<string> paths,
++        ShellDirectoryMonitorRequest request, ShellDirectoryChangeQueue queue, long version)
++    {
++        var startedAt = _traceNativeUserMessages ? _directoryDeleteNotificationTiming.Start() : 0;
++        try
++        {
++            var result = await ShellDeletedItemNotification.NotifyDeletedItemsAsync(folderView, paths,
++                () => IsCurrentDirectoryMonitorRequest(request),
++                _traceNativeUserMessages ? step => TraceShellSelectionRestore("delete-identity", step) : null,
++                _folderSizeProfileClassId);
++            if (!IsCurrentDirectoryMonitorRequest(request)) return;
++            _directoryChangeLastFolderDeleteNotificationResult = result.ToString();
++            if (result is ShellDeletedItemNotificationResult.Notified or ShellDeletedItemNotificationResult.PartiallyNotified)
++                Interlocked.Increment(ref _directoryChangeNativeFolderDeleteNotifications);
++        }
++        catch (Exception error)
++        {
++            if (IsCurrentDirectoryMonitorRequest(request))
++            {
++                System.Diagnostics.Trace.TraceError($"Explorer Dirs: incremental delete repair failed; hr=0x{error.HResult:X8}");
++                QueueDirectoryChange(version, queue, delta: 0, forceRefresh: true);
++            }
++        }
++        finally
++        {
++            _directoryDeleteNotificationTiming.Stop(startedAt);
++            Marshal.Release(folderView);
++            if (_activeDeleteRepairVersion == version) _activeDeleteRepairVersion = -1;
++        }
++    }
++
+diff --git a/src/ExplorerDirs.App/ShellDeletedItemNotification.cs b/src/ExplorerDirs.App/ShellDeletedItemNotification.cs
+index a7b81a8..1267d21 100644
+--- a/src/ExplorerDirs.App/ShellDeletedItemNotification.cs
++++ b/src/ExplorerDirs.App/ShellDeletedItemNotification.cs
+@@ -3,0 +4 @@ using System.Runtime.InteropServices;
++using System.Windows.Threading;
+@@ -15 +16,2 @@ internal enum ShellDeletedItemNotificationResult
+-    PartiallyNotified
++    PartiallyNotified,
++    Retired
+@@ -32,3 +34,3 @@ internal static class ShellDeletedItemNotification
+-    internal static bool CanScanViewForDeletedFolder(int? viewItemCount, int? expectedViewItemCount, bool softRefresh = false) =>
+-        viewItemCount is > 0 and <= MaxIdentityScanViewItems &&
+-        (softRefresh || expectedViewItemCount is > 0 and <= MaxIdentityScanViewItems);
++    internal static bool CanScanViewForDeletedFolder(int? viewItemCount, int? expectedViewItemCount, bool softRefresh = false, bool incremental = false) =>
++        viewItemCount is > 0 && (incremental || viewItemCount <= MaxIdentityScanViewItems) &&
++        (softRefresh || expectedViewItemCount is > 0 && (incremental || expectedViewItemCount <= MaxIdentityScanViewItems));
+@@ -36 +38 @@ internal static class ShellDeletedItemNotification
+-    internal static ShellDeletedItemNotificationResult NotifyDeletedItems(nint folderView, IReadOnlyList<string> paths,
++    internal static async Task<ShellDeletedItemNotificationResult> NotifyDeletedItemsAsync(nint folderView, IReadOnlyList<string> paths, Func<bool> isCurrent,
+@@ -38,0 +41 @@ internal static class ShellDeletedItemNotification
++        if (!isCurrent()) return ShellDeletedItemNotificationResult.Retired;
+@@ -44,0 +48 @@ internal static class ShellDeletedItemNotification
++        var removals = new List<(nint Pidl, uint Event)>();
+@@ -49,0 +54 @@ internal static class ShellDeletedItemNotification
++            if (!isCurrent()) return ShellDeletedItemNotificationResult.Retired;
+@@ -55,0 +61,2 @@ internal static class ShellDeletedItemNotification
++            if (!isCurrent()) return ShellDeletedItemNotificationResult.Retired;
++            var slice = Stopwatch.StartNew();
+@@ -57,0 +65,8 @@ internal static class ShellDeletedItemNotification
++                // Keep the original identity-matching scan, but yield between bounded
++                // chunks so large folders do not monopolize the Shell STA.
++                if (index > 0 && (index % 32 == 0 || slice.ElapsedMilliseconds >= 8))
++                {
++                    await Dispatcher.Yield(DispatcherPriority.Background);
++                    slice.Restart();
++                }
++                if (!isCurrent()) return ShellDeletedItemNotificationResult.Retired;
+@@ -68,0 +84 @@ internal static class ShellDeletedItemNotification
++                    if (!isCurrent()) return ShellDeletedItemNotificationResult.Retired;
+@@ -71,0 +88,5 @@ internal static class ShellDeletedItemNotification
++                    if (!isCurrent())
++                    {
++                        if (name != 0) Marshal.FreeCoTaskMem(name);
++                        return ShellDeletedItemNotificationResult.Retired;
++                    }
+@@ -87,0 +109 @@ internal static class ShellDeletedItemNotification
++                    if (!isCurrent()) return ShellDeletedItemNotificationResult.Retired;
+@@ -95,0 +118 @@ internal static class ShellDeletedItemNotification
++                    if (!isCurrent()) return ShellDeletedItemNotificationResult.Retired;
+@@ -112 +135,3 @@ internal static class ShellDeletedItemNotification
+-                        SHChangeNotify(removedEvent, PidlAndFlushNoWait, pidl, IntPtr.Zero);
++                        if (!isCurrent()) return ShellDeletedItemNotificationResult.Retired;
++                        removals.Add((pidl, removedEvent));
++                        pidl = 0;
+@@ -114,2 +138,0 @@ internal static class ShellDeletedItemNotification
+-                        notified++;
+-                        if (remaining.Count == 0) return ShellDeletedItemNotificationResult.Notified;
+@@ -119,0 +143,8 @@ internal static class ShellDeletedItemNotification
++                if (remaining.Count == 0) break;
++            }
++            // Resolve the complete bounded batch before mutations can shift view indices.
++            foreach (var removal in removals)
++            {
++                if (!isCurrent()) return ShellDeletedItemNotificationResult.Retired;
++                SHChangeNotify(removal.Event, PidlAndFlushNoWait, removal.Pidl, IntPtr.Zero);
++                notified++;
+@@ -121 +152 @@ internal static class ShellDeletedItemNotification
+-            return notified > 0 ? ShellDeletedItemNotificationResult.PartiallyNotified : failure;
++            return remaining.Count == 0 ? ShellDeletedItemNotificationResult.Notified : notified > 0 ? ShellDeletedItemNotificationResult.PartiallyNotified : failure;
+@@ -129,0 +161 @@ internal static class ShellDeletedItemNotification
++            foreach (var removal in removals) Marshal.FreeCoTaskMem(removal.Pidl);
+diff --git a/src/ExplorerDirs.SettingsSmoke/ShellDeleteNotificationBatchSmoke.cs b/src/ExplorerDirs.SettingsSmoke/ShellDeleteNotificationBatchSmoke.cs
+index 94da918..66594d0 100644
+--- a/src/ExplorerDirs.SettingsSmoke/ShellDeleteNotificationBatchSmoke.cs
++++ b/src/ExplorerDirs.SettingsSmoke/ShellDeleteNotificationBatchSmoke.cs
+@@ -65,0 +66,9 @@ internal static class ShellDeleteNotificationBatchSmoke
++        Check(ShellDeletedItemNotification.CanScanViewForDeletedFolder(1027, null,
++                softRefresh: true, incremental: true),
++            "large views require the incremental lookup path");
++        Check(!ShellDeletedItemNotification.CanScanViewForDeletedFolder(0, null,
++                softRefresh: true, incremental: true),
++            "incremental lookup does not invent items in an empty view");
++        Check(ShellDeletedItemNotification.NotifyDeletedItemsAsync(1, [@"C:\retired.txt"], () => false)
++                .GetAwaiter().GetResult() == ShellDeletedItemNotificationResult.Retired,
++            "a retired repair never queries its invalid native view pointer");

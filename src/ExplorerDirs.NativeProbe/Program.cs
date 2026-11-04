@@ -19,6 +19,9 @@ internal static class Program
             AppSessionProcessProbe.CleanupOwnedProfile(failedAppProfile);
             return 0;
         }
+        if (args is ["--full-app-session-private-desktop", var largeTracedRun, "--filler-count", var largeCountText, "--adapter", var largeAdapter] &&
+            int.TryParse(largeCountText, out var largeCount) && largeCount is > 0 and <= 10000)
+            return PrivateDesktopShellProbe.RunFullAppSession(largeTracedRun, adapterOverride: largeAdapter, fillerCount: largeCount);
         if (args is ["--full-app-session-private-desktop", var largeRun, "--filler-count", var fillerText] &&
             int.TryParse(fillerText, out var fillerCount) && fillerCount is > 0 and <= 10000)
             return PrivateDesktopShellProbe.RunFullAppSession(largeRun, fillerCount: fillerCount);

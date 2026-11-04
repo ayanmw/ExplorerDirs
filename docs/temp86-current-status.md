@@ -123,3 +123,13 @@
 独立诊断编译 `app-large-find-trace.log`：IFolderView2.GetItem候选名称匹配，但已删目录的SFGAO_FOLDER返回S_FALSE；`app-large-find-array.log` 改用既有IShellItemArray候选，类型返回S_OK和0x20000000，准备了RMDIR(0x10)，仍未全部移除，未形成有效修复。对应run的delete-lookup-probe.log保留候选/身份/类型的阶段证据。不能把“找到行/通知已准备”写成实际删除通过。
 
 未通过的两个产品文件改动已撤回，临时诊断编译定义没有保留到源码；尝试diff留在 `src/.state/app-large-native-find-experiment.patch` 供定位对照。NativeProbe保留只查询本任务子进程的名称查找能力及大目录反例。正常产品源码行为仍为已验证的小视图修复，大目录默认软刷新自动删除继续开放；不覆盖预览。
+
+## 大目录通知后半段与分段实验（2026-11-05，保持开放）
+
+继续原生名称查找对照时，新增身份诊断误把SDK内联包装ILCloneFull当成DLL导出，导致诊断在通知前抛异常。现场NativeLibrary导出核验和SDK头文件确认ILCloneFull包装ILClone，已纠正；该错误仅在未发布诊断源码/产物中。`app-large-retained-fixed-run.log` 两进程通过，但对应实例没有生成托管查找日志，不能据此证明修复走到了托管路径。SHGetIDListFromObject实测返回S_OK；此前缺少后续日志不等于PIDL获取失败。
+
+移除临时诊断后，普通构建 `app-large-normal-clean-run.log` 的515项两进程目录通知通过；扩大场景 `app-large-burst-1025.log` 在后续普通文件创建失败。关闭测试端额外LVM_FINDITEM查询（默认不再查询；只有显式adapter诊断才记录）后，`app-large-no-observer-513.log` 目录删除仍失败。因此原生名称查找方案有观察时序依赖，已撤回，不算产品修复。
+
+另作有界分段实验：沿用身份匹配算法，每32行或约8ms让出Dispatcher，按监视代际取消、同代际单个worker串行，整批收集身份后再通知。普通构建 `src/.state/app-incremental-delete-513.log` 目录删除通过，但普通文件删除超时，未达到整项标准；未声称早退/中途取消的原生生命周期已验证。下一步区分分段时条目数组变化、任务退休及最终通知结果。
+
+完整未通过实现与合同尝试保存在Git跟踪的 `src/ExplorerDirs.NativeProbe/experiments/incremental-delete-repair.patch`，未接入默认编译；默认App和SettingsSmoke已恢复已验证实现。不降低成功标准，不发布预览。NativeProbe保留大目录目录/文件/突发用例与显式大目录adapter组合诊断入口，默认关闭额外名称观察。
