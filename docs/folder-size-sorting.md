@@ -114,3 +114,13 @@ ViewState 新增默认 false 的 MixedSizeSort init 属性，保留原六参数�
 初轮原生菜单重排时临时空行导致固定四行读取前置断言失败；探针现在等待当前行数恢复到4再读取，并保持3秒截止和完整四行顺序要求，不对空列表记通过。先前无箭头同步的入口轮在后续选区断言失败仍保留。
 
 当前只验证了详细信息模式与固定列身份下的同步；列表/图标模式、列重排后的观察器重新定位、header HWND 重建及导航生命周期仍未覆盖。因此该方案没有接入产品宿主。NativeProbe Release 与显式实验 native 严格构建通过，最终diff检查通过，普通产品无新增排序行为，未发布。
+
+## 列表/图标模式反例
+
+新增 list/icons 两个独立入口，参数 nativeSortMode=3/1；先应用产品同样的 EnableAllViewHeaders，再切换模式。没有点击隐藏列头，升降序均用原生 canonical sortascending/sortdescending，保持其他真实行序/选区/隔离断言。
+
+sort-arrow-list.log 首次失败后，补齐产品列头标志的 sort-arrow-list-product-flags.log 仍失败；sort-arrow-icons.log 同样失败。两种模式的 header 更新次数均0，独立升序通过，独立降序却将文件2048放到所有目录前。实际行序为 file-2048.bin、folder-12288、folder-25600、folder-empty，违反独立分类要求。两轮前台/输入守卫干净。说明方向没有同步，不能把详细信息模式中的成功扩大为所有查看方式可用。
+
+随后 sort-arrow-details-regression.log 完整通过，证明新增模式分支没有破坏已验证的详细信息路径。NativeProbe Release 编译及最终diff检查通过。没有产品代码或发布载荷变更。
+
+后续方案必须覆盖隐藏header时的原生排序状态变化；箭头观察器仅能作为详细信息的一条信号，不能成为产品唯一依据。不得静默禁用列表/图标模式，也不得把独立降序改成文件在前以通过测试。继续评估无需比较回调反查的通用排序命令/状态接线。

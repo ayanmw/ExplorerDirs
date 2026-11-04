@@ -30,6 +30,10 @@ internal static class Program
             return RegisteredMultiRootPidlProbe.Run(volatileRegistration: true);
         if (args is ["--size-sort-stable-identity-child", var stableSortName, var stableSortPath])
             return SyntheticShellSortProbe.RunStableSortIdentityChild(stableSortName, stableSortPath);
+        if (args is ["--product-size-sort-entrypoints-list-private-desktop", var listSortAdapter])
+            return PrivateDesktopShellProbe.RunProductSizeDisplay(listSortAdapter, explorerBrowser: true, sortPolicyExperiment: true, dynamicSortPolicy: true, nativeSortEntrypoints: true, nativeSortMode: 3);
+        if (args is ["--product-size-sort-entrypoints-icons-private-desktop", var iconSortAdapter])
+            return PrivateDesktopShellProbe.RunProductSizeDisplay(iconSortAdapter, explorerBrowser: true, sortPolicyExperiment: true, dynamicSortPolicy: true, nativeSortEntrypoints: true, nativeSortMode: 1);
         if (args is ["--product-size-sort-entrypoints-private-desktop", var sortEntrypointsAdapter])
             return PrivateDesktopShellProbe.RunProductSizeDisplay(sortEntrypointsAdapter, explorerBrowser: true, sortPolicyExperiment: true, dynamicSortPolicy: true, nativeSortEntrypoints: true);
         if (args is ["--product-size-sort-dynamic-private-desktop", var dynamicSortAdapter])

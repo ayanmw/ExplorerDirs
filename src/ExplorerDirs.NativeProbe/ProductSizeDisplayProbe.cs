@@ -8,7 +8,7 @@ public static partial class SyntheticShellSortProbe
 {
     private static readonly List<StreamViewHost> ProductDisplayProcessLifetimeHosts = [];
     internal static int RunProductSizeDisplay(string adapterPath, bool explorerBrowser = false, bool rootControl = false,
-        FolderSizeSource source = FolderSizeSource.BuiltIn, bool sortPolicyExperiment = false, bool? encodedSortPolicy = null, bool columnStateSortPolicy = false, int encodedSortDirection = 1, bool dynamicSortPolicy = false, bool nativeSortEntrypoints = false)
+        FolderSizeSource source = FolderSizeSource.BuiltIn, bool sortPolicyExperiment = false, bool? encodedSortPolicy = null, bool columnStateSortPolicy = false, int encodedSortDirection = 1, bool dynamicSortPolicy = false, bool nativeSortEntrypoints = false, uint nativeSortMode = 4)
     {
         var fixture = Path.Combine(Path.GetTempPath(), "ExplorerDirs-ProductSizeDisplay-" + Guid.NewGuid().ToString("N"));
         nint root = 0, folder = 0, view = 0, parent = 0, browserPointer = 0, folderView = 0;
@@ -170,6 +170,14 @@ public static partial class SyntheticShellSortProbe
                 }
                 finally { Marshal.FreeCoTaskMem(preparedPeer); }
             }
+            if (nativeSortEntrypoints) Check(ShellFolderViewOptions.EnableAllViewHeaders(view));
+            if (nativeSortEntrypoints && nativeSortMode != 4)
+            {
+                Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, nativeSortMode, 32));
+                Pump(150);
+                if (FindListView(view) != listView) throw new InvalidOperationException("View mode replaced the observed list.");
+                Console.WriteLine($"product-size-sort-mode: mode={nativeSortMode}; same-list=True");
+            }
             var headerMixed = false;
             var publishPolicy = nativeSortEntrypoints ? Marshal.GetDelegateForFunctionPointer<SetDynamicSizePolicy>(
                 NativeLibrary.GetExport(diagnosticModule, "SetDynamicSizeSortPolicyForProbe")) : null;
@@ -211,12 +219,12 @@ public static partial class SyntheticShellSortProbe
                         var beforeComparisons = comparisonCount?.Invoke() ?? -1;
                         if (nativeSortEntrypoints)
                         {
-                            if (direction > 0) ClickSortHeaderForProbe(listView, sizeSubItem);
+                            if (direction > 0 && nativeSortMode == 4) ClickSortHeaderForProbe(listView, sizeSubItem);
                             var callbackCount = Marshal.GetDelegateForFunctionPointer<GetCounter>(
                                 NativeLibrary.GetExport(diagnosticModule, "GetSizeSortColumnClickCountForProbe"))();
                             var headerSort = CaptureNativeSortColumns(folderView);
                             Console.WriteLine($"product-size-sort-header-entry: callbacks={callbackCount}; actual=[{FormatSortColumns(headerSort)}]; requested={direction}");
-                            if (direction > 0 && (headerSort.Length != 1 || headerSort[0].Direction != direction))
+                            if (direction > 0 && nativeSortMode == 4 && (headerSort.Length != 1 || headerSort[0].Direction != direction))
                                 throw new InvalidOperationException("Header click did not request the expected sort direction.");
                         }
                         else Check(target.SetSorting([new(new PropertyKeyState(SizeFormatId, 12), direction)]));
@@ -287,6 +295,11 @@ public static partial class SyntheticShellSortProbe
                     if (sortPolicy != 0) Marshal.Release(sortPolicy);
                     if (policyFolder != 0) Marshal.Release(policyFolder);
                 }
+            }
+            if (nativeSortEntrypoints && nativeSortMode != 4)
+            {
+                Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, 4, 16));
+                Pump(150);
             }
             owner.SetFolderSizeSource(source, false);
             sizeEnabled = false;
