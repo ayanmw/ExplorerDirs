@@ -28,6 +28,15 @@ internal static class ShellRefreshPresentationSmoke
                 modePath.IndexOf("ShellViewRedrawLease.TrySuppress(view)", StringComparison.Ordinal) &&
             !modePath.Contains("Refresh(", StringComparison.Ordinal) && !modePath.Contains("Navigate(", StringComparison.Ordinal),
             "view-style changes invalidate the existing native view after restoring redraw from the scoped mode setter");
+        var cleanupStart = sortPath.IndexOf("void FinishSortRecovery()", StringComparison.Ordinal);
+        var cleanupEnd = sortPath.IndexOf("var timer =", cleanupStart, StringComparison.Ordinal);
+        var cleanup = sortPath[cleanupStart..cleanupEnd];
+        Check(cleanup.Contains("oppositeApplied && !savedApplied && IsCurrent()", StringComparison.Ordinal) &&
+            cleanup.Contains("savedApplied = InvokeVirtualSortVerb(savedSortVerb, IsCurrent)", StringComparison.Ordinal) &&
+            cleanup.IndexOf("InvokeVirtualSortVerb", StringComparison.Ordinal) <
+                cleanup.IndexOf("ReleaseInitialVirtualSortRedrawLease", StringComparison.Ordinal) &&
+            cleanup.Contains("_viewRestoreFailed = true", StringComparison.Ordinal),
+            "deadline cleanup compensates a temporary sort before releasing redraw and protects failed restoration");
         var sortLeaseCall = sortPath.IndexOf("ShellViewRedrawLease.TrySuppress(sortView)", StringComparison.Ordinal);
         var oppositeSortCall = sortPath.IndexOf("InvokeVirtualSortVerb(oppositeVerb, IsCurrent)", StringComparison.Ordinal);
         Check(sortLeaseCall >= 0 && oppositeSortCall > sortLeaseCall &&

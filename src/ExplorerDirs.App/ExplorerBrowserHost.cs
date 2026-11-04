@@ -2815,9 +2815,32 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             expectedInputVersion == Interlocked.Read(ref _nativeUserInputVersion);
         void FinishSortRecovery()
         {
-            initialSortSelection?.Dispose();
-            initialSortSelection = null;
-            ReleaseInitialVirtualSortRedrawLease();
+            try
+            {
+                // A deadline between the two native verbs must not leave the temporary
+                // opposite direction in the live view. Navigation/user input still cancels it.
+                if (oppositeApplied && !savedApplied && IsCurrent())
+                {
+                    var savedSortVerb = sort.Direction > 0 ? "sortascending" : "sortdescending";
+                    savedApplied = InvokeVirtualSortVerb(savedSortVerb, IsCurrent);
+                    if (IsCurrent())
+                    {
+                        if (!savedApplied)
+                        {
+                            _viewRestoreFailed = true;
+                            MenuError?.Invoke(this, "保存的排序方向未能恢复，暂不保存视图状态；请重新打开目录后重试。");
+                        }
+                        else if (initialSortSelection is not null)
+                            RestoreInitialVirtualSortSelection(initialSortSelection, IsCurrent);
+                    }
+                }
+            }
+            finally
+            {
+                initialSortSelection?.Dispose();
+                initialSortSelection = null;
+                ReleaseInitialVirtualSortRedrawLease();
+            }
         }
         var timer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -3131,8 +3154,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         Interlocked.Increment(ref _shellSortCommandDispatchDepth);
         try
         {
-            if (menu.InvokeCanonicalVerb(verb) is not { } result) return false;
-            return result >= 0;
+            // Opening the native menu can pump navigation/input before the command dispatch.
+            if (!isCurrent() || menu.InvokeCanonicalVerb(verb) is not { } result) return false;
+            return result >= 0 && isCurrent();
         }
         finally { Interlocked.Decrement(ref _shellSortCommandDispatchDepth); }
     }

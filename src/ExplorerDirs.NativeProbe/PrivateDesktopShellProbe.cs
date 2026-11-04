@@ -52,8 +52,8 @@ internal static class PrivateDesktopShellProbe
         ExplorerDirs.App.FolderSizeSource source = ExplorerDirs.App.FolderSizeSource.BuiltIn) => Run("product-size-display",
         () => SyntheticShellSortProbe.RunProductSizeDisplay(adapterPath, explorerBrowser, rootControl, source), TimeSpan.FromSeconds(30), initializeOle: true);
 
-    internal static int RunProductFourPaneHost(string hostProbePath, bool large = false, bool observeNotifications = true) => Run("product-four-pane-host",
-        () => ProductFourPaneHostProbe.Run(hostProbePath, large, observeNotifications), TimeSpan.FromSeconds(large ? 180 : 60), initializeOle: true);
+    internal static int RunProductFourPaneHost(string hostProbePath, bool large = false, bool observeNotifications = true, bool forceSortDeadline = false) => Run("product-four-pane-host",
+        () => ProductFourPaneHostProbe.Run(hostProbePath, large, observeNotifications, forceSortDeadline), TimeSpan.FromSeconds(large ? 180 : forceSortDeadline ? 90 : 60), initializeOle: true);
 
     internal static int RunHostMenuCommands() => Run("host-menu-commands", ShellViewHostFilterProbe.RunMenuCommandsForPrivateDesktop);
 

@@ -16,11 +16,11 @@ internal static class ProfileOwnerMultiRootShellHostProbe
     internal static string FindProductAdapterForProbe() => FindProductAdapter();
 
     internal static int Run(bool large = false, int folderCount = 0, bool diagnosticAdapter = true,
-        int cacheCapacity = 8192, bool captureNotificationIdentities = false)
+        int cacheCapacity = 8192, bool captureNotificationIdentities = false, bool forceSortDeadline = false)
     {
         var root = Path.Combine(Path.GetTempPath(), "ExplorerDirs-ProfileOwnerMultiRoot-" + Guid.NewGuid().ToString("N"));
         var profile = Path.Combine(root, "profile");
-        var folders = Enumerable.Range(0, 4).Select(index => Path.Combine(root, $"pane-{index + 1}")).ToArray();
+        var folders = Enumerable.Range(0, forceSortDeadline ? 1 : 4).Select(index => Path.Combine(root, $"pane-{index + 1}")).ToArray();
         var itemCount = folderCount > 0 ? folderCount : large ? LargeFolderCount : 2;
         large = itemCount > 2;
         var expectedSizes = large
@@ -35,6 +35,8 @@ internal static class ProfileOwnerMultiRootShellHostProbe
         HwndSource? source = null;
         nint adapterModule = 0;
         var hosts = new List<HwndHost>();
+        DispatcherTimer? deadlineStall = null;
+        var deadlineStalled = false;
         var foreground = GetForegroundWindow();
         try
         {
@@ -61,8 +63,8 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             var appAssembly = Assembly.Load("ExplorerDirs.App");
             Console.WriteLine("profile-owner-multi-root-shell-host: stage=assembly-loaded");
             var ownerType = appAssembly.GetType("ExplorerDirs.App.ProfileShellNamespaceOwner", throwOnError: true)!;
-            var adapterPath = large && diagnosticAdapter ? FindProductDiagnosticAdapter() : FindProductAdapter();
-            if (large && diagnosticAdapter)
+            var adapterPath = (large && diagnosticAdapter || forceSortDeadline) ? FindProductDiagnosticAdapter() : FindProductAdapter();
+            if (large && diagnosticAdapter || forceSortDeadline)
             {
                 adapterModule = NativeLibrary.Load(adapterPath);
                 Marshal.GetDelegateForFunctionPointer<SetProductCompareTraceEnabled>(
@@ -119,6 +121,33 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             {
                 WindowStyle = unchecked((int)0x80000000), Width = 960, Height = 640
             });
+            if (forceSortDeadline)
+            {
+                var getView = hostType.GetMethod("GetFolderView2Pointer", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                var nativeSource = hostType.GetNestedType("NativeViewStateSource", BindingFlags.NonPublic)!;
+                deadlineStall = new DispatcherTimer(DispatcherPriority.Send) { Interval = TimeSpan.FromMilliseconds(10) };
+                deadlineStall.Tick += (_, _) =>
+                {
+                    var view = (nint)getView.Invoke(hosts[0], null)!;
+                    if (view == 0) return;
+                    try
+                    {
+                        var reader = Activator.CreateInstance(nativeSource, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                            null, [view], null)!;
+                        object?[] arguments = [1, null];
+                        var result = (int)nativeSource.GetMethod("GetSortColumns")!.Invoke(reader, arguments)!;
+                        if (result < 0 || arguments[1] is not System.Collections.IEnumerable columns) return;
+                        var column = columns.Cast<object>().FirstOrDefault();
+                        if (column is null || (int)column.GetType().GetProperty("Direction")!.GetValue(column)! != -1) return;
+                        if (!ExpireSortReadinessClockForProbe()) return;
+                        deadlineStall.Stop();
+                        deadlineStalled = true;
+                        Console.WriteLine("profile-owner-sort-deadline: observed-temporary-descending; injected-readiness-elapsed-ms=31000; dispatcher-not-blocked=True");
+                    }
+                    finally { Marshal.Release(view); }
+                };
+                deadlineStall.Start();
+            }
             Console.WriteLine("profile-owner-multi-root-shell-host: stage=attach-root-visual");
             source.RootVisual = grid;
             grid.Measure(new Size(960, 640));
@@ -197,7 +226,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                         paneValues[index] = (string[])readValues.Invoke(null, [hostType, host, expectedItemCount])!;
                         return paneValues[index].Select(value => ulong.TryParse(value, out var bytes) ? bytes : ulong.MaxValue)
                             .SequenceEqual(expectedOrder);
-                    }, TimeSpan.FromSeconds(75), $"Product pane {index + 1} did not restore its independent saved recursive-size sort.",
+                    }, TimeSpan.FromSeconds(forceSortDeadline ? 5 : 75), $"Product pane {index + 1} did not restore its independent saved recursive-size sort.",
                         pollMilliseconds: 100);
                     paneSortReadyMilliseconds[index] = sortReadyClock.ElapsedMilliseconds;
                     var nativeRows = readNativeRows.Invoke(null, [viewWindow])!;
@@ -256,7 +285,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                             .Select(row => row[1]).SequenceEqual(expected), TimeSpan.FromSeconds(8),
                         $"Product pane {index + 1} has size properties but blank/incorrect displayed folder cells.");
                 }
-                Console.WriteLine("profile-owner-multi-root-shell-host: actual-folder-size-cells=PASS (all four product HwndHosts).");
+                Console.WriteLine($"profile-owner-multi-root-shell-host: actual-folder-size-cells=PASS ({hosts.Count} product HwndHosts).");
 
                 var filterType = appAssembly.GetType("ExplorerDirs.App.QuickFilterSettings", true)!;
                 var keyType = appAssembly.GetType("ExplorerDirs.App.PropertyKeyState", true)!;
@@ -337,6 +366,10 @@ internal static class ProfileOwnerMultiRootShellHostProbe
 
             if (GetForegroundWindow() != foreground)
                 throw new InvalidOperationException("The product panes changed the foreground window.");
+            if (forceSortDeadline && !deadlineStalled)
+                throw new InvalidOperationException("Deadline control did not observe/expire the temporary sort; result is inconclusive.");
+            if (forceSortDeadline)
+                Console.WriteLine("profile-owner-sort-deadline: PASS (real temporary descending, injected 31-second readiness clock, saved ascending and native row order restored).");
             var valueEdges = paneValues.Select(values => $"{values.Length}:{values[0]}..{values[^1]}");
             var cacheMetrics = adapterModule == 0 ? "diagnostic-counters=unavailable" : ReadCacheMetrics(adapterModule);
             Console.WriteLine("profile-owner-multi-root-shell-host: warm-size-read-ms=[" + string.Join('|',
@@ -346,6 +379,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
         }
         finally
         {
+            deadlineStall?.Stop();
             Console.WriteLine("profile-owner-multi-root-shell-host: stage=cleanup");
             if (source is not null)
             {
@@ -422,6 +456,35 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             if (File.Exists(path)) return path;
         }
         throw new FileNotFoundException("Build the diagnostic-only product Shell namespace adapter before this probe.");
+    }
+
+    private static bool ExpireSortReadinessClockForProbe()
+    {
+        // Test only: expire the captured clock, not the UI thread. Sleeping the STA can
+        // time out unrelated Shell work and does not isolate the product deadline branch.
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
+        foreach (var field in typeof(Dispatcher).GetFields(flags))
+        {
+            if (field.GetValue(Dispatcher.CurrentDispatcher) is not System.Collections.IEnumerable timers) continue;
+            foreach (var timer in timers.OfType<DispatcherTimer>().ToArray())
+            foreach (var timerField in typeof(DispatcherTimer).GetFields(flags))
+            {
+                if (timerField.GetValue(timer) is not Delegate callbacks) continue;
+                foreach (var callback in callbacks.GetInvocationList())
+                {
+                    var closure = callback.Target;
+                    if (closure is null) continue;
+                    var closureType = closure.GetType();
+                    if (closureType.GetField("readinessWait", flags)?.GetValue(closure) is not Stopwatch clock ||
+                        closureType.GetField("oppositeApplied", flags)?.GetValue(closure) is not true || !clock.IsRunning) continue;
+                    var start = typeof(Stopwatch).GetField("_startTimeStamp", flags)
+                        ?? throw new InvalidOperationException("This runtime does not expose the probe's expected Stopwatch field.");
+                    start.SetValue(clock, Stopwatch.GetTimestamp() - 31 * Stopwatch.Frequency);
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static string ReadCacheMetrics(nint module)
