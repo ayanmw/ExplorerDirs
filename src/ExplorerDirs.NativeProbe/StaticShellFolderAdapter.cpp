@@ -262,7 +262,7 @@ namespace
     }
 
     void RecordProductCompareDiagnostic(LPARAM column, PCWSTR leftName, ULONGLONG leftSize,
-        PCWSTR rightName, ULONGLONG rightSize, short comparison)
+        PCWSTR rightName, ULONGLONG rightSize, short comparison, bool categoryOnly = false, const void* instance = nullptr)
     {
         if (!InterlockedCompareExchange(&g_productCompareTraceEnabled, 0, 0)) return;
         std::lock_guard<std::mutex> lock(g_productCompareDiagnosticMutex);
@@ -270,7 +270,7 @@ namespace
         g_productCompareDiagnostics.push_back(L"column=" + std::to_wstring(LOWORD(column)) +
             L";left=" + (leftName ? leftName : L"<null>") + L";left-bytes=" + std::to_wstring(leftSize) +
             L";right=" + (rightName ? rightName : L"<null>") + L";right-bytes=" + std::to_wstring(rightSize) +
-            L";result=" + std::to_wstring(comparison));
+            L";result=" + std::to_wstring(comparison) + L";category-only=" + std::to_wstring(categoryOnly) + L";instance=" + std::to_wstring(reinterpret_cast<UINT_PTR>(instance)));
     }
 #endif
     // This adapter is loaded only by the opt-in NativeProbe. It forwards normal
@@ -3142,7 +3142,18 @@ namespace
         ULONG _index;
     };
 
+#if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
+    // Per-view capability: a process-global flag would couple tabs visiting the same path.
+    struct __declspec(uuid("37A49964-E858-4A39-A411-D552E136921B")) IExplorerDirsSizeSortPolicy : public IUnknown
+    {
+        virtual HRESULT STDMETHODCALLTYPE SetMixedSizeSort(BOOL mixed) = 0;
+    };
+
+#endif
     class SyntheticSortFolder final : public IShellFolder2, public IPersistFolder2, public IShellFolderViewCB
+#if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
+        , public IExplorerDirsSizeSortPolicy
+#endif
     {
     public:
         explicit SyntheticSortFolder(SyntheticRecursiveSizeSnapshotStore* recursiveSizeStore = nullptr,
@@ -3164,6 +3175,10 @@ namespace
                 *value = static_cast<IPersistFolder2*>(this);
             else if (iid == IID_IShellFolderViewCB)
                 *value = static_cast<IShellFolderViewCB*>(this);
+#if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
+            else if (iid == __uuidof(IExplorerDirsSizeSortPolicy))
+                *value = static_cast<IExplorerDirsSizeSortPolicy*>(this);
+#endif
             else return E_NOINTERFACE;
             AddRef();
             return S_OK;
@@ -3175,6 +3190,33 @@ namespace
             if (!references) delete this;
             return references;
         }
+#if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
+        HRESULT STDMETHODCALLTYPE SetMixedSizeSort(BOOL mixed) override
+        {
+            InterlockedExchange(&_mixedSizeSort, mixed ? 1 : 0);
+#if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
+            RecordProductCompareDiagnostic(0xFFFF, L"<set-policy>", mixed ? 1 : 0, L"", 0, 0, false, this);
+#endif
+            return S_OK;
+        }
+
+        int CurrentSizeSortDirection() const
+        {
+            if (!_shellView) return 1;
+            IFolderView2* view = nullptr;
+            if (FAILED(_shellView->QueryInterface(IID_PPV_ARGS(&view)))) return 1;
+            SORTCOLUMN columns[16]{};
+            int count = 0, direction = 1;
+            if (SUCCEEDED(view->GetSortColumnCount(&count)) && count > 0 && count <= ARRAYSIZE(columns) &&
+                SUCCEEDED(view->GetSortColumns(columns, count)))
+                for (int index = 0; index < count; ++index)
+                    if (columns[index].propkey == kSizeKey || columns[index].propkey == kSyntheticRecursiveSizeKey)
+                    { direction = columns[index].direction == SORT_DESCENDING ? -1 : 1; break; }
+            view->Release();
+            return direction;
+        }
+
+#endif
         HRESULT SetRecursiveSizeSnapshotForProbe(PCUITEMID_CHILD item, PCWSTR parsingName,
             const SyntheticFileIdentity& expectedIdentity, ULONGLONG bytes, ULONGLONG files = 0,
             ULONGLONG folders = 0, ULONGLONG unreadable = 0)
@@ -3895,6 +3937,20 @@ namespace
                 if (sampleCompareDuration) QueryPerformanceCounter(&compareStart);
 #endif
                 if (!g_syntheticSizeMetricsObservation) ED_PROBE_METRIC_INCREMENT(g_syntheticSizeCompareCount);
+#if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
+                const bool leftFolder = (leftChild->attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+                const bool rightFolder = (rightChild->attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+                if (!InterlockedCompareExchange(&_mixedSizeSort, 0, 0) && leftFolder != rightFolder)
+                {
+                    // Shell reverses CompareIDs for descending; compensate only the category
+                    // boundary so folders remain first while each category follows the requested direction.
+                    comparison = static_cast<short>((leftFolder ? -1 : 1) * CurrentSizeSortDirection());
+#if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
+                    RecordProductCompareDiagnostic(column, leftChild->name, 0, rightChild->name, 0, comparison, true, this);
+#endif
+                    break;
+                }
+#endif
                 const bool ignoreFolderSize =
                     InterlockedCompareExchange(&g_syntheticIgnoreRecursiveFolderSizeSortForProbe, 0, 0) != 0;
                 // Q-Dir exposes an option to ignore recursive folder sizes for sorting while keeping them displayable.
@@ -3922,7 +3978,7 @@ namespace
 #endif
                 comparison = leftSize < rightSize ? -1 : leftSize > rightSize ? 1 : 0;
 #if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
-                RecordProductCompareDiagnostic(column, leftChild->name, leftSize, rightChild->name, rightSize, comparison);
+                RecordProductCompareDiagnostic(column, leftChild->name, leftSize, rightChild->name, rightSize, comparison, false, this);
 #endif
                 break;
             }
@@ -4242,6 +4298,10 @@ namespace
                 InterlockedCompareExchange(&g_syntheticRelativePercentColumnTypeForProbe, 0, 0));
             *state = SHCOLSTATE_ONBYDEFAULT | (column == 1 ? SHCOLSTATE_TYPE_INT :
                 column == 3 ? relativePercentType : SHCOLSTATE_TYPE_STR);
+#if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
+            // Keep Shell from applying an independent folder partition before our size policy.
+            if (column == 1) *state |= SHCOLSTATE_NOSORTBYFOLDERNESS;
+#endif
             if (column == 1 && InterlockedCompareExchange(&g_syntheticCustomSizeColumnForProbe, 0, 0) &&
                 InterlockedCompareExchange(&g_syntheticSlowCustomSizeColumnForProbe, 0, 0))
                 *state |= SHCOLSTATE_SLOW;
@@ -5986,6 +6046,9 @@ namespace
 #endif
         PIDLIST_ABSOLUTE _backingRoot = nullptr;
         IShellView* _shellView = nullptr;
+#if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
+        volatile LONG _mixedSizeSort = 1; // Legacy until the host applies its per-tab default-off setting.
+#endif
         std::wstring _backingPath;
         IShellFolder2* _inner = nullptr;
         SyntheticRecursiveSizeSnapshotStore* _recursiveSizeStore = nullptr;

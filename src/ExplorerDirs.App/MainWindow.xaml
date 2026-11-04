@@ -60,8 +60,6 @@
             </MenuItem>
             <MenuItem x:Name="ViewMenu" Header="视图(_V)" SubmenuOpened="ViewMenu_SubmenuOpened">
                 <MenuItem x:Name="CurrentViewMenu" Header="当前标签查看方式"/>
-                <MenuItem x:Name="ShowFolderSizesMenu" Header="显示文件夹大小" IsCheckable="True"
-                          ToolTip="异步显示文件夹汇总大小；数据来源在工具选项中设置。" Click="ShowFolderSizes_Click"/>
                 <MenuItem x:Name="MouseWheelFocusMenu" Header="鼠标悬停滚轮" IsCheckable="True"
                           ToolTip="启用后，普通滚轮由鼠标所在的 Shell 文件视图或目录树处理。Ctrl+滚轮仍切换查看方式。"
                           Click="MouseWheelFocus_Click"/>
@@ -165,10 +163,14 @@
                         </MenuItem>
                     </MenuItem>
                     <MenuItem x:Name="DefaultViewMenu" Header="新建标签默认查看"/>
-                    <MenuItem Header="文件夹大小来源">
-                        <MenuItem x:Name="FolderSizeAutoMenu" Header="自动（Everything 优先，内置扫描后备）" IsCheckable="True" Tag="Auto" Click="FolderSizeSource_Click"/>
-                        <MenuItem x:Name="FolderSizeEverythingMenu" Header="Everything（不可用时不扫描）" IsCheckable="True" Tag="Everything" Click="FolderSizeSource_Click"/>
-                        <MenuItem x:Name="FolderSizeBuiltInMenu" Header="内置后台扫描" IsCheckable="True" Tag="BuiltIn" Click="FolderSizeSource_Click"/>
+                    <MenuItem Header="文件夹">
+                        <MenuItem x:Name="ShowFolderSizesMenu" Header="显示文件夹大小" IsCheckable="True"
+                                  ToolTip="异步显示文件夹汇总大小。" Click="ShowFolderSizes_Click"/>
+                        <MenuItem Header="文件夹大小来源">
+                            <MenuItem x:Name="FolderSizeAutoMenu" Header="自动（Everything 优先，内置扫描后备）" IsCheckable="True" Tag="Auto" Click="FolderSizeSource_Click"/>
+                            <MenuItem x:Name="FolderSizeEverythingMenu" Header="Everything（不可用时不扫描）" IsCheckable="True" Tag="Everything" Click="FolderSizeSource_Click"/>
+                            <MenuItem x:Name="FolderSizeBuiltInMenu" Header="内置后台扫描" IsCheckable="True" Tag="BuiltIn" Click="FolderSizeSource_Click"/>
+                        </MenuItem>
                     </MenuItem>
                     <MenuItem Header="地址栏样式">
                         <MenuItem x:Name="ClassicAddressBarMenu" Header="经典（完整路径）"

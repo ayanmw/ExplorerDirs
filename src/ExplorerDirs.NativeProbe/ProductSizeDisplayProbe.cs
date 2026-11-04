@@ -1,3 +1,4 @@
+using System.Text;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using ExplorerDirs.App;
@@ -7,7 +8,7 @@ public static partial class SyntheticShellSortProbe
 {
     private static readonly List<StreamViewHost> ProductDisplayProcessLifetimeHosts = [];
     internal static int RunProductSizeDisplay(string adapterPath, bool explorerBrowser = false, bool rootControl = false,
-        FolderSizeSource source = FolderSizeSource.BuiltIn)
+        FolderSizeSource source = FolderSizeSource.BuiltIn, bool sortPolicyExperiment = false)
     {
         var fixture = Path.Combine(Path.GetTempPath(), "ExplorerDirs-ProductSizeDisplay-" + Guid.NewGuid().ToString("N"));
         nint root = 0, folder = 0, view = 0, parent = 0, browserPointer = 0, folderView = 0;
@@ -132,6 +133,74 @@ public static partial class SyntheticShellSortProbe
             sortedNames = ReadColumnTextsForRows(listView, 0, 4);
             if (Array.IndexOf(sortedNames, "folder-12288") >= Array.IndexOf(sortedNames, "folder-25600"))
                 throw new InvalidOperationException("The displayed folder totals did not retain numeric descending sorting.");
+            if (sortPolicyExperiment)
+            {
+                var sortPolicyId = new Guid("37A49964-E858-4A39-A411-D552E136921B");
+                nint policyFolder = 0, sortPolicy = 0;
+                try
+                {
+                    Check(At<GetSizePolicyFolder>(folderView, 5)(folderView, in ShellFolder2Id, out policyFolder));
+                    Check(Marshal.QueryInterface(policyFolder, in sortPolicyId, out sortPolicy));
+                    foreach (var mixed in new[] { false, true, false })
+                    foreach (var direction in new[] { 1, -1 })
+                    {
+                        Check(At<SetSizePolicy>(sortPolicy, 3)(sortPolicy, mixed ? 1 : 0));
+                        var beforeNames = ReadColumnTextsForRows(listView, 0, 4);
+                        Check(At<GetSizePolicyItem>(folderView, 6)(folderView, Array.IndexOf(beforeNames, "folder-empty"), out var emptyItem));
+                        Check(At<GetSizePolicyItem>(folderView, 6)(folderView, Array.IndexOf(beforeNames, "file-2048.bin"), out var fileItem));
+                        try
+                        {
+                            var direct = At<CompareSizePolicyItems>(policyFolder, 7)(policyFolder, 1, emptyItem, fileItem);
+                            Console.WriteLine($"product-size-sort-policy-direct: mixed={mixed}; requested-direction={direction}; empty-vs-file={(short)direct}");
+                        }
+                        finally { Marshal.FreeCoTaskMem(emptyItem); Marshal.FreeCoTaskMem(fileItem); }
+                        GetSizePolicyCount? comparisonCount = NativeLibrary.TryGetExport(diagnosticModule, "GetProductRecursiveCompareCount", out var compareAddress)
+                            ? Marshal.GetDelegateForFunctionPointer<GetSizePolicyCount>(compareAddress) : null;
+                        var beforeComparisons = comparisonCount?.Invoke() ?? -1;
+                        Check(target.SetSorting([new(new PropertyKeyState(SizeFormatId, 12), direction)]));
+                        var contextId = new Guid("000214E4-0000-0000-C000-000000000046");
+                        Check(At<GetSizePolicyMenu>(view, 15)(view, 0, in contextId, out var contextPointer));
+                        object context;
+                        try { context = Marshal.GetObjectForIUnknown(contextPointer); }
+                        finally { Marshal.Release(contextPointer); }
+                        using (var command = new NativeShellCommandMenu(context, parent))
+                        {
+                            var result = command.InvokeCanonicalVerb(direction > 0 ? "sortascending" : "sortdescending");
+                            if (result is null) throw new InvalidOperationException("Native size-sort direction verb is unavailable.");
+                            Check(result.Value);
+                        }
+                        var expected = mixed
+                            ? direction > 0 ? new[] { "folder-empty", "file-2048.bin", "folder-25600", "folder-12288" }
+                                : new[] { "folder-12288", "folder-25600", "file-2048.bin", "folder-empty" }
+                            : direction > 0 ? new[] { "folder-empty", "folder-25600", "folder-12288", "file-2048.bin" }
+                                : new[] { "folder-12288", "folder-25600", "folder-empty", "file-2048.bin" };
+                        var clock = System.Diagnostics.Stopwatch.StartNew();
+                        do { Pump(20); sortedNames = ReadColumnTextsForRows(listView, 0, 4); }
+                        while (!sortedNames.SequenceEqual(expected) && clock.Elapsed < TimeSpan.FromSeconds(3));
+                        Console.WriteLine($"product-size-sort-policy: mixed={mixed}; direction={direction}; compare-delta={(comparisonCount?.Invoke() ?? -1) - beforeComparisons}; names=[{string.Join('|', sortedNames)}]");
+                        if (!sortedNames.SequenceEqual(expected))
+                        {
+                            if (NativeLibrary.TryGetExport(diagnosticModule, "GetProductCompareDiagnosticCount", out var countAddress) &&
+                                NativeLibrary.TryGetExport(diagnosticModule, "GetProductCompareDiagnostic", out var diagnosticAddress))
+                            {
+                                var count = Marshal.GetDelegateForFunctionPointer<GetCounter>(countAddress)();
+                                var read = Marshal.GetDelegateForFunctionPointer<GetSizePolicyDiagnostic>(diagnosticAddress);
+                                for (var index = Math.Max(0, count - 16); index < count; index++)
+                                {
+                                    var text = new StringBuilder(4096); Check(read(index, text, (uint)text.Capacity));
+                                    Console.WriteLine("product-size-sort-policy-compare: " + text);
+                                }
+                            }
+                            throw new InvalidOperationException("Folder/file size order disagrees with the selected mixed/separate policy.");
+                        }
+                    }
+                }
+                finally
+                {
+                    if (sortPolicy != 0) Marshal.Release(sortPolicy);
+                    if (policyFolder != 0) Marshal.Release(policyFolder);
+                }
+            }
             owner.SetFolderSizeSource(source, false);
             sizeEnabled = false;
             Check(At<RefreshView>(view, 8)(view));
@@ -365,4 +434,17 @@ public static partial class SyntheticShellSortProbe
     private delegate int DestroyDisplayBrowser(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int GetDisplayFolderFlags(nint self, out uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int GetSizePolicyFolder(nint self, in Guid iid, out nint folder);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int SetSizePolicy(nint self, int mixed);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int GetSizePolicyMenu(nint self, uint flags, in Guid iid, out nint context);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSizePolicyItem(nint self, int index, out nint item);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CompareSizePolicyItems(nint self, nint column, nint left, nint right);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate long GetSizePolicyCount();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSizePolicyDiagnostic(int index, [MarshalAs(UnmanagedType.LPWStr)] StringBuilder text, uint capacity);
+
+
+
 }
