@@ -52,8 +52,11 @@ internal static class PrivateDesktopShellProbe
         ExplorerDirs.App.FolderSizeSource source = ExplorerDirs.App.FolderSizeSource.BuiltIn, bool sortPolicyExperiment = false, bool? encodedSortPolicy = null, bool columnStateSortPolicy = false, int encodedSortDirection = 1, bool dynamicSortPolicy = false, bool nativeSortEntrypoints = false, uint nativeSortMode = 4, bool shellFolderPartition = false, bool reconcileSortCommands = false) => Run("product-size-display",
         () => SyntheticShellSortProbe.RunProductSizeDisplay(adapterPath, explorerBrowser, rootControl, source, sortPolicyExperiment, encodedSortPolicy, columnStateSortPolicy, encodedSortDirection, dynamicSortPolicy, nativeSortEntrypoints, nativeSortMode, shellFolderPartition, reconcileSortCommands), TimeSpan.FromSeconds(30), initializeOle: true);
 
-    internal static int RunProductPersistedSortHost(string hostProbePath, string adapterPath, string sessionPath, bool read, bool unavailable = false) => Run("product-persisted-sort-host",
-        () => ProductFourPaneHostProbe.Run(hostProbePath, sortContextAdapter: adapterPath, persistedSessionPath: sessionPath, readPersistedSession: read, unavailableSizes: unavailable), TimeSpan.FromSeconds(90), initializeOle: true);
+    internal static int RunProductGroupedLargeHost(string hostProbePath, string adapterPath) => Run("product-grouped-large-host",
+        () => ProductFourPaneHostProbe.Run(hostProbePath, sortContextAdapter: adapterPath, initialSizeGrouping: true), TimeSpan.FromSeconds(180), initializeOle: true);
+
+    internal static int RunProductPersistedSortHost(string hostProbePath, string adapterPath, string sessionPath, bool read, bool unavailable = false, bool holdUnavailable = false) => Run("product-persisted-sort-host",
+        () => ProductFourPaneHostProbe.Run(hostProbePath, sortContextAdapter: adapterPath, persistedSessionPath: sessionPath, readPersistedSession: read, unavailableSizes: unavailable, holdUnavailable: holdUnavailable), TimeSpan.FromSeconds(90), initializeOle: true);
 
     internal static int RunProductSortRetryHost(string hostProbePath, string adapterPath) => Run("product-sort-retry-host",
         () => ProductFourPaneHostProbe.Run(hostProbePath, sortContextAdapter: adapterPath, retrySort: true), TimeSpan.FromSeconds(90), initializeOle: true);
@@ -73,8 +76,8 @@ internal static class PrivateDesktopShellProbe
     internal static int RunProductSortContextHost(string hostProbePath, string adapterPath) => Run("product-sort-context-host",
         () => ProductFourPaneHostProbe.Run(hostProbePath, sortContextAdapter: adapterPath), TimeSpan.FromSeconds(90), initializeOle: true);
 
-    internal static int RunProductFourPaneHost(string hostProbePath, bool large = false, bool observeNotifications = true, bool forceSortDeadline = false) => Run("product-four-pane-host",
-        () => ProductFourPaneHostProbe.Run(hostProbePath, large, observeNotifications, forceSortDeadline), TimeSpan.FromSeconds(large ? 180 : forceSortDeadline ? 90 : 60), initializeOle: true);
+    internal static int RunProductFourPaneHost(string hostProbePath, bool large = false, bool observeNotifications = true, bool forceSortDeadline = false, bool initialSizeGrouping = false) => Run("product-four-pane-host",
+        () => ProductFourPaneHostProbe.Run(hostProbePath, large, observeNotifications, forceSortDeadline, initialSizeGrouping: initialSizeGrouping), TimeSpan.FromSeconds(large ? 180 : forceSortDeadline ? 90 : 60), initializeOle: true);
 
     internal static int RunHostMenuCommands() => Run("host-menu-commands", ShellViewHostFilterProbe.RunMenuCommandsForPrivateDesktop);
 

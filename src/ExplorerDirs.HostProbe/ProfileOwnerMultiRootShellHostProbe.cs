@@ -24,6 +24,9 @@ internal static class ProfileOwnerMultiRootShellHostProbe
     private static string? _persistedSessionPath;
     private static bool _readPersistedSession;
     private static bool _unavailableSizes;
+    private static bool _holdUnavailable;
+    private static readonly System.Threading.ManualResetEventSlim UnknownRelease = new(true);
+    private static int _pendingUnknownQueries;
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int ConfigureUnavailableProvider(nint query, nint invalidate, [MarshalAs(UnmanagedType.Bool)] bool enabled);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
@@ -31,15 +34,24 @@ internal static class ProfileOwnerMultiRootShellHostProbe
         out ulong bytes, out ulong files, out ulong folders, out ulong unreadable, out uint flags);
     private static int QueryUnavailable(string path, nint cancelled, out ulong bytes, out ulong files,
         out ulong folders, out ulong unreadable, out uint flags)
-    { bytes = files = folders = unreadable = 0; flags = 0; return 0; }
+    {
+        bytes = files = folders = unreadable = 0; flags = 0;
+        Interlocked.Increment(ref _pendingUnknownQueries);
+        while (!UnknownRelease.Wait(10))
+            if (cancelled != 0 && Marshal.ReadInt32(cancelled) != 0) return unchecked((int)0x800704C7);
+        return 0;
+    }
 
-    internal static int RunPersistedSortForProbe(string adapterPath, string sessionPath, bool read, bool unavailable)
+    internal static int RunPersistedSortForProbe(string adapterPath, string sessionPath, bool read, bool unavailable, bool holdUnavailable)
     {
         _persistedSessionPath = Path.GetFullPath(sessionPath);
         _readPersistedSession = read;
         _unavailableSizes = unavailable;
+        _holdUnavailable = holdUnavailable;
+        _pendingUnknownQueries = 0;
+        if (holdUnavailable) UnknownRelease.Reset(); else UnknownRelease.Set();
         try { return RunWithSortContextForProbe(adapterPath); }
-        finally { _persistedSessionPath = null; _readPersistedSession = false; _unavailableSizes = false; }
+        finally { _persistedSessionPath = null; _readPersistedSession = false; _unavailableSizes = false; _holdUnavailable = false; UnknownRelease.Set(); }
     }
 
     private static bool _inputDuringSort;
@@ -103,11 +115,18 @@ internal static class ProfileOwnerMultiRootShellHostProbe
         finally { _sortContextAdapter = null; }
     }
 
+    internal static int RunGroupedLargeForProbe(string adapterPath)
+    {
+        _sortContextAdapter = Path.GetFullPath(adapterPath);
+        try { return Run(folderCount: 1025, diagnosticAdapter: false, initialSizeGrouping: true); }
+        finally { _sortContextAdapter = null; }
+    }
+
     internal static object CreateViewStateForProbe(Assembly appAssembly) => CreateViewState(appAssembly, 0);
     internal static string FindProductAdapterForProbe() => FindProductAdapter();
 
     internal static int Run(bool large = false, int folderCount = 0, bool diagnosticAdapter = true,
-        int cacheCapacity = 8192, bool captureNotificationIdentities = false, bool forceSortDeadline = false)
+        int cacheCapacity = 8192, bool captureNotificationIdentities = false, bool forceSortDeadline = false, bool initialSizeGrouping = false)
     {
         var root = Path.Combine(Path.GetTempPath(), "ExplorerDirs-ProfileOwnerMultiRoot-" + Guid.NewGuid().ToString("N"));
         var profile = Path.Combine(root, "profile");
@@ -216,6 +235,13 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 var identity = (string)codec.GetMethod("ToProviderIdentity", BindingFlags.Static | BindingFlags.NonPublic)!
                     .Invoke(null, [folders[index], classId])!;
                 var viewState = CreateViewState(appAssembly, index % 2 == 0 ? 1 : -1);
+                if (initialSizeGrouping)
+                {
+                    var keyType = appAssembly.GetType("ExplorerDirs.App.PropertyKeyState", true)!;
+                    var sizeKey = Activator.CreateInstance(keyType, [new Guid("b725f130-47ef-101a-a5f1-02608c9eebac"), 12u]);
+                    viewState.GetType().GetProperty("GroupKey")!.SetValue(viewState, sizeKey);
+                }
+
                 if (_persistedSessionPath is not null)
                 {
                     if (_readPersistedSession)
@@ -282,7 +308,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 };
                 deadlineStall.Start();
             }
-            if (_sortContextAdapter is not null && !_readPersistedSession)
+            if (_sortContextAdapter is not null && !_readPersistedSession && !initialSizeGrouping)
             {
                 transientCaptureTimer = new DispatcherTimer(DispatcherPriority.Send) { Interval = TimeSpan.FromMilliseconds(10) };
                 transientCaptureTimer.Tick += (_, _) =>
@@ -451,6 +477,25 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             if (_unavailableSizes)
             {
                 var firstWindow = (nint)hostViewWindow.GetValue(hosts[0])!;
+                if (_holdUnavailable)
+                {
+                    WaitUntil(() => Volatile.Read(ref _pendingUnknownQueries) > 0, TimeSpan.FromSeconds(5), "Pending provider callback did not start.");
+                    var pendingView = (nint)hostType.GetMethod("GetFolderView2Pointer", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(hosts[0], null)!;
+                    try
+                    {
+                        var reader = appAssembly.GetType("ExplorerDirs.App.ShellSizeSortOrder", true)!.GetMethod("AreValuesReadyAsync", BindingFlags.Static | BindingFlags.NonPublic)!;
+                        var task = (System.Threading.Tasks.Task<bool?>)reader.Invoke(null, [pendingView, 2, new Func<bool>(() => true), true])!;
+                        WaitUntil(() => task.IsCompleted, TimeSpan.FromSeconds(5), "Pending readiness read blocked on provider work.");
+                        if (task.GetAwaiter().GetResult() is not null)
+                            throw new InvalidOperationException("Pending provider values were treated as completed unknown values.");
+                        var recovery = (string)hostType.GetProperty("InitialSortRecoveryStatus", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(hosts[0])!;
+                        if (recovery.Contains("grouped-values-ready-refresh", StringComparison.Ordinal))
+                            throw new InvalidOperationException("Grouped refresh started before pending queries completed.");
+                    }
+                    finally { if (pendingView != 0) Marshal.Release(pendingView); }
+                    Console.WriteLine("product-pending-size-readiness: callbacks-held=True; nonblocking=True; pending-not-terminal=True; no-premature-refresh=True");
+                    UnknownRelease.Set();
+                }
                 var unknownGroupWait = Stopwatch.StartNew();
                 WaitUntil(() => ShellProviderLocationProbe.IsNativeGroupingEnabled(firstWindow),
                     TimeSpan.FromSeconds(5), "Confirmed unavailable size values did not materialize grouping promptly.");
@@ -530,32 +575,37 @@ internal static class ProfileOwnerMultiRootShellHostProbe
 
             if (_sortContextAdapter is not null)
             {
-                if (!_readPersistedSession) WaitUntil(() => transientCaptureObserved || transientCaptureFailure is not null,
+                if (!_readPersistedSession && !initialSizeGrouping) WaitUntil(() => transientCaptureObserved || transientCaptureFailure is not null,
                     TimeSpan.FromSeconds(15), "Did not observe the real temporary sort capture boundary.");
                 if (transientCaptureFailure is not null) throw new InvalidOperationException("Temporary sort capture control failed.", transientCaptureFailure);
                 var contextField = hostType.GetField("_folderSizeSortContext", BindingFlags.Instance | BindingFlags.NonPublic)!;
                 foreach (var host in hosts)
                     sortContexts.Add(contextField.GetValue(host) ?? throw new InvalidOperationException("Host did not create its sort context."));
                 if (sortContexts.Distinct().Count() != hosts.Count) throw new InvalidOperationException("Hosts shared sort contexts.");
-                var first = hosts[0];
-                void WaitForPath(string path, ulong[] expected)
+                // Keep startup measurement free of pre-observation history navigation.
+                // Dedicated context/persisted-host cases retain the history regression.
+                if (!initialSizeGrouping)
                 {
-                    WaitUntil(() => string.Equals((string)hostType.GetProperty("CurrentPath")!.GetValue(first)!, path, StringComparison.OrdinalIgnoreCase),
-                        TimeSpan.FromSeconds(15), "Context navigation did not settle its physical path.");
-                    WaitUntil(() => ((string[])readValues.Invoke(null, [hostType, first, expectedItemCount])!)
-                        .Select(value => ulong.TryParse(value, out var bytes) ? bytes : ulong.MaxValue).Order().SequenceEqual(expected),
-                        TimeSpan.FromSeconds(15), "Context navigation did not restore this directory's values.");
-                    if (!ReferenceEquals(contextField.GetValue(first), sortContexts[0])) throw new InvalidOperationException("Navigation replaced the tab context.");
+                    var first = hosts[0];
+                    void WaitForPath(string path, ulong[] expected)
+                    {
+                        WaitUntil(() => string.Equals((string)hostType.GetProperty("CurrentPath")!.GetValue(first)!, path, StringComparison.OrdinalIgnoreCase),
+                            TimeSpan.FromSeconds(15), "Context navigation did not settle its physical path.");
+                        WaitUntil(() => ((string[])readValues.Invoke(null, [hostType, first, expectedItemCount])!)
+                            .Select(value => ulong.TryParse(value, out var bytes) ? bytes : ulong.MaxValue).Order().SequenceEqual(expected),
+                            TimeSpan.FromSeconds(15), "Context navigation did not restore this directory's values.");
+                        if (!ReferenceEquals(contextField.GetValue(first), sortContexts[0])) throw new InvalidOperationException("Navigation replaced the tab context.");
+                    }
+                    hostType.GetMethod("Navigate")!.Invoke(first, [folders[1]]);
+                    WaitForPath(folders[1], expectedSizes[1]);
+                    if (!(bool)hostType.GetMethod("GoBack")!.Invoke(first, null)!) throw new InvalidOperationException("Context history back failed.");
+                    WaitForPath(folders[0], expectedSizes[0]);
+                    if (!(bool)hostType.GetMethod("GoForward")!.Invoke(first, null)!) throw new InvalidOperationException("Context history forward failed.");
+                    WaitForPath(folders[1], expectedSizes[1]);
+                    if (!(bool)hostType.GetMethod("GoBack")!.Invoke(first, null)!) throw new InvalidOperationException("Context history return failed.");
+                    WaitForPath(folders[0], expectedSizes[0]);
+                    Console.WriteLine("product-sort-context-navigation: independent-four-contexts=True; cross-directory-reuse=True; back-forward=True; stable-physical-path=True");
                 }
-                hostType.GetMethod("Navigate")!.Invoke(first, [folders[1]]);
-                WaitForPath(folders[1], expectedSizes[1]);
-                if (!(bool)hostType.GetMethod("GoBack")!.Invoke(first, null)!) throw new InvalidOperationException("Context history back failed.");
-                WaitForPath(folders[0], expectedSizes[0]);
-                if (!(bool)hostType.GetMethod("GoForward")!.Invoke(first, null)!) throw new InvalidOperationException("Context history forward failed.");
-                WaitForPath(folders[1], expectedSizes[1]);
-                if (!(bool)hostType.GetMethod("GoBack")!.Invoke(first, null)!) throw new InvalidOperationException("Context history return failed.");
-                WaitForPath(folders[0], expectedSizes[0]);
-                Console.WriteLine("product-sort-context-navigation: independent-four-contexts=True; cross-directory-reuse=True; back-forward=True; stable-physical-path=True");
             }
 
             var paneValues = new string[hosts.Count][];
@@ -691,6 +741,30 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 finally { if (orderView != 0) Marshal.Release(orderView); }
             }
             Console.WriteLine("product-size-order-verification: correct=True; wrong-direction=False; changed-count=pending; retired=pending");
+
+            if (initialSizeGrouping)
+            {
+                for (var index = 0; index < hosts.Count; index++)
+                {
+                    var host = hosts[index];
+                    var nativeWindow = (nint)hostViewWindow.GetValue(host)!;
+                    WaitUntil(() => ShellProviderLocationProbe.IsNativeGroupingEnabled(nativeWindow),
+                        TimeSpan.FromSeconds(10), "Large grouped startup did not enable native grouping.");
+                    // Product display defaults to Auto units; the independent managed formatter
+                    // supplies expected text while raw-byte and native row-order checks remain above.
+                    var format = appAssembly.GetType("ExplorerDirs.App.ByteSizeFormatter", true)!.GetMethod("Format",
+                        BindingFlags.Static | BindingFlags.NonPublic, null, [typeof(ulong)], null)!;
+                    var expectedText = (index % 2 == 0 ? expectedSizes[index] : expectedSizes[index].Reverse())
+                        .Select(bytes => (string)format.Invoke(null, [bytes])!).ToArray();
+                    WaitUntil(() => ShellProviderLocationProbe.ReadNativeListViewCells(nativeWindow, 3)
+                        .Select(row => row[1]).SequenceEqual(expectedText), TimeSpan.FromSeconds(10),
+                        "Large grouped startup has properties but incorrect native Size cells.");
+                    var captured = hostType.GetMethod("CaptureViewState")!.Invoke(host, null)!;
+                    if (captured.GetType().GetProperty("GroupKey")!.GetValue(captured) is null)
+                        throw new InvalidOperationException("Large grouped startup lost its saved group.");
+                }
+                Console.WriteLine($"product-grouped-large-startup: hosts={hosts.Count}; rows-per-pane={expectedItemCount}; actual-size-order-and-cells=True; native-groups-enabled=True");
+            }
 
             // Keep this targeted case ungrouped; ordinary four-host tests retain grouping coverage.
             if (!large && !_reconcileUserSort)
@@ -1137,6 +1211,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
         }
         finally
         {
+            UnknownRelease.Set(); // Unblock worker callbacks before unregister waits for them.
             if (configureUnavailable is not null) Marshal.ThrowExceptionForHR(configureUnavailable(0, 0, false));
             GC.KeepAlive(unavailableQuery);
             deadlineStall?.Stop();

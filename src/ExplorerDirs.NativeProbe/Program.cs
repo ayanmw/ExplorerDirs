@@ -14,8 +14,12 @@ internal static class Program
     [STAThread]
     static int Main(string[] args)
     {
-        if (args is ["--product-persisted-sort-host-private-desktop", var persistedHost, var persistedAdapter, var persistedPath, var persistedPhase] && persistedPhase is "write" or "read" or "read-unknown")
-            return PrivateDesktopShellProbe.RunProductPersistedSortHost(persistedHost, persistedAdapter, persistedPath, persistedPhase != "write", persistedPhase == "read-unknown");
+        if (args is ["--product-grouped-four-pane-host-large-private-desktop", var groupedRegularHost, var groupedRegularAdapter])
+            return PrivateDesktopShellProbe.RunProductGroupedLargeHost(groupedRegularHost, groupedRegularAdapter);
+        if (args is ["--product-grouped-four-pane-host-large-private-desktop", var groupedLargeHost])
+            return PrivateDesktopShellProbe.RunProductFourPaneHost(groupedLargeHost, large: true, observeNotifications: false, initialSizeGrouping: true);
+        if (args is ["--product-persisted-sort-host-private-desktop", var persistedHost, var persistedAdapter, var persistedPath, var persistedPhase] && persistedPhase is "write" or "read" or "read-unknown" or "read-pending")
+            return PrivateDesktopShellProbe.RunProductPersistedSortHost(persistedHost, persistedAdapter, persistedPath, persistedPhase != "write", persistedPhase is "read-unknown" or "read-pending", persistedPhase == "read-pending");
         if (args is ["--product-notification-capture-smoke", var captureAdapter])
             return ProductNotificationCaptureProbe.Run(captureAdapter);
         if (args.Length == 2 && args[0] == "--inspect-qdr-viewstate")
