@@ -90,6 +90,13 @@ namespace
         if (file == INVALID_HANDLE_VALUE) return;
         DWORD written = 0; WriteFile(file, line, static_cast<DWORD>(count), &written, nullptr); CloseHandle(file);
     }
+    BOOL CALLBACK TraceSizeViewChild(HWND window, LPARAM instance)
+    {
+        WCHAR className[128]{};
+        if (GetClassNameW(window, className, ARRAYSIZE(className)))
+            TraceSizeRequest("view-control", reinterpret_cast<const void*>(instance), className, 0, 0, 0);
+        return TRUE;
+    }
 #else
 #define ED_SIZE_TRACE(...) ((void)0)
 #endif
@@ -3405,6 +3412,10 @@ namespace
             if (message == SFVM_WINDOWCREATED)
             {
                 TraceSyntheticSortStage("synthetic-sort: SFVM_WINDOWCREATED");
+#if defined(EXPLORERDIRS_SIZE_TRACE_EXPERIMENT)
+                TraceSizeViewChild(reinterpret_cast<HWND>(wParam), reinterpret_cast<LPARAM>(this));
+                EnumChildWindows(reinterpret_cast<HWND>(wParam), TraceSizeViewChild, reinterpret_cast<LPARAM>(this));
+#endif
 #if defined(EXPLORERDIRS_NOTIFICATION_BRIDGE_EXPERIMENT)
                 return AttachBackingNotifications(reinterpret_cast<HWND>(wParam));
 #endif
