@@ -21,6 +21,16 @@ internal static class ProfileOwnerMultiRootShellHostProbe
         finally { _retrySortForProbe = false; }
     }
 
+    private static string? _persistedSessionPath;
+    private static bool _readPersistedSession;
+    internal static int RunPersistedSortForProbe(string adapterPath, string sessionPath, bool read)
+    {
+        _persistedSessionPath = Path.GetFullPath(sessionPath);
+        _readPersistedSession = read;
+        try { return RunWithSortContextForProbe(adapterPath); }
+        finally { _persistedSessionPath = null; _readPersistedSession = false; }
+    }
+
     private static bool _inputDuringSort;
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int GetProbeFolder(nint self, in Guid iid, out nint folder);
@@ -106,6 +116,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
         nint adapterModule = 0;
         nint sortPolicyModule = 0, sortPolicyRoot = 0;
         var hosts = new List<HwndHost>();
+        var replayViews = new List<object>();
         var sortContexts = new List<object>();
         DispatcherTimer? deadlineStall = null;
         DispatcherTimer? transientCaptureTimer = null;
@@ -184,6 +195,23 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 var identity = (string)codec.GetMethod("ToProviderIdentity", BindingFlags.Static | BindingFlags.NonPublic)!
                     .Invoke(null, [folders[index], classId])!;
                 var viewState = CreateViewState(appAssembly, index % 2 == 0 ? 1 : -1);
+                if (_persistedSessionPath is not null)
+                {
+                    if (_readPersistedSession)
+                    {
+                        var storeType = appAssembly.GetType("ExplorerDirs.App.SessionStore", true)!;
+                        var reader = Activator.CreateInstance(storeType, [_persistedSessionPath, _persistedSessionPath + ".legacy"])!;
+                        var session = storeType.GetMethod("Load")!.Invoke(reader, null)!;
+                        var pane = ((System.Collections.IEnumerable)session.GetType().GetProperty("Panes")!.GetValue(session)!).Cast<object>().ElementAt(index);
+                        var tab = ((System.Collections.IEnumerable)pane).Cast<object>().Single();
+                        viewState = tab.GetType().GetProperty("View")!.GetValue(tab)!;
+                        replayViews.Add(viewState);
+                    }
+                    else viewState.GetType().GetProperty("MixedSizeSort")!.SetValue(viewState, index % 2 == 0);
+                    if (!Equals(viewState.GetType().GetProperty("MixedSizeSort")!.GetValue(viewState), index % 2 == 0))
+                        throw new InvalidOperationException("Persisted per-pane mixed policy did not reload.");
+                }
+
                 var host = (HwndHost)Activator.CreateInstance(hostType, identity, viewState)!;
                 hostType.GetMethod("EnableInitialSortRecoveryTrace", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(host, null);
                 if (_retrySortForProbe && index == 0)
@@ -233,7 +261,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 };
                 deadlineStall.Start();
             }
-            if (_sortContextAdapter is not null)
+            if (_sortContextAdapter is not null && !_readPersistedSession)
             {
                 transientCaptureTimer = new DispatcherTimer(DispatcherPriority.Send) { Interval = TimeSpan.FromMilliseconds(10) };
                 transientCaptureTimer.Tick += (_, _) =>
@@ -399,9 +427,45 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 }, TimeSpan.FromSeconds(30), $"Product pane {index + 1} did not enumerate its own {expectedItemCount} rows.");
             }
 
+            if (_readPersistedSession)
+            {
+                for (var index = 0; index < hosts.Count; index++)
+                {
+                    var expected = replayViews[index];
+                    var replayWindow = (nint)hostViewWindow.GetValue(hosts[index])!;
+                    string[] replayNames = [];
+                    try
+                    {
+                    WaitUntil(() =>
+                    {
+                        var rows = readNativeRows.Invoke(null, [replayWindow])!;
+                        replayNames = (string[])rows.GetType().GetField("Item2")!.GetValue(rows)!;
+                        return replayNames.SequenceEqual(index % 2 == 0 ? new[] { "folder-small", "folder-large" } : new[] { "folder-large", "folder-small" });
+                    }, TimeSpan.FromSeconds(10), $"Replayed host {index + 1} did not restore actual native size row order.");
+                    }
+                    catch (TimeoutException error)
+                    {
+                        throw new InvalidOperationException($"Persisted native rows: pane={index + 1}; names={string.Join('|', replayNames)}; groups={string.Join('|', ShellProviderLocationProbe.ReadNativeGroupIds(replayWindow))}; saved-group={expected.GetType().GetProperty("GroupKey")!.GetValue(expected)}.", error);
+                    }
+
+                    WaitUntil(() =>
+                    {
+                        var actual = hostType.GetMethod("CaptureViewState")!.Invoke(hosts[index], null)!;
+                        var type = actual.GetType();
+                        return new[] { "Mode", "IconSize", "MixedSizeSort", "GroupKey", "GroupAscending" }
+                            .All(name => Equals(type.GetProperty(name)!.GetValue(actual), type.GetProperty(name)!.GetValue(expected))) &&
+                            ((System.Collections.IEnumerable)type.GetProperty("SortColumns")!.GetValue(actual)!).Cast<object>()
+                                .SequenceEqual(((System.Collections.IEnumerable)type.GetProperty("SortColumns")!.GetValue(expected)!).Cast<object>()) &&
+                            ((System.Collections.IEnumerable)type.GetProperty("DisplayColumns")!.GetValue(actual)!).Cast<object>()
+                                .SequenceEqual(((System.Collections.IEnumerable)type.GetProperty("DisplayColumns")!.GetValue(expected)!).Cast<object>());
+                    }, TimeSpan.FromSeconds(10), $"Replayed host {index + 1} did not restore its persisted view settings.");
+                }
+                Console.WriteLine("product-persisted-view-settings: four-hosts=True; mode-icon-sort-group-mixed-columns=True; native-initial-row-order=True");
+            }
+
             if (_sortContextAdapter is not null)
             {
-                WaitUntil(() => transientCaptureObserved || transientCaptureFailure is not null,
+                if (!_readPersistedSession) WaitUntil(() => transientCaptureObserved || transientCaptureFailure is not null,
                     TimeSpan.FromSeconds(15), "Did not observe the real temporary sort capture boundary.");
                 if (transientCaptureFailure is not null) throw new InvalidOperationException("Temporary sort capture control failed.", transientCaptureFailure);
                 var contextField = hostType.GetField("_folderSizeSortContext", BindingFlags.Instance | BindingFlags.NonPublic)!;
@@ -978,6 +1042,31 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                         Console.WriteLine($"product-user-sort-header: direction={headerDirection}; actual-row-order=True; selected-folder-preserved=True");
                     }
                 }
+            }
+            if (_persistedSessionPath is not null)
+            {
+                if (!_readPersistedSession)
+                {
+                    var tabType = appAssembly.GetType("ExplorerDirs.App.TabSettings", true)!;
+                    var tabsType = typeof(List<>).MakeGenericType(tabType);
+                    var panes = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(tabsType))!;
+                    for (var index = 0; index < hosts.Count; index++)
+                    {
+                        var capturedView = hostType.GetMethod("CaptureViewState")!.Invoke(hosts[index], null)!;
+                        if (!Equals(capturedView.GetType().GetProperty("MixedSizeSort")!.GetValue(capturedView), index % 2 == 0))
+                            throw new InvalidOperationException("Host capture lost its independent mixed policy.");
+                        var tabs = (System.Collections.IList)Activator.CreateInstance(tabsType)!;
+                        tabs.Add(Activator.CreateInstance(tabType, [folders[index], capturedView, null, false, false]));
+                        panes.Add(tabs);
+                    }
+                    var stateType = appAssembly.GetType("ExplorerDirs.App.SessionState", true)!;
+                    var session = stateType.GetConstructors().Single(value => value.GetParameters().Length == 11)
+                        .Invoke([4, 4u, panes, 0, new int[4], 16, new bool[4], null, null, null, null]);
+                    var storeType = appAssembly.GetType("ExplorerDirs.App.SessionStore", true)!;
+                    var writer = Activator.CreateInstance(storeType, [_persistedSessionPath, _persistedSessionPath + ".legacy"])!;
+                    storeType.GetMethod("Save")!.Invoke(writer, [session]);
+                }
+                Console.WriteLine($"product-persisted-sort: phase={(_readPersistedSession ? "read" : "write")}; pid={Environment.ProcessId}; panes=4; mixed=True|False|True|False; actual-host-sort-order=True; physical-paths=fresh-fixture");
             }
             return 0;
         }
