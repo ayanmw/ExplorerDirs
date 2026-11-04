@@ -54,3 +54,5 @@
 - `src/.state/app-external-delete-hard-control.log`：同一对照载荷显式关闭软刷新，两次完整进程均创建/删除更新成功，分组/会话实际重写/窗口位置恢复及隔离清理全部通过；第二进程删除约363ms。不能以完整刷新对照代替默认软刷新目标。
 
 当前发布门槛新增明确反例：软刷新下的真实外部目录删除没有逐项移除。下一步定位 native backing→provider 删除身份通知以及托管删除补偿路径，不通过自动完整枚举掩盖问题。预览不覆盖。
+
+后续删除对照：`app-delete-pidl-only.log`（条目绝对PIDL通知）、`app-delete-pidl-and-delta.log`（PIDL+保留差量）均仍删除失败，两项产品尝试均已撤回。原产品载荷的 `app-delete-settle-control.log` 在实际视图就绪后再等待3秒才执行外部变化，同样删除失败，排除仅因探针紧接启动操作的解释。保留显式 `--settle-external-changes` 对照参数，默认路径仍不等待，避免削弱原有启动边界覆盖。下一步需要直接获取通知阶段证据，不把这些反例记录为已修复。

@@ -10,7 +10,7 @@ using Microsoft.Win32.SafeHandles;
 // Only processes created here are queried/closed; no input injection or Shell restart.
 internal static class AppSessionProcessProbe
 {
-    internal static int Run(string preparedRun, bool softRefresh = true)
+    internal static int Run(string preparedRun, bool softRefresh = true, bool settleExternalChanges = false)
     {
         preparedRun = Path.GetFullPath(preparedRun);
         using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(preparedRun, "preparation.json")));
@@ -103,7 +103,7 @@ internal static class AppSessionProcessProbe
                     return readings.Length == 4 && readings.All(item => item.Rows == 2) &&
                         readings.Any(item => item.Grouped == 1);
                 }, TimeSpan.FromSeconds(60), "Full app views/grouping did not become ready.");
-                VerifyExternalDirectoryChanges(window, child, expected, pass);
+                VerifyExternalDirectoryChanges(window, child, expected, pass, settleExternalChanges);
                 if (pass == 0)
                 {
                     if (!GetWindowRect(window, out var bounds)) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -180,8 +180,13 @@ internal static class AppSessionProcessProbe
         Console.WriteLine($"app-session-process-registration-cleanup: profile-identity={identity}; ownership-checked=True");
     }
 
-    private static void VerifyExternalDirectoryChanges(nint window, ProcessInfo child, SessionState session, int pass)
+    private static void VerifyExternalDirectoryChanges(nint window, ProcessInfo child, SessionState session, int pass, bool settleExternalChanges)
     {
+        if (settleExternalChanges)
+        {
+            Console.WriteLine("app-external-change-settle-control: wait-ms=3000; before-external-mutation=True");
+            Thread.Sleep(3000);
+        }
         var additions = session.Panes.Select((tabs, pane) => Path.Combine(
             tabs[session.ActiveTabIndices![pane]].Path, "external-notification-fixture")).ToArray();
         var grouped = VisibleFileViews(window).Where(list => Message(list, 0x10AF) == 1).ToArray();
