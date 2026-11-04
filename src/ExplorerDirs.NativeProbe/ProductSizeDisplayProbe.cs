@@ -8,7 +8,7 @@ public static partial class SyntheticShellSortProbe
 {
     private static readonly List<StreamViewHost> ProductDisplayProcessLifetimeHosts = [];
     internal static int RunProductSizeDisplay(string adapterPath, bool explorerBrowser = false, bool rootControl = false,
-        FolderSizeSource source = FolderSizeSource.BuiltIn, bool sortPolicyExperiment = false, bool? encodedSortPolicy = null, bool columnStateSortPolicy = false, int encodedSortDirection = 1)
+        FolderSizeSource source = FolderSizeSource.BuiltIn, bool sortPolicyExperiment = false, bool? encodedSortPolicy = null, bool columnStateSortPolicy = false, int encodedSortDirection = 1, bool dynamicSortPolicy = false)
     {
         var fixture = Path.Combine(Path.GetTempPath(), "ExplorerDirs-ProductSizeDisplay-" + Guid.NewGuid().ToString("N"));
         nint root = 0, folder = 0, view = 0, parent = 0, browserPointer = 0, folderView = 0;
@@ -19,7 +19,7 @@ public static partial class SyntheticShellSortProbe
         var siblingLists = new List<(nint List, string Prefix)>();
         var displayBrowsers = new List<nint>();
         var displayBrowserViews = new List<nint>();
-        nint diagnosticModule = 0;
+        nint diagnosticModule = 0, sortContextLease = 0, peerSortLease = 0, peerFolderView = 0, peerList = 0;
         GetCounter? enumCounter = null;
         ProfileShellNamespaceOwner? owner = null;
         StreamViewHost? host = null;
@@ -46,6 +46,13 @@ public static partial class SyntheticShellSortProbe
             var mainIdentity = rootControl ? $"::{{{classId:D}}}" : CreatePathIdentityParsingName(classId, fixture);
             Console.WriteLine($"product-size-display-identity: encoded-root={!rootControl}");
             Check(SHParseDisplayName(mainIdentity, 0, out root, 0, out _));
+            if (dynamicSortPolicy)
+            {
+                var prepare = Marshal.GetDelegateForFunctionPointer<CreateDynamicSizePolicy>(
+                    NativeLibrary.GetExport(diagnosticModule, "CreateDynamicSizeSortPidlForProbe"));
+                Check(prepare(root, 0, out var prepared, out sortContextLease));
+                Marshal.FreeCoTaskMem(root); root = prepared;
+            }
             if (encodedSortPolicy is { } initialPolicy)
             {
                 var prepare = Marshal.GetDelegateForFunctionPointer<CreateEncodedSizePolicy>(
@@ -141,6 +148,27 @@ public static partial class SyntheticShellSortProbe
             sortedNames = ReadColumnTextsForRows(listView, 0, 4);
             if (Array.IndexOf(sortedNames, "folder-12288") >= Array.IndexOf(sortedNames, "folder-25600"))
                 throw new InvalidOperationException("The displayed folder totals did not retain numeric descending sorting.");
+            if (dynamicSortPolicy)
+            {
+                Check(SHParseDisplayName(mainIdentity, 0, out var peerRoot, 0, out _));
+                var prepare = Marshal.GetDelegateForFunctionPointer<CreateDynamicSizePolicy>(
+                    NativeLibrary.GetExport(diagnosticModule, "CreateDynamicSizeSortPidlForProbe"));
+                nint preparedPeer = 0;
+                try { Check(prepare(peerRoot, 3, out preparedPeer, out peerSortLease)); }
+                finally { Marshal.FreeCoTaskMem(peerRoot); }
+                try
+                {
+                    var peerView = OpenDisplayBrowser(preparedPeer);
+                    peerList = FindListView(peerView);
+                    var peerReady = Stopwatch.StartNew();
+                    while (SendMessageW(peerList, LvmGetItemCount, 0, 0).ToInt32() != 4 && peerReady.Elapsed < TimeSpan.FromSeconds(5)) Pump(20);
+                    if (SendMessageW(peerList, LvmGetItemCount, 0, 0).ToInt32() != 4)
+                        throw new TimeoutException("Same-path peer did not enumerate its four rows.");
+                    Check(Marshal.QueryInterface(peerView, in FolderView2Id, out peerFolderView));
+                    Check(ShellFolderViewOptions.SetNoEnumRefresh(peerFolderView, true));
+                }
+                finally { Marshal.FreeCoTaskMem(preparedPeer); }
+            }
             if (sortPolicyExperiment)
             {
                 var sortPolicyId = new Guid("37A49964-E858-4A39-A411-D552E136921B");
@@ -149,10 +177,13 @@ public static partial class SyntheticShellSortProbe
                 {
                     Check(At<GetSizePolicyFolder>(folderView, 5)(folderView, in ShellFolder2Id, out policyFolder));
                     if (!columnStateSortPolicy) Check(Marshal.QueryInterface(policyFolder, in sortPolicyId, out sortPolicy));
+                    var enumBeforePolicies = enumCounter?.Invoke();
+                    var originalList = listView;
                     foreach (var mixed in encodedSortPolicy is { } encoded ? new[] { encoded } : columnStateSortPolicy ? new[] { true, false, true } : new[] { false, true, false })
                     foreach (var direction in encodedSortPolicy.HasValue ? new[] { encodedSortDirection } : new[] { 1, -1 })
                     {
                         if (columnStateSortPolicy) Check(SetSizeSortColumnStateForProbe(folderView, mixed));
+                        else if (dynamicSortPolicy) Check(At<SetSizePolicy>(sortPolicy, 4)(sortPolicy, (mixed ? 1 : 0) | (direction < 0 ? 2 : 0)));
                         else Check(At<SetSizePolicy>(sortPolicy, 3)(sortPolicy, mixed ? 1 : 0));
                         var beforeNames = ReadColumnTextsForRows(listView, 0, 4);
                         Check(At<GetSizePolicyItem>(folderView, 6)(folderView, Array.IndexOf(beforeNames, "folder-empty"), out var emptyItem));
@@ -206,7 +237,26 @@ public static partial class SyntheticShellSortProbe
                             }
                             throw new InvalidOperationException("Folder/file size order disagrees with the selected mixed/separate policy.");
                         }
+                        if (dynamicSortPolicy)
+                        {
+                            // Force the peer to compare again: merely retaining old painted order
+                            // would not prove that its independently bound policy stayed isolated.
+                            var peerTarget = new NativeShellViewStateTarget(peerFolderView);
+                            Check(peerTarget.SetSorting([new(new PropertyKeyState(SizeFormatId, 12), 1)]));
+                            Pump(50);
+                            Check(peerTarget.SetSorting([new(new PropertyKeyState(SizeFormatId, 12), -1)]));
+                            var peerExpected = new[] { "folder-12288", "folder-25600", "file-2048.bin", "folder-empty" };
+                            var peerClock = Stopwatch.StartNew();
+                            while (!ReadPeerNames().SequenceEqual(peerExpected) && peerClock.Elapsed < TimeSpan.FromSeconds(3)) Pump(20);
+                            if (!ReadPeerNames().SequenceEqual(peerExpected))
+                                throw new InvalidOperationException("Same-path peer inherited the main view's sorting policy.");
+                            if (FindListView(view) != originalList)
+                                throw new InvalidOperationException("Policy change recreated the file view.");
+                            Console.WriteLine($"product-size-sort-peer: main-mixed={mixed}; main-direction={direction}; peer=mixed-desc; independent=True; same-list=True");
+                        }
                     }
+                    if (dynamicSortPolicy && enumBeforePolicies is { } initialEnums && enumCounter!() != initialEnums)
+                        throw new InvalidOperationException("Changing sort policy re-enumerated the directory.");
                 }
                 finally
                 {
@@ -305,6 +355,9 @@ public static partial class SyntheticShellSortProbe
                 }
                 throw new TimeoutException("ExplorerBrowser did not create a Shell view.");
             }
+
+            string[] ReadPeerNames() => SendMessageW(peerList, LvmGetItemCount, 0, 0).ToInt32() == 4
+                ? ReadColumnTextsForRows(peerList, 0, 4) : [];
 
             void WaitForIndex(string parentPath, IReadOnlyDictionary<string, ulong> expected)
             {
@@ -435,7 +488,14 @@ public static partial class SyntheticShellSortProbe
             // synchronously activate the system IME during STA teardown; leave these
             // private HWND/COM references to process exit, as the existing harness does.
             // Registration and fixture ownership are still cleaned explicitly.
+            if (peerFolderView != 0) Marshal.Release(peerFolderView);
             owner?.Dispose();
+            if (peerSortLease != 0)
+                Marshal.GetDelegateForFunctionPointer<ReleaseDynamicSizePolicy>(
+                    NativeLibrary.GetExport(diagnosticModule, "ReleaseDynamicSizeSortLeaseForProbe"))(peerSortLease);
+            if (sortContextLease != 0)
+                Marshal.GetDelegateForFunctionPointer<ReleaseDynamicSizePolicy>(
+                    NativeLibrary.GetExport(diagnosticModule, "ReleaseDynamicSizeSortLeaseForProbe"))(sortContextLease);
             if (diagnosticModule != 0) NativeLibrary.Free(diagnosticModule);
             if (Directory.Exists(fixture)) Directory.Delete(fixture, true);
             foreach (var sibling in siblingFixtures)
@@ -471,6 +531,8 @@ public static partial class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CompareSizePolicyItems(nint self, nint column, nint left, nint right);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate long GetSizePolicyCount();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSizePolicyAttributes(nint self, uint count, [In, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] nint[] items, ref uint attributes);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateDynamicSizePolicy(nint source, uint policy, out nint output, out nint lease);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ReleaseDynamicSizePolicy(nint lease);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateEncodedSizePolicy(nint source, int mixed, out nint output);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSizePolicyDiagnostic(int index, [MarshalAs(UnmanagedType.LPWStr)] StringBuilder text, uint capacity);
 

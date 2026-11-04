@@ -28,6 +28,8 @@ internal static class Program
             return RegisteredMultiRootPidlProbe.Run();
         if (args.Length == 1 && args[0] == "--registered-multi-root-pidl-volatile-smoke")
             return RegisteredMultiRootPidlProbe.Run(volatileRegistration: true);
+        if (args is ["--product-size-sort-dynamic-private-desktop", var dynamicSortAdapter])
+            return PrivateDesktopShellProbe.RunProductSizeDisplay(dynamicSortAdapter, explorerBrowser: true, sortPolicyExperiment: true, dynamicSortPolicy: true);
         if (args is ["--product-size-sort-context-separate-desc-private-desktop", var separateDescAdapter])
             return PrivateDesktopShellProbe.RunProductSizeDisplay(separateDescAdapter, explorerBrowser: true, sortPolicyExperiment: true, encodedSortPolicy: false, encodedSortDirection: -1);
         if (args is ["--product-size-sort-context-mixed-desc-private-desktop", var mixedDescAdapter])

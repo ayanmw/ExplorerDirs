@@ -41,6 +41,20 @@ extern "C" ED_PROBE_EXPORT void WINAPI ResetSyntheticSortCounters();
 
 #if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
 static HRESULT CreateSizeSortPolicyPidl(PCIDLIST_ABSOLUTE source, DWORD policy, PIDLIST_ABSOLUTE* output);
+// Experiment leases own context lifetime; directory bindings only share that context.
+struct SizeSortContext { std::atomic<DWORD> policy{0}; DWORD id = 0; };
+static std::mutex g_sizeSortContextMutex;
+static std::map<DWORD, std::weak_ptr<SizeSortContext>> g_sizeSortContexts;
+static DWORD g_nextSizeSortContext = 0;
+static std::shared_ptr<SizeSortContext> FindSizeSortContext(DWORD encoded)
+{
+    std::lock_guard<std::mutex> lock(g_sizeSortContextMutex);
+    const auto found = g_sizeSortContexts.find(encoded >> 2);
+    return found == g_sizeSortContexts.end() ? nullptr : found->second.lock();
+}
+static bool ValidSizeSortPolicy(DWORD encoded)
+{ return encoded <= 3 || static_cast<bool>(FindSizeSortContext(encoded)); }
+
 #endif
 
 using FolderSizeProviderCallback = HRESULT(WINAPI*)(PCWSTR, volatile LONG*, ULONGLONG*, ULONGLONG*, ULONGLONG*, ULONGLONG*, DWORD*);
@@ -2572,7 +2586,7 @@ namespace
                         CopyMemory(&policy, reinterpret_cast<const BYTE*>(header) + kSyntheticRootPathPidlHeaderSize, sizeof(policy));
                         DWORD firstPolicy = 0;
                         CopyMemory(&firstPolicy, reinterpret_cast<const BYTE*>(first) + kSyntheticRootPathPidlHeaderSize, sizeof(firstPolicy));
-                        if (policy > 3 || policy != firstPolicy) return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+                        if (!ValidSizeSortPolicy(policy) || policy != firstPolicy) return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
                     }
 #endif
                     path->append(reinterpret_cast<const WCHAR*>(reinterpret_cast<const BYTE*>(header) + textOffset), characters);
@@ -3182,6 +3196,7 @@ namespace
     struct __declspec(uuid("37A49964-E858-4A39-A411-D552E136921B")) IExplorerDirsSizeSortPolicy : public IUnknown
     {
         virtual HRESULT STDMETHODCALLTYPE SetMixedSizeSort(BOOL mixed) = 0;
+        virtual HRESULT STDMETHODCALLTYPE SetSizeSortPolicy(DWORD policy) = 0;
     };
 
 #endif
@@ -3228,6 +3243,7 @@ namespace
 #if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
         HRESULT STDMETHODCALLTYPE SetMixedSizeSort(BOOL mixed) override
         {
+            if (_sizeSortContext) _sizeSortContext->policy.store((_sizeSortContext->policy.load() & 2) | (mixed ? 1u : 0u));
             InterlockedExchange(&_mixedSizeSort, mixed ? 1 : 0);
 #if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
             RecordProductCompareDiagnostic(0xFFFF, L"<set-policy>", mixed ? 1 : 0, L"", 0, 0, false, this);
@@ -3235,11 +3251,20 @@ namespace
             return S_OK;
         }
 
+        HRESULT STDMETHODCALLTYPE SetSizeSortPolicy(DWORD policy) override
+        {
+            if (policy > 3 || !_sizeSortContext) return E_INVALIDARG;
+            _sizeSortContext->policy.store(policy);
+            return S_OK;
+        }
+        LONG CurrentMixedSizeSort() const
+        { return _sizeSortContext ? static_cast<LONG>(_sizeSortContext->policy.load() & 1) : InterlockedCompareExchange(const_cast<volatile LONG*>(&_mixedSizeSort), 0, 0); }
         int CurrentSizeSortDirection() const
         {
             // Identity serialization and comparison can run during lazy view initialization.
             // Never call back into the view here: GetSortColumns reentered GetCurFolder
             // and overflowed the stack in the encoded-root private Desktop probe.
+            if (_sizeSortContext) return (_sizeSortContext->policy.load() & 2) ? -1 : 1;
             return _hasEncodedSizeSortPolicy ? _encodedSizeSortDirection : 1;
         }
 
@@ -3398,6 +3423,7 @@ namespace
             auto result = ReadSyntheticRootPathFromPidl(value, &backingPath, true);
 #if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
             _hasEncodedSizeSortPolicy = false;
+            _sizeSortContext.reset();
             for (auto* part = reinterpret_cast<PCUIDLIST_RELATIVE>(value); !ILIsEmpty(part); part = ILNext(part))
             {
                 if (part->mkid.cb < kSyntheticRootPathPidlHeaderSize + sizeof(DWORD)) continue;
@@ -3405,6 +3431,7 @@ namespace
                 if (header->magic != 0x32525044) continue;
                 DWORD policy = 0;
                 CopyMemory(&policy, reinterpret_cast<const BYTE*>(header) + kSyntheticRootPathPidlHeaderSize, sizeof(policy));
+                _sizeSortContext = FindSizeSortContext(policy);
                 InterlockedExchange(&_mixedSizeSort, (policy & 1) ? 1 : 0);
                 _encodedSizeSortDirection = (policy & 2) ? -1 : 1;
                 _hasEncodedSizeSortPolicy = true;
@@ -3982,7 +4009,7 @@ namespace
 #if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
                 const bool leftFolder = (leftChild->attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
                 const bool rightFolder = (rightChild->attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-                if (!InterlockedCompareExchange(&_mixedSizeSort, 0, 0) && leftFolder != rightFolder)
+                if (!CurrentMixedSizeSort() && leftFolder != rightFolder)
                 {
                     // Shell reverses CompareIDs for descending; compensate only the category
                     // boundary so folders remain first while each category follows the requested direction.
@@ -4022,7 +4049,7 @@ namespace
 #if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
 #if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
                 RecordProductCompareDiagnostic(column, leftChild->name, leftSize, rightChild->name, rightSize, comparison, false, this,
-                    _hasEncodedSizeSortPolicy ? static_cast<int>(InterlockedCompareExchange(&_mixedSizeSort, 0, 0)) : -1);
+                    _hasEncodedSizeSortPolicy ? static_cast<int>(CurrentMixedSizeSort()) : -1);
 #else
                 RecordProductCompareDiagnostic(column, leftChild->name, leftSize, rightChild->name, rightSize, comparison, false, this);
 #endif
@@ -6094,6 +6121,7 @@ namespace
         PIDLIST_ABSOLUTE _backingRoot = nullptr;
         IShellView* _shellView = nullptr;
 #if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
+        std::shared_ptr<SizeSortContext> _sizeSortContext;
         volatile LONG _mixedSizeSort = 1; // Legacy until the host applies its per-tab default-off setting.
         bool _hasEncodedSizeSortPolicy = false;
         int _encodedSizeSortDirection = 1;
@@ -6465,12 +6493,12 @@ extern "C" ED_PROBE_EXPORT HRESULT WINAPI VerifyBackingColumnMetadataForProbe(PC
 }
 
 #if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
-// Read-only policy in an opaque experimental PIDL survives Shell re-binding;
+// Encoded policy/context in an opaque experimental PIDL survives Shell re-binding;
 // canonical parsing names and the physical path are deliberately unchanged.
 static HRESULT CreateSizeSortPolicyPidl(
     PCIDLIST_ABSOLUTE source, DWORD policy, PIDLIST_ABSOLUTE* output)
 {
-    if (!source || !output || policy > 3) return E_INVALIDARG;
+    if (!source || !output || !ValidSizeSortPolicy(policy)) return E_INVALIDARG;
     *output = nullptr;
     std::wstring path;
     const auto parsed = ReadSyntheticRootPathFromPidl(source, &path, true);
@@ -6512,8 +6540,75 @@ extern "C" __declspec(dllexport) HRESULT WINAPI CreateSizeSortPolicyPidlForProbe
     PCIDLIST_ABSOLUTE source, DWORD policy, PIDLIST_ABSOLUTE* output)
 { return CreateSizeSortPolicyPidl(source, policy, output); }
 
+extern "C" __declspec(dllexport) HRESULT WINAPI CreateDynamicSizeSortPidlForProbe(
+    PCIDLIST_ABSOLUTE source, DWORD policy, PIDLIST_ABSOLUTE* output, void** lease)
+{
+    if (!output || !lease || policy > 3) return E_INVALIDARG;
+    *output = nullptr; *lease = nullptr;
+    try
+    {
+        auto state = std::make_shared<SizeSortContext>();
+        state->policy.store(policy);
+        {
+            std::lock_guard<std::mutex> lock(g_sizeSortContextMutex);
+            if (g_nextSizeSortContext >= (MAXDWORD >> 2)) return E_OUTOFMEMORY;
+            state->id = ++g_nextSizeSortContext;
+            g_sizeSortContexts[state->id] = state;
+        }
+        auto* owned = new (std::nothrow) std::shared_ptr<SizeSortContext>(state);
+        auto result = owned ? CreateSizeSortPolicyPidl(source, (state->id << 2) | policy, output) : E_OUTOFMEMORY;
+        if (FAILED(result))
+        {
+            delete owned;
+            std::lock_guard<std::mutex> lock(g_sizeSortContextMutex);
+            g_sizeSortContexts.erase(state->id);
+            return result;
+        }
+        *lease = owned;
+        return S_OK;
+    }
+    catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+}
+extern "C" __declspec(dllexport) void WINAPI ReleaseDynamicSizeSortLeaseForProbe(void* lease)
+{
+    auto* owned = static_cast<std::shared_ptr<SizeSortContext>*>(lease);
+    if (!owned) return;
+    {
+        std::lock_guard<std::mutex> lock(g_sizeSortContextMutex);
+        g_sizeSortContexts.erase((*owned)->id);
+    }
+    delete owned;
+}
+
 extern "C" __declspec(dllexport) HRESULT WINAPI VerifySizeSortPolicyPidlForProbe()
 {
+    // Leases must isolate same-path identities and remove registry entries on release.
+    PIDLIST_ABSOLUTE contextRoot = nullptr, firstRoot = nullptr, secondRoot = nullptr;
+    void* firstLease = nullptr; void* secondLease = nullptr;
+    auto contextResult = CreateSyntheticRootPathPidl(L"C:\\", &contextRoot);
+    if (SUCCEEDED(contextResult)) contextResult = CreateDynamicSizeSortPidlForProbe(contextRoot, 0, &firstRoot, &firstLease);
+    if (SUCCEEDED(contextResult)) contextResult = CreateDynamicSizeSortPidlForProbe(contextRoot, 3, &secondRoot, &secondLease);
+    DWORD firstToken = 0, secondToken = 0;
+    if (SUCCEEDED(contextResult))
+    {
+        CopyMemory(&firstToken, reinterpret_cast<BYTE*>(firstRoot) + kSyntheticRootPathPidlHeaderSize, sizeof(firstToken));
+        CopyMemory(&secondToken, reinterpret_cast<BYTE*>(secondRoot) + kSyntheticRootPathPidlHeaderSize, sizeof(secondToken));
+        auto first = FindSizeSortContext(firstToken), rebound = FindSizeSortContext(firstToken), second = FindSizeSortContext(secondToken);
+        if (!first || first != rebound || first == second || !second) contextResult = E_FAIL;
+        else
+        {
+            first->policy.store(2);
+            if (rebound->policy.load() != 2 || second->policy.load() != 3) contextResult = E_FAIL;
+        }
+    }
+    ReleaseDynamicSizeSortLeaseForProbe(firstLease);
+    ReleaseDynamicSizeSortLeaseForProbe(secondLease);
+    if (firstToken && (FindSizeSortContext(firstToken) || FindSizeSortContext(secondToken))) contextResult = E_FAIL;
+    if (contextRoot) CoTaskMemFree(contextRoot);
+    if (firstRoot) CoTaskMemFree(firstRoot);
+    if (secondRoot) CoTaskMemFree(secondRoot);
+    if (FAILED(contextResult)) return contextResult;
+
     for (const size_t length : { 3u, 1024u, 1025u, 4096u })
     for (const DWORD policy : { 0u, 1u, 2u, 3u })
     {
