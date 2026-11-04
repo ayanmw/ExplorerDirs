@@ -19,6 +19,8 @@ internal static class Program
             AppSessionProcessProbe.CleanupOwnedProfile(failedAppProfile);
             return 0;
         }
+        if (args is ["--full-app-session-private-desktop", var comparisonRun, "--no-soft-refresh"])
+            return PrivateDesktopShellProbe.RunFullAppSession(comparisonRun, softRefresh: false);
         if (args is ["--full-app-session-private-desktop", var preparedAppRun])
             return PrivateDesktopShellProbe.RunFullAppSession(preparedAppRun);
         if (args is ["--product-everything-hosts-private-desktop", var realEverythingHost, var realEverythingAdapter])

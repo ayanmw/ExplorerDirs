@@ -3127,7 +3127,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         {
             Trace(stage);
             FinishSortRecovery();
-            if (IsCurrent()) Refresh();
+            // The full-App soft-refresh control reproduces missing startup groups:
+            // DefView must enumerate once to materialize saved groups after values arrive.
+            if (IsCurrent()) RefreshWithPresentation(traceAsUserRefresh: false, forceFullEnumeration: true);
         }
         var timer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -3660,9 +3662,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     internal void RefreshFromUser() => RefreshWithPresentation(traceAsUserRefresh: true);
 
-    private void RefreshWithPresentation(bool traceAsUserRefresh)
+    private void RefreshWithPresentation(bool traceAsUserRefresh, bool forceFullEnumeration = false)
     {
-        ShellDirectoryRefreshRecovery.TryInvoke(() => Refresh(afterRefresh: null, traceAsUserRefresh), error =>
+        ShellDirectoryRefreshRecovery.TryInvoke(() => Refresh(afterRefresh: null, traceAsUserRefresh, forceFullEnumeration), error =>
         {
             LastShellRefreshStatus = $"refresh-exception={error.GetType().Name},hr=0x{error.HResult:X8}";
             MenuError?.Invoke(this, $"Shell 文件视图刷新失败（0x{error.HResult:X8}）。请稍后重试。");
@@ -3961,7 +3963,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         finally { Marshal.Release(browserUnknown); }
     }
 
-    private void Refresh(Action? afterRefresh, bool traceAsUserRefresh = false)
+    private void Refresh(Action? afterRefresh, bool traceAsUserRefresh = false, bool forceFullEnumeration = false)
     {
         if (_browser is null)
         {
@@ -4063,10 +4065,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 var viewPointer = Marshal.GetIUnknownForObject(viewObject);
                 try
                 {
-                    refreshResult = ShellRefreshPolicy.Invoke(traceAsUserRefresh, _softRefresh,
+                    refreshResult = ShellRefreshPolicy.Invoke(traceAsUserRefresh || forceFullEnumeration, _softRefresh,
                         enabled => ShellFolderViewOptions.SetNoEnumRefresh(viewPointer, enabled),
                         shellView.Refresh, IsCurrentRefreshRequest, () => _softRefresh);
                     LastShellRefreshStatus = traceAsUserRefresh ? "manual-full-refresh" :
+                        forceFullEnumeration ? "restore-full-refresh" :
                         _softRefresh ? "soft-refresh" : "IShellView.Refresh";
                 }
                 finally { Marshal.Release(viewPointer); }

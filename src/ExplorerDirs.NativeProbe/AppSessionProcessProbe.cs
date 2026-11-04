@@ -10,7 +10,7 @@ using Microsoft.Win32.SafeHandles;
 // Only processes created here are queried/closed; no input injection or Shell restart.
 internal static class AppSessionProcessProbe
 {
-    internal static int Run(string preparedRun)
+    internal static int Run(string preparedRun, bool softRefresh = true)
     {
         preparedRun = Path.GetFullPath(preparedRun);
         using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(preparedRun, "preparation.json")));
@@ -63,6 +63,8 @@ internal static class AppSessionProcessProbe
         const string seed = ";full-process-seed-must-be-rewritten\n";
         File.WriteAllText(sessionPath, seed + File.ReadAllText(sessionPath));
         File.WriteAllText(Path.Combine(profile, "FolderSize.ini"), "[FolderSize]\nFormatVersion=1\nEnabled=true\nSource=BuiltIn\n");
+        File.WriteAllText(Path.Combine(profile, "SoftRefresh.ini"), $"[View]\nFormatVersion=1\nSoftRefresh={softRefresh}\n");
+        Console.WriteLine($"app-session-configuration: soft-refresh={softRefresh}");
         var executable = Path.Combine(app, "ExplorerDirs.App.exe");
         var expectedPlacement = default(WindowPlacementState);
         var pids = new List<uint>();

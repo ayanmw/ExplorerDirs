@@ -63,7 +63,7 @@ internal static class ShellRefreshPresentationSmoke
             "Shell child command notifications do not masquerade as user input and cancel paired sorting");
         // Refresh now passes the native call through the manual/automatic flag policy;
         // keep checking the presentation boundary rather than the old invocation spelling.
-        Check(refreshPath.Contains("ShellRefreshPolicy.Invoke(traceAsUserRefresh, _softRefresh", StringComparison.Ordinal) &&
+        Check(refreshPath.Contains("ShellRefreshPolicy.Invoke(traceAsUserRefresh || forceFullEnumeration, _softRefresh", StringComparison.Ordinal) &&
             refreshPath.Contains("shellView.Refresh, IsCurrentRefreshRequest", StringComparison.Ordinal) &&
             !refreshPath.Contains("TryNotifyDirectoryRefresh(", StringComparison.Ordinal) &&
             !refreshPath.Contains("ShellViewRedrawLease.TrySuppress(folderView)", StringComparison.Ordinal) &&
@@ -73,6 +73,8 @@ internal static class ShellRefreshPresentationSmoke
         Check(redrawLease.Contains("activeLease.Count++", StringComparison.Ordinal) &&
             redrawLease.Contains("--activeLease.Count == 0", StringComparison.Ordinal),
             "overlapping redraw leases for the same native Shell view restore painting only after the last owner releases");
+        Check(host.Contains("if (IsCurrent()) RefreshWithPresentation(traceAsUserRefresh: false, forceFullEnumeration: true)", StringComparison.Ordinal),
+            "saved startup groups bypass automatic soft enumeration without pretending user F5 input");
         Console.WriteLine("Shell refresh presentation smoke: PASS (source contract; no Shell view created)");
     }
 
