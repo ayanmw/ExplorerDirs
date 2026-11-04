@@ -84,6 +84,7 @@ public static partial class SyntheticShellSortProbe
             ShowWindow(parent, 4); // Never switches the private Desktop onto the user's display.
             var listView = FindListView(view);
             WaitForSizes("initial");
+            if (dynamicSortPolicy) VerifySortExternalIdentity(root, folder, mainIdentity, fixture);
             for (var index = 1; index <= 3; index++)
             {
                 var sibling = fixture + "-pane-" + index;
@@ -537,6 +538,144 @@ public static partial class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSizePolicyDiagnostic(int index, [MarshalAs(UnmanagedType.LPWStr)] StringBuilder text, uint capacity);
 
 
+
+    private static void VerifySortExternalIdentity(nint root, nint folder, string stableName, string physicalFolder, bool freshProcess = false)
+    {
+        Check(GetSizeIdentityName(root, 0x80028000, out var name));
+        try
+        {
+            if (!string.Equals(Marshal.PtrToStringUni(name), stableName, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Transient sorting identity leaked into the stable parsing name.");
+        }
+        finally { Marshal.FreeCoTaskMem(name); }
+        Check(SHParseDisplayName(stableName, 0, out var restored, 0, out _));
+        try
+        {
+            Check(GetSizeIdentityName(restored, 0x80028000, out name));
+            try
+            {
+                if (!string.Equals(Marshal.PtrToStringUni(name), stableName, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Stable sorting identity failed parsing-name roundtrip.");
+            }
+            finally { Marshal.FreeCoTaskMem(name); }
+        }
+        finally { Marshal.FreeCoTaskMem(restored); }
+        uint nestedEaten = 0, nestedAttributes = 0;
+        Check(At<ParseSizeIdentityChild>(folder, 3)(folder, 0, 0, "folder-empty", ref nestedEaten, out var nestedItem, ref nestedAttributes));
+        nint nestedFolder = 0, nestedPersist = 0, nestedRoot = 0;
+        try
+        {
+            Check(At<BindSizeIdentityChild>(folder, 5)(folder, nestedItem, 0, in ShellFolder2Id, out nestedFolder));
+            var persistId = new Guid("1ac3d9f0-175c-11d1-95be-00609797ea4f");
+            Check(Marshal.QueryInterface(nestedFolder, in persistId, out nestedPersist));
+            Check(At<GetSizeCurrentFolder>(nestedPersist, 5)(nestedPersist, out nestedRoot));
+            Check(GetSizeIdentityName(nestedRoot, 0x80028000, out name));
+            try
+            {
+                if (!string.Equals(Marshal.PtrToStringUni(name), stableName + "\\folder-empty", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Nested navigation lost its stable parent identity.");
+            }
+            finally { Marshal.FreeCoTaskMem(name); }
+        }
+        finally
+        {
+            if (nestedRoot != 0) Marshal.FreeCoTaskMem(nestedRoot);
+            if (nestedPersist != 0) Marshal.Release(nestedPersist);
+            if (nestedFolder != 0) Marshal.Release(nestedFolder);
+            Marshal.FreeCoTaskMem(nestedItem);
+        }
+        uint eaten = 0, attributes = 0;
+        Check(At<ParseSizeIdentityChild>(folder, 3)(folder, 0, 0, "file-2048.bin", ref eaten, out var child, ref attributes));
+        var dataId = new Guid("0000010e-0000-0000-C000-000000000046");
+        nint dataPointer = 0;
+        try
+        {
+            Check(At<GetSizeIdentityData>(folder, 10)(folder, 0, 1, [child], in dataId, 0, out dataPointer));
+            var data = (System.Runtime.InteropServices.ComTypes.IDataObject)Marshal.GetObjectForIUnknown(dataPointer);
+            try
+            {
+                var format = new System.Runtime.InteropServices.ComTypes.FORMATETC
+                {
+                    cfFormat = 15, dwAspect = System.Runtime.InteropServices.ComTypes.DVASPECT.DVASPECT_CONTENT,
+                    lindex = -1, tymed = System.Runtime.InteropServices.ComTypes.TYMED.TYMED_HGLOBAL
+                };
+                data.GetData(ref format, out var medium);
+                try
+                {
+                    var path = new StringBuilder(32768);
+                    if (ReadSizeIdentityDrop(medium.unionmember, uint.MaxValue, null, 0) != 1 ||
+                        ReadSizeIdentityDrop(medium.unionmember, 0, path, (uint)path.Capacity) == 0 ||
+                        !string.Equals(path.ToString(), Path.Combine(physicalFolder, "file-2048.bin"), StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException("External data object did not contain the physical file path.");
+                }
+                finally { ReleaseSizeIdentityMedium(ref medium); }
+            }
+            finally { Marshal.ReleaseComObject(data); }
+        }
+        finally
+        {
+            if (dataPointer != 0) Marshal.Release(dataPointer);
+            Marshal.FreeCoTaskMem(child);
+        }
+        Console.WriteLine("product-size-sort-external-identity: stable-parsing-roundtrip=True; nested-stable-parent=True; physical-CF_HDROP=True; transient-token-not-exported-in-text=True");
+        if (!freshProcess)
+        {
+            var start = new ProcessStartInfo("dotnet") { UseShellExecute = false, CreateNoWindow = true,
+                RedirectStandardOutput = true, RedirectStandardError = true };
+            foreach (var argument in new[] { typeof(SyntheticShellSortProbe).Assembly.Location,
+                "--size-sort-stable-identity-child", stableName, physicalFolder }) start.ArgumentList.Add(argument);
+            using var childProcess = Process.Start(start) ?? throw new InvalidOperationException("Could not start identity child.");
+            var output = childProcess.StandardOutput.ReadToEndAsync();
+            var error = childProcess.StandardError.ReadToEndAsync();
+            if (!childProcess.WaitForExit(15000))
+            {
+                childProcess.Kill(entireProcessTree: true);
+                childProcess.WaitForExit();
+                throw new TimeoutException("Stable identity fresh-process check timed out.");
+            }
+            Console.Write(output.GetAwaiter().GetResult());
+            Console.Error.Write(error.GetAwaiter().GetResult());
+            if (childProcess.ExitCode != 0) throw new InvalidOperationException($"Stable identity child exited {childProcess.ExitCode}.");
+        }
+    }
+
+    internal static int RunStableSortIdentityChild(string stableName, string physicalFolder)
+    {
+        Check(InitializeSizeIdentityOle(0));
+        nint root = 0, folder = 0;
+        try
+        {
+            // No DLL preloading or context registration: use only the published stable name.
+            Check(SHParseDisplayName(stableName, 0, out root, 0, out _));
+            Check(BindProductDisplayFolder(0, root, 0, in ShellFolder2Id, out folder));
+            VerifySortExternalIdentity(root, folder, stableName, physicalFolder, freshProcess: true);
+            Console.WriteLine("product-size-sort-fresh-process: PASS (stable name and physical data object; no view/context preconfiguration)");
+            return 0;
+        }
+        finally
+        {
+            if (folder != 0) Marshal.Release(folder);
+            if (root != 0) Marshal.FreeCoTaskMem(root);
+            UninitializeSizeIdentityOle();
+        }
+    }
+    [DllImport("ole32.dll", EntryPoint = "OleInitialize")] private static extern int InitializeSizeIdentityOle(nint reserved);
+    [DllImport("ole32.dll", EntryPoint = "OleUninitialize")] private static extern void UninitializeSizeIdentityOle();
+
+    [DllImport("shell32.dll", EntryPoint = "SHGetNameFromIDList")]
+    private static extern int GetSizeIdentityName(nint item, uint kind, out nint name);
+    [DllImport("shell32.dll", EntryPoint = "DragQueryFileW", CharSet = CharSet.Unicode)]
+    private static extern uint ReadSizeIdentityDrop(nint drop, uint index, StringBuilder? path, uint capacity);
+    [DllImport("ole32.dll", EntryPoint = "ReleaseStgMedium")]
+    private static extern void ReleaseSizeIdentityMedium(ref System.Runtime.InteropServices.ComTypes.STGMEDIUM medium);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int BindSizeIdentityChild(nint self, nint item, nint bind, in Guid iid, out nint folder);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int GetSizeCurrentFolder(nint self, out nint root);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int ParseSizeIdentityChild(nint self, nint owner, nint bind, [MarshalAs(UnmanagedType.LPWStr)] string name, ref uint eaten, out nint child, ref uint attributes);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int GetSizeIdentityData(nint self, nint owner, uint count, [In, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 2)] nint[] children, in Guid iid, nint reserved, out nint value);
 
     private static int SetSizeSortColumnStateForProbe(IntPtr folderView, bool mixed, Func<bool>? isCurrent = null)
     {

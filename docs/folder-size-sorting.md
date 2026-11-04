@@ -82,3 +82,13 @@ dotnet run --project src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.cspro
 无窗口 smoke 新增：同路径两份 lease 不共享策略，同 token 的重绑定引用能观察更新，释放 lease 后注册项不可再取得；原有路径分段/非法数据测试仍通过。实验使用同进程瞬时 token，目前不具备跨进程解析或持久化能力；产品接入前必须保持稳定的保存路径、对外 Shell 身份及导航生命周期，不能把瞬时 PIDL 写入会话或直接作为外部进程入口。尚未接入产品菜单/INI，未发布。
 
 本批 27 项后台总检整轮通过：src/.state/background-checks/20261104-232757-928cdf524aa34a7d9b96d11f5fbd6a59/summary.json，记录 914f754 加本批源码状态；额外显式排序实验构建和动态视图探针独立于总检。未进行可见 UI 验收。
+
+## 稳定名称、子目录身份与对外数据对象
+
+新增实际 Shell 接口对照，日志 src/.state/dynamic-sort-external-child-nested.log：动态 root 的 SIGDN_DESKTOPABSOLUTEPARSING 与普通稳定 edpath 名称相同（GUID 大小写按 Shell 规范化作不区分比较），SHParseDisplayName 后可往返；绑定 folder-empty 后 IPersistFolder2.GetCurFolder 返回的子目录能取得含稳定父身份的解析名称。GetUIObjectOf(IDataObject) 的 CF_HDROP 精确指向物理 file-2048.bin，不输出排序 token。
+
+新进程仅接收稳定名称与预期物理目录，不预加载 DLL、不设置 profile class/context，通过现有临时 profile 注册元数据完成解析/绑定，并独立重复稳定名称、子目录父身份和 CF_HDROP 检查。子进程不创建窗口，15 秒有界等待且输出异步排空；清理只针对该测试子进程和自己的 COM 资源。
+
+整轮动态六次排序、同路径 peer、后续自动变化与选区、清理通过，前台/输入守卫干净，5 宿主销毁后残留列表 HWND=0。初始测试曾因 GUID 大小写差异误报名称不符，已记录实际文本确认后修正比较，不改产品身份。上述证明稳定文本与物理数据对象可跨进程使用，不证明原始临时 PIDL 可跨进程传递，也没有验证原生属性页/第三方菜单全部格式或真实浏览器前进后退。产品入口必须继续使用稳定路径，临时 PIDL 不可直接持久化。
+
+本批仅增加探针，NativeProbe Release 编译与最终 diff 检查通过；产品源码未改，未覆盖 temp.86。下一步核对应用现有导航/状态采集使用稳定名称的路径，并设计新视图生命周期接线。
