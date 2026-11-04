@@ -54,6 +54,15 @@ internal static class ProfileOwnerMultiRootShellHostProbe
         finally { _persistedSessionPath = null; _readPersistedSession = false; _unavailableSizes = false; _holdUnavailable = false; UnknownRelease.Set(); }
     }
 
+    private static bool _realEverything;
+    internal static int RunEverythingHostsForProbe(string adapterPath)
+    {
+        _realEverything = true;
+        _sortContextAdapter = Path.GetFullPath(adapterPath);
+        try { return Run(); }
+        finally { _realEverything = false; _sortContextAdapter = null; }
+    }
+
     private static bool _inputDuringSort;
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int GetProbeFolder(nint self, in Guid iid, out nint folder);
@@ -195,10 +204,47 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 var configureResult = configureCache(cacheCapacity);
                 if (configureResult < 0) Marshal.ThrowExceptionForHR(configureResult);
             }
+            if (_realEverything)
+            {
+                var client = appAssembly.GetType("ExplorerDirs.App.EverythingSizeClient", true)!;
+                var query = client.GetMethod("QueryChildrenAsync", BindingFlags.Static | BindingFlags.NonPublic)!;
+                for (var index = 0; index < folders.Length; index++)
+                {
+                    var indexed = false;
+                    var wait = Stopwatch.StartNew();
+                    do
+                    {
+                        var task = (System.Threading.Tasks.Task)query.Invoke(null, [folders[index], 0u, CancellationToken.None])!;
+                        WaitUntil(() => task.IsCompleted, TimeSpan.FromSeconds(5), "Everything IPC fixture query timed out.");
+                        task.GetAwaiter().GetResult();
+                        var page = task.GetType().GetProperty("Result")!.GetValue(task)!;
+                        var status = page.GetType().GetProperty("Status")!.GetValue(page)!.ToString();
+                        if (status != "Available") throw new InvalidOperationException($"Real Everything source unavailable: {status}.");
+                        var items = ((System.Collections.IEnumerable)page.GetType().GetProperty("Items")!.GetValue(page)!).Cast<object>().ToArray();
+                        indexed = items.Length == 2 && items.All(item =>
+                        {
+                            var name = Path.GetFileName((string)item.GetType().GetProperty("Path")!.GetValue(item)!);
+                            var bytes = item.GetType().GetProperty("Bytes")!.GetValue(item);
+                            return name == "folder-small" && Equals(bytes, expectedSizes[index][0]) ||
+                                name == "folder-large" && Equals(bytes, expectedSizes[index][1]);
+                        });
+                        if (!indexed) PumpDispatcher(TimeSpan.FromMilliseconds(100));
+                    } while (!indexed && wait.Elapsed < TimeSpan.FromSeconds(5));
+                    if (!indexed) throw new TimeoutException("Everything did not index the independent fixture totals.");
+                }
+                Console.WriteLine("product-everything-host-fixture: indexed-four-roots=True; real-ipc=True; external-settings-changed=False");
+            }
             owner = ownerType.GetMethod("Start", BindingFlags.Public | BindingFlags.Static)!
                 .Invoke(null, [classId, profile, adapterPath]);
             if (owner is not IDisposable) throw new InvalidOperationException("The production profile owner is not disposable.");
             Console.WriteLine("profile-owner-multi-root-shell-host: stage=profile-owner-created");
+            if (_realEverything)
+            {
+                var sourceType = appAssembly.GetType("ExplorerDirs.App.FolderSizeSource", true)!;
+                ownerType.GetMethod("SetFolderSizeSource", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .Invoke(owner, [Enum.Parse(sourceType, "Everything"), true]);
+            }
+
             if (_unavailableSizes)
             {
                 adapterModule = NativeLibrary.Load(adapterPath);
@@ -1200,6 +1246,18 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                         Console.WriteLine($"product-user-sort-header: direction={headerDirection}; actual-row-order=True; selected-folder-preserved=True");
                     }
                 }
+            }
+            if (_realEverything)
+            {
+                var bridge = ownerType.GetField("_folderSizeBridge", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(owner)!;
+                var cacheGate = bridge.GetType().GetField("_cacheGate", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(bridge)!;
+                int pages;
+                lock (cacheGate)
+                {
+                    pages = ((System.Collections.IDictionary)bridge.GetType().GetField("_pages", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(bridge)!).Count;
+                }
+                if (pages is < 1 or > 4) throw new InvalidOperationException("Actual managed native bridge did not query bounded Everything parent pages.");
+                Console.WriteLine($"product-everything-four-hosts: production-app-assembly=True; real-ipc=True; source=Everything; native-bridge-parent-pages={pages}; independent-values-order-selection-focus=True");
             }
             if (_persistedSessionPath is not null)
             {
