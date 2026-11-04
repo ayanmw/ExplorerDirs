@@ -2249,6 +2249,13 @@ internal static class ShellProviderLocationProbe
         }
     }
 
+    internal static string ReadNativeGroupingState(nint viewWindow)
+    {
+        var list = FindNativeListView(viewWindow);
+        var cells = ReadNativeListViewCells(viewWindow, 3);
+        return $"enabled={SendMessageW(list, 0x10AF, 0, 0)}; count={SendMessageW(list, 0x1098, 0, 0)}; cells={string.Join("/", cells.Select(row => string.Join("|", row)))}";
+    }
+
     internal static int[] ReadNativeGroupIds(nint viewWindow)
     {
         var list = FindNativeListView(viewWindow);

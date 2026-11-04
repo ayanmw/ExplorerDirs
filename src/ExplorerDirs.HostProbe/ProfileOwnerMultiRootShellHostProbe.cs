@@ -445,7 +445,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                     }
                     catch (TimeoutException error)
                     {
-                        throw new InvalidOperationException($"Persisted native rows: pane={index + 1}; names={string.Join('|', replayNames)}; groups={string.Join('|', ShellProviderLocationProbe.ReadNativeGroupIds(replayWindow))}; saved-group={expected.GetType().GetProperty("GroupKey")!.GetValue(expected)}; recovery={hostType.GetProperty("InitialSortRecoveryStatus", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(hosts[index])}.", error);
+                        throw new InvalidOperationException($"Persisted native rows: pane={index + 1}; names={string.Join('|', replayNames)}; groups={string.Join('|', ShellProviderLocationProbe.ReadNativeGroupIds(replayWindow))}; saved-group={expected.GetType().GetProperty("GroupKey")!.GetValue(expected)}; native-grouping={ShellProviderLocationProbe.ReadNativeGroupingState(replayWindow)}; recovery={hostType.GetProperty("InitialSortRecoveryStatus", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(hosts[index])}.", error);
                     }
 
                     try

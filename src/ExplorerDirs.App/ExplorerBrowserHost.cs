@@ -3047,17 +3047,18 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 if (restored) _quickFilterGroupToRestore = null;
                 if (_initialSortRecoveryTrace is not null)
                     RecordInitialSortRecovery($"restore;generation={generation};restored={restored};provider={IsFolderSizeProvider};sorts={saved.SortColumns.Count};group={saved.GroupKey}");
-                if (restored && (!_location.IsFileSystemLocation || IsFolderSizeProvider) && saved.GroupKey is null &&
+                if (restored && (!_location.IsFileSystemLocation || IsFolderSizeProvider) &&
+                    (saved.GroupKey is null || IsFolderSizeProvider && saved.SortColumns.Count == 1 && saved.SortColumns[0].Key == FolderSizeLocationPolicy.SizeColumn) &&
                     saved.SortColumns.Count == 1 &&
                     ((IsFolderSizeProvider && saved.SortColumns[0].Key == FolderSizeLocationPolicy.SizeColumn) ||
                      ShellFileViewExportCapture.HasVisibleUnresolvedColumn(view, saved.SortColumns[0].Key)) && Current())
-                    ScheduleInitialVirtualSort(saved.SortColumns[0], Current);
+                    ScheduleInitialVirtualSort(saved.SortColumns[0], Current, grouped: saved.GroupKey is not null);
             }
         }
         finally { Marshal.Release(view); }
     }
 
-    private void ScheduleInitialVirtualSort(SortColumnState sort, Func<bool> isCurrent, ShellViewSelectionSnapshot? selectionToPreserve = null)
+    private void ScheduleInitialVirtualSort(SortColumnState sort, Func<bool> isCurrent, ShellViewSelectionSnapshot? selectionToPreserve = null, bool grouped = false)
     {
         if (!isCurrent()) { selectionToPreserve?.Dispose(); return; }
         var traceSerial = ++_initialSortRecoverySerial;
@@ -3262,7 +3263,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             {
                 if (!IsCurrent()) { FinishSortRecovery(); return; }
                 if (IsFolderSizeProvider && sort.Key == FolderSizeLocationPolicy.SizeColumn &&
-                    !ShellFileViewExportCapture.HasVisibleUnresolvedColumn(view, sort.Key, includeResolved: true))
+                    (grouped || !ShellFileViewExportCapture.HasVisibleUnresolvedColumn(view, sort.Key, includeResolved: true)))
                 {
                     // A saved Size sort remains valid when the display column is hidden.
                     var count = ReadDirectoryMonitorItemCount();
@@ -3345,6 +3346,16 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 readinessRow = 0;
                 readinessFoundPendingValue = false;
                 timer.Start();
+                return;
+            }
+            if (grouped)
+            {
+                // A saved group can be accepted before DefView builds its groups.
+                // One refresh after all Size values exist materializes native grouping;
+                // refreshing before values are ready only creates an unsorted empty group.
+                Trace("grouped-values-ready-refresh");
+                FinishSortRecovery();
+                if (IsCurrent()) Refresh();
                 return;
             }
             // SetSortColumns restores state but does not always execute a provider's
