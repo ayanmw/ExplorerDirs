@@ -4837,8 +4837,9 @@ namespace
             }
             return S_OK;
         }
-        PIDLIST_ABSOLUTE ProviderNotificationIdentity(PCIDLIST_ABSOLUTE physical, LONG event) const
+        PIDLIST_ABSOLUTE ProviderNotificationIdentity(PCIDLIST_ABSOLUTE physical, LONG event, bool* staleUpdate = nullptr) const
         {
+            if (staleUpdate) *staleUpdate = false;
             if (!physical || !_root || !_backingRoot) return nullptr;
             if (ILIsEqual(physical, _backingRoot)) return ILCloneFull(_root);
             if (!ILIsParent(_backingRoot, physical, TRUE)) return nullptr;
@@ -4853,6 +4854,7 @@ namespace
                 ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
             WIN32_FIND_DATAW data{};
             const auto search = FindFirstFileW(path, &data);
+            const auto lookupError = search == INVALID_HANDLE_VALUE ? GetLastError() : ERROR_SUCCESS;
             if (search != INVALID_HANDLE_VALUE)
             {
                 FindClose(search);
@@ -4864,6 +4866,14 @@ namespace
             ED_SIZE_TRACE(search != INVALID_HANDLE_VALUE ? "provider-identity-live" : "provider-identity-missing",
                 this, child.name, kind, child.attributes, child.size);
             CoTaskMemFree(path);
+            // A delayed UPDATEITEM for a deleted child otherwise resurrects its row as a normal file.
+            // Keep missing identities for DELETE/RMDIR and rename; access failures are not deletion proof.
+            if (kind == SHCNE_UPDATEITEM &&
+                (lookupError == ERROR_FILE_NOT_FOUND || lookupError == ERROR_PATH_NOT_FOUND))
+            {
+                if (staleUpdate) *staleUpdate = true;
+                return nullptr;
+            }
             // Deleted items have no filesystem metadata, but their name still identifies the row.
             if (FAILED(copied) || !*child.name) return nullptr;
             auto* relative = CloneSyntheticChild(child);
@@ -4881,14 +4891,15 @@ namespace
             PCIDLIST_ABSOLUTE physical[] = { first, second };
             MessageSFVCB(SFVM_FSNOTIFY, reinterpret_cast<WPARAM>(physical), kind);
             if (!_notificationWindow) return;
-            auto* translatedFirst = ProviderNotificationIdentity(first, kind);
+            bool staleUpdate = false;
+            auto* translatedFirst = ProviderNotificationIdentity(first, kind, &staleUpdate);
             auto* translatedSecond = second ? ProviderNotificationIdentity(second, kind) : nullptr;
             if (translatedFirst && (!second || translatedSecond))
             {
                 ED_SIZE_TRACE("provider-view-forwarded", this, nullptr, kind, 0, 0);
                 SHChangeNotify(kind, SHCNF_IDLIST | SHCNF_FLUSHNOWAIT, translatedFirst, translatedSecond);
             }
-            else if (ILIsEqual(first, _backingRoot) || ILIsParent(_backingRoot, first, FALSE))
+            else if (!staleUpdate && (ILIsEqual(first, _backingRoot) || ILIsParent(_backingRoot, first, FALSE)))
                 SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_IDLIST | SHCNF_FLUSHNOWAIT, _root, nullptr);
             if (translatedFirst) CoTaskMemFree(translatedFirst);
             if (translatedSecond) CoTaskMemFree(translatedSecond);

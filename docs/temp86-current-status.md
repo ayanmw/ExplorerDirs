@@ -150,3 +150,10 @@ NativeProbe在断言超时之后才读取最多2048行名称，打印非filler�
 `src/.state/app-notification-identity-run.log` 完整 App 四窗格×1,025 filler 失败于 file-create；隔离及输入保护通过。专用诊断 trace 位于 `.state/app-session-process/6927ac257bef4a258f9aa276c9dc6259/app/ExplorerDirs.ShellNamespace.dll.size-trace.log`。tick381371453 四窗格转发已删除目录的 RMDIR；tick381374046/381374062 又转发同名不存在条目的 UPDATEITEM，构造属性变成 FILE_ATTRIBUTE_NORMAL。随后旧目录行复现。该证据支持调查延迟更新通知，不等同修复已验证。
 
 Windows SDK 常量核实：SHCNE_UPDATEDIR=0x1000，SHCNE_UPDATEITEM=0x2000；此前调查中将原始 0x2000 称作 UPDATEDIR 的描述有误，应按本次更正解释。此次仅诊断编译增加叶名称/存在状态，普通产品行为未修改。下一步对照不存在条目的更新通知处理，保留删除/重命名旧身份语义，禁止自动完整刷新回退。
+
+
+## 延迟 UPDATEITEM 候选处理（2026-11-05，整项未通过）
+
+仅当 UPDATEITEM 的物理直接子项查询返回 FILE_NOT_FOUND/PATH_NOT_FOUND 时，停止构造/转发该过期更新，且不回退为目录刷新。删除、重命名及访问失败行为保留。诊断DLL构建通过；`src/.state/stale-update-run.log` 同一1025行完整App对照通过目录删除、单文件创建/删除及三文件创建，旧目录未再出现，但三文件删除全部残留，整项失败。所用App仍为NoEnumRefresh关闭控制载荷，不替代默认产品验证；过程中存在空列表采样，不符合最终视觉目标。
+
+当前源码删除补偿明确跳过大于512行的视图，下一步需结合原生批量删除通知追踪和有界异步身份查找处理；不得通过扩大同步扫描上限或自动全量刷新掩盖问题。候选尚未正常产品/同名重建回归，不发布。
