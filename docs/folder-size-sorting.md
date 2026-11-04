@@ -156,3 +156,19 @@ App/ProfileShellNamespaceOwner 提供上下文工厂，按实际 DLL 完整导�
 探针新增生命周期断言时发现：RootVisual=null仅会停放HwndHost；原探针source分支没有显式Dispose各host。现source销毁后逐一Dispose宿主，再断言上下文释放，避免以进程退出冒充产品关闭证据。此修正只影响探针，不改生产窗口关闭路径。
 
 普通后台30项整轮通过：src/.state/background-checks/20261105-004318-297c58096f9d4d7180dced442edb5593/summary.json（本批源码状态）。最后对HostProbe反射构造新增第三个排序回调的接线，HostProbe/App Release重建通过；未据此重跑并关闭候选保存排序失败。候选ABI native严格构建与最终diff检查通过。未覆盖temp.86。
+
+## 2026-11-05 初始排序恢复：确定性修复与对照
+
+新增默认关闭、按宿主最多128条的恢复轨迹，记录阶段/退出/输入版本/代际，不在比较回调中反查Shell。隔离探针明确观察原生临时降序后立即调用产品CaptureViewState。旧版 transient-sort-capture-before.log 确定失败：缓存被写成临时降序；修正版在同阶段保留升序并报告未完成。临时保护不污染原有失败位，避免隐藏标签在恢复结束后仍被临时失败永久阻断；getter序列还核对临时状态版本，拒绝穿越临时阶段的重入采集。
+
+每个恢复任务拥有序号。新任务/销毁会退休旧任务；旧任务只能清理自己的临时标志，不能解除新任务的重绘保护。抑制重绘前后核对当前任务，过期候选lease自行释放。列可见性Shell getter后再次核对代际，避免迟到读启动旧任务。
+
+第二条对照发现空owner的后台排序命令会在本机四窗格中返回成功却留下错误行序。保持捕获修复不变，只将owner切回0的 sort-null-owner-control.log 再次在pane3失败（接口升序、实际37/11降序），守卫干净；自动finally恢复源码。DefView子窗口owner的四窗格虽通过，但截止分支有0/未知值及行序失败（sort-recovery-deadline.log），保留失败。最终使用本窗格宿主_hostWindow，普通可见菜单的顶层owner逻辑不改。
+
+最终窗格宿主owner对照：sort-pane-owner-candidate.log 四上下文、临时捕获、导航历史、真实行序、大小、选区/焦点、释放和守卫整项通过；sort-pane-owner-deadline.log 观察真实临时反向，再只将readiness时钟推进到31秒，保存升序/5与29字节行序及选区全部恢复，整项通过。早先修正版直接DefView owner的成功轮 sort-recovery-candidate-final.log 和普通DLL轮 sort-recovery-regular-host.log也保留，但不替代最终owner证据。
+
+大目录最终宿主owner回归：sort-recovery-large-no-observer.log / sort-recovery-large-observer.log 均已退出0、完成清理并通过隔离守卫，四窗格各1025目录，4,100条目独立数值/升降序/选区/焦点全部正确；观察器开启时记录4100个通知身份且没有丢弃。第一轮清理未结束即误启动第二轮，两轮清理/扫描有重叠；因此保留功能证据，不将耗时当作独立性能基准。观察超时期间均跟踪原会话，没有因短观察超时重启进程。
+
+最终后台30项整轮通过：src/.state/background-checks/20261105-011951-d744e826334047a9913d0c88c82575b1/summary.json（48d8411加本批源码）。最后只补旧异常分支的同一序号重绘lease保护，App/HostProbe重建检查另行记录。本批没有覆盖预览；混合排序原生菜单校正产品接线及可见验收仍待完成，不因初始排序回归通过宣布temp.86全部完成。
+
+边界：本批的确定性打断控制是导航/状态采集，不代表已覆盖用户键鼠输入在临时反向阶段的所有取消语义；该交互仍保留在集中验收及后续命令协调检查中。

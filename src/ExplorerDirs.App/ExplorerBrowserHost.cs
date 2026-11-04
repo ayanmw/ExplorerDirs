@@ -61,6 +61,28 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private ShellViewRedrawLease? _initialVirtualSortRedrawLease;
     private IntPtr _initialVirtualSortRedrawWindow;
     private int _shellSortCommandDispatchDepth;
+    private List<string>? _initialSortRecoveryTrace;
+    private long _initialSortRecoverySerial;
+    private long _initialSortTransientOwner;
+    private long _initialSortStateVersion;
+    internal void EnableInitialSortRecoveryTrace() => _initialSortRecoveryTrace = [];
+    internal string InitialSortRecoveryStatus => _initialSortRecoveryTrace is { } trace ? string.Join('|', trace) : "disabled";
+    private void RecordInitialSortRecovery(string stage)
+    {
+        if (_initialSortRecoveryTrace is { Count: < 128 } trace) trace.Add(stage);
+    }
+
+    private void BeginInitialSortTransient(long owner)
+    {
+        _initialSortTransientOwner = owner;
+        _initialSortStateVersion++;
+    }
+    private void EndInitialSortTransient(long owner)
+    {
+        if (owner == 0 || _initialSortTransientOwner != owner) return;
+        _initialSortTransientOwner = 0;
+        _initialSortStateVersion++;
+    }
     private readonly ViewStyleWheelAccumulator _ctrlWheelAccumulator = new();
     private readonly Dictionary<uint, int> _nativeUserMessages = new();
     private readonly Dictionary<IntPtr, string> _nativeViewWindowClasses = new();
@@ -516,7 +538,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private bool _viewCaptureFailed;
     public bool ViewCaptureFailed
     {
-        get => _viewCaptureFailed || _viewRestoreFailed;
+        get => _viewCaptureFailed || _viewRestoreFailed || _initialSortTransientOwner != 0;
         private set => _viewCaptureFailed = value;
     }
     internal int DirectoryChangeFallbackRefreshCount { get; private set; }
@@ -2082,7 +2104,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 if (context is not null) Marshal.ReleaseComObject(context);
                 return null;
             }
-            return new NativeShellCommandMenu(context, allowHidden ? IntPtr.Zero :
+            // Hidden recovery commands still need their own pane host owner. The
+            // null-owner control left inactive panes unsorted despite S_OK replies.
+            return new NativeShellCommandMenu(context, allowHidden ? _hostWindow :
                 Window.GetWindow(this) is { } window ? new WindowInteropHelper(window).Handle : _hostWindow);
         }
         finally { Marshal.ReleaseComObject(viewObject); }
@@ -2489,7 +2513,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     {
         var browser = _browser;
         var generation = _viewReadiness.Generation;
-        bool IsCurrentCapture() => ReferenceEquals(browser, _browser) && generation == _viewReadiness.Generation;
+        var sortStateVersion = _initialSortStateVersion;
+        bool IsCurrentCapture() => ReferenceEquals(browser, _browser) && generation == _viewReadiness.Generation &&
+            _initialSortTransientOwner == 0 && sortStateVersion == _initialSortStateVersion;
+        // The getter reports this attempt incomplete while the temporary phase is
+        // active. Do not poison the confirmed cache's failure bit for a hidden tab.
+        if (_initialSortTransientOwner != 0) return _viewState.Copy();
         if (_locationUnconfirmed)
         {
             ViewCaptureFailed = true;
@@ -2829,10 +2858,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             {
                 _viewRestoreFailed = !restored;
                 if (restored) _quickFilterGroupToRestore = null;
+                if (_initialSortRecoveryTrace is not null)
+                    RecordInitialSortRecovery($"restore;generation={generation};restored={restored};provider={IsFolderSizeProvider};sorts={saved.SortColumns.Count};group={saved.GroupKey}");
                 if (restored && (!_location.IsFileSystemLocation || IsFolderSizeProvider) && saved.GroupKey is null &&
                     saved.SortColumns.Count == 1 &&
                     ShellFileViewExportCapture.HasVisibleUnresolvedColumn(view, saved.SortColumns[0].Key,
-                        includeResolved: IsFolderSizeProvider && saved.SortColumns[0].Key == FolderSizeLocationPolicy.SizeColumn))
+                        includeResolved: IsFolderSizeProvider && saved.SortColumns[0].Key == FolderSizeLocationPolicy.SizeColumn) && Current())
                     ScheduleInitialVirtualSort(saved.SortColumns[0], Current);
             }
         }
@@ -2841,7 +2872,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private void ScheduleInitialVirtualSort(SortColumnState sort, Func<bool> isCurrent)
     {
+        if (!isCurrent()) return;
+        var traceSerial = ++_initialSortRecoverySerial;
         ReleaseInitialVirtualSortRedrawLease();
+        EndInitialSortTransient(_initialSortTransientOwner);
         var oppositeApplied = false;
         var savedApplied = false;
         ShellViewSelectionSnapshot? initialSortSelection = null;
@@ -2851,10 +2885,18 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var readinessRow = 0;
         int? readinessItemCount = null;
         var readinessFoundPendingValue = false;
-        bool IsCurrent() => isCurrent() &&
+        var traceTicks = 0;
+        bool IsCurrent() => traceSerial == _initialSortRecoverySerial && isCurrent() &&
             expectedInputVersion == Interlocked.Read(ref _nativeUserInputVersion);
+        void Trace(string stage)
+        {
+            if (_initialSortRecoveryTrace is null) return;
+            RecordInitialSortRecovery($"{traceSerial}:{stage};ms={readinessWait.ElapsedMilliseconds};tick={traceTicks};opposite={oppositeApplied};saved={savedApplied};current={IsCurrent()};visit-current={isCurrent()};input={expectedInputVersion}/{Interlocked.Read(ref _nativeUserInputVersion)};row={readinessRow}/{readinessItemCount};pending-value={readinessFoundPendingValue}");
+        }
+        Trace("scheduled");
         void FinishSortRecovery()
         {
+            Trace("finish");
             try
             {
                 // A deadline between the two native verbs must not leave the temporary
@@ -2863,6 +2905,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 {
                     var savedSortVerb = sort.Direction > 0 ? "sortascending" : "sortdescending";
                     savedApplied = InvokeVirtualSortVerb(savedSortVerb, IsCurrent);
+                    Trace("saved-verb-returned");
+                    if (savedApplied) EndInitialSortTransient(traceSerial);
                     if (IsCurrent())
                     {
                         if (!savedApplied)
@@ -2879,7 +2923,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             {
                 initialSortSelection?.Dispose();
                 initialSortSelection = null;
-                ReleaseInitialVirtualSortRedrawLease();
+                EndInitialSortTransient(traceSerial);
+                if (traceSerial == _initialSortRecoverySerial) ReleaseInitialVirtualSortRedrawLease();
             }
         }
         var timer = new DispatcherTimer(DispatcherPriority.Background)
@@ -2890,8 +2935,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         timer.Tick += async (_, _) =>
         {
             timer.Stop();
+            traceTicks++;
+            if ((traceTicks & (traceTicks - 1)) == 0) Trace("tick");
             if (!IsCurrent() || readinessWait.Elapsed >= TimeSpan.FromSeconds(30))
             {
+                Trace("cancel-or-deadline");
                 FinishSortRecovery();
                 return;
             }
@@ -2907,7 +2955,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 if (!savedApplied)
                 {
                     var savedSortVerb = sort.Direction > 0 ? "sortascending" : "sortdescending";
-                    try { savedApplied = InvokeVirtualSortVerb(savedSortVerb, IsCurrent); }
+                    try
+                    {
+                        savedApplied = InvokeVirtualSortVerb(savedSortVerb, IsCurrent);
+                        Trace("saved-verb-returned");
+                        if (savedApplied) EndInitialSortTransient(traceSerial);
+                    }
                     catch
                     {
                         FinishSortRecovery();
@@ -2983,7 +3036,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     timer.Start();
                     return;
                 }
-                if (readinessSession is null) return;
+                if (readinessSession is null) { Trace("no-readiness-session"); timer.Start(); return; }
 
                 while (IsCurrent() && readinessWait.Elapsed < TimeSpan.FromSeconds(30))
                 {
@@ -3068,18 +3121,30 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                             initialSortSelection = null;
                             initialSortSelection = cachedSelection.Clone();
                         }
-                        _initialVirtualSortRedrawLease = ShellViewRedrawLease.TrySuppress(sortView);
-                        if (_initialVirtualSortRedrawLease is not null)
-                            _initialVirtualSortRedrawWindow = _viewWindow;
+                        if (IsCurrent())
+                        {
+                            var redraw = ShellViewRedrawLease.TrySuppress(sortView);
+                            if (IsCurrent())
+                            {
+                                _initialVirtualSortRedrawLease = redraw;
+                                if (redraw is not null) _initialVirtualSortRedrawWindow = _viewWindow;
+                            }
+                            else redraw?.Dispose();
+                        }
                     }
                     catch (COMException)
                     {
-                        ReleaseInitialVirtualSortRedrawLease(requestRedraw: false);
+                        if (traceSerial == _initialSortRecoverySerial)
+                            ReleaseInitialVirtualSortRedrawLease(requestRedraw: false);
                     }
                     finally { Marshal.Release(sortView); }
                 }
 
-                try { oppositeApplied = InvokeVirtualSortVerb(oppositeVerb, IsCurrent); }
+                if (!IsCurrent()) { FinishSortRecovery(); return; }
+                // Capture during this deliberate reverse sort must retain the user's
+                // intended view, including navigation callbacks pumped by the command.
+                BeginInitialSortTransient(traceSerial);
+                try { oppositeApplied = InvokeVirtualSortVerb(oppositeVerb, IsCurrent); Trace("opposite-verb-returned"); }
                 catch
                 {
                     FinishSortRecovery();
@@ -3098,6 +3163,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             try
             {
                 savedApplied = InvokeVirtualSortVerb(savedVerb, IsCurrent);
+                Trace("saved-verb-returned");
+                if (savedApplied) EndInitialSortTransient(traceSerial);
                 if (savedApplied)
                 {
                     expectedInputVersion = Interlocked.Read(ref _nativeUserInputVersion);
@@ -5379,6 +5446,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private void DisposeBrowser()
     {
         ReleaseInitialVirtualSortRedrawLease(requestRedraw: false);
+        _initialSortRecoverySerial++;
+        EndInitialSortTransient(_initialSortTransientOwner);
         _viewStyleCaptureOperation?.Abort();
         _viewStyleCaptureOperation = null;
         _quickFilterRequestVersion++;

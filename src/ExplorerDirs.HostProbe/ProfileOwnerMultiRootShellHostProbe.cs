@@ -45,6 +45,9 @@ internal static class ProfileOwnerMultiRootShellHostProbe
         var hosts = new List<HwndHost>();
         var sortContexts = new List<object>();
         DispatcherTimer? deadlineStall = null;
+        DispatcherTimer? transientCaptureTimer = null;
+        Exception? transientCaptureFailure = null;
+        var transientCaptureObserved = false;
         var deadlineStalled = false;
         var foreground = GetForegroundWindow();
         try
@@ -117,6 +120,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                     .Invoke(null, [folders[index], classId])!;
                 var viewState = CreateViewState(appAssembly, index % 2 == 0 ? 1 : -1);
                 var host = (HwndHost)Activator.CreateInstance(hostType, identity, viewState)!;
+                hostType.GetMethod("EnableInitialSortRecoveryTrace", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(host, null);
                 // Match PaneControl: provider identity is paired with its owning profile.
                 hostType.GetMethod("ConfigureFolderSizeLocations", BindingFlags.Instance | BindingFlags.NonPublic)!
                     .Invoke(host, [classId, true]);
@@ -162,6 +166,41 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 };
                 deadlineStall.Start();
             }
+            if (_sortContextAdapter is not null)
+            {
+                transientCaptureTimer = new DispatcherTimer(DispatcherPriority.Send) { Interval = TimeSpan.FromMilliseconds(10) };
+                transientCaptureTimer.Tick += (_, _) =>
+                {
+                    nint view = 0;
+                    try
+                    {
+                        var trace = (string)hostType.GetProperty("InitialSortRecoveryStatus", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(hosts[0])!;
+                        if (!trace.Contains("opposite-verb-returned", StringComparison.Ordinal)) return;
+                        view = (nint)hostType.GetMethod("GetFolderView2Pointer", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(hosts[0], null)!;
+                        if (view == 0) return;
+                        var sourceType = hostType.GetNestedType("NativeViewStateSource", BindingFlags.NonPublic)!;
+                        var reader = Activator.CreateInstance(sourceType, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                            null, [view], null)!;
+                        object?[] args = [1, null];
+                        if ((int)sourceType.GetMethod("GetSortColumns")!.Invoke(reader, args)! < 0 || args[1] is not System.Collections.IEnumerable columns) return;
+                        var actual = columns.Cast<object>().SingleOrDefault();
+                        if (actual is null || (int)actual.GetType().GetProperty("Direction")!.GetValue(actual)! != -1) return;
+                        var captured = hostType.GetMethod("CaptureViewState")!.Invoke(hosts[0], null)!;
+                        var saved = ((System.Collections.IEnumerable)captured.GetType().GetProperty("SortColumns")!.GetValue(captured)!)
+                            .Cast<object>().Single();
+                        if ((int)saved.GetType().GetProperty("Direction")!.GetValue(saved)! != 1)
+                            throw new InvalidOperationException("Capture cached the initial recovery's temporary descending direction.");
+                        if (!(bool)hostType.GetProperty("ViewCaptureFailed", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!.GetValue(hosts[0])!)
+                            throw new InvalidOperationException("Temporary recovery capture was reported as complete.");
+                        transientCaptureObserved = true;
+                        transientCaptureTimer.Stop();
+                        Console.WriteLine("product-initial-sort-transient-capture: native-descending=True; cached-ascending=True; incomplete=True");
+                    }
+                    catch (Exception error) { transientCaptureFailure = error; transientCaptureTimer.Stop(); }
+                    finally { if (view != 0) Marshal.Release(view); }
+                };
+                transientCaptureTimer.Start();
+            }
             Console.WriteLine("profile-owner-multi-root-shell-host: stage=attach-root-visual");
             source.RootVisual = grid;
             grid.Measure(new Size(960, 640));
@@ -191,6 +230,9 @@ internal static class ProfileOwnerMultiRootShellHostProbe
 
             if (_sortContextAdapter is not null)
             {
+                WaitUntil(() => transientCaptureObserved || transientCaptureFailure is not null,
+                    TimeSpan.FromSeconds(15), "Did not observe the real temporary sort capture boundary.");
+                if (transientCaptureFailure is not null) throw new InvalidOperationException("Temporary sort capture control failed.", transientCaptureFailure);
                 var contextField = hostType.GetField("_folderSizeSortContext", BindingFlags.Instance | BindingFlags.NonPublic)!;
                 foreach (var host in hosts)
                     sortContexts.Add(contextField.GetValue(host) ?? throw new InvalidOperationException("Host did not create its sort context."));
@@ -307,6 +349,8 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                                 ? numericValues[row - 1] > numericValues[row]
                                 : numericValues[row - 1] < numericValues[row]));
                     var failureCacheMetrics = adapterModule == 0 ? "diagnostic-counters=unavailable" : ReadCacheMetrics(adapterModule);
+                    var recoveryTrace = hostType.GetProperty("InitialSortRecoveryStatus", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host);
+                    Console.WriteLine($"product-initial-sort-recovery: pane={index + 1};trace=[{recoveryTrace}]");
                     throw new InvalidOperationException($"Product pane {index + 1} saved sort timed out: value-ready-ms={paneValueReadyMilliseconds[index]}; rows={totalRows}/{expectedItemCount}; actual-names={failureNameEdges}; actual-values={failureValueEdges}; name-mismatches={nameMismatches.Length}; first-mismatches=[{mismatchSamples}]; adjacent-sort-violations={sortViolations}; actual-sort=[{string.Join('|', actualSorts)}]; cache=[{failureCacheMetrics}]; expected-direction={expectedDirection}.", exception);
                 }
             }
@@ -405,6 +449,8 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                     throw new InvalidOperationException($"Product pane {index + 1} lost its independent selection/focus after sort: selected=[{string.Join('|', selected)}]; listview-focus={listViewFocus}; shell-focus={paneFocus[index]}.");
             }
 
+            for (var traceIndex = 0; traceIndex < hosts.Count; traceIndex++)
+                Console.WriteLine($"product-initial-sort-recovery: pane={traceIndex + 1};trace=[{hostType.GetProperty("InitialSortRecoveryStatus", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(hosts[traceIndex])}]");
             if (GetForegroundWindow() != foreground)
                 throw new InvalidOperationException("The product panes changed the foreground window.");
             if (forceSortDeadline && !deadlineStalled)
@@ -421,6 +467,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
         finally
         {
             deadlineStall?.Stop();
+            transientCaptureTimer?.Stop();
             Console.WriteLine("profile-owner-multi-root-shell-host: stage=cleanup");
             if (source is not null)
             {
