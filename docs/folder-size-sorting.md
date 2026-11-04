@@ -213,3 +213,20 @@ sort-post-input-host.log、sort-input-consecutive-no-edit.log、sort-input-revie
 重命名场景显式使用SVSI_EDIT在folder-large打开真实Edit，泵消息350ms确认编辑仍聚焦、排序仍为临时降序（未在编辑中重排），向私有桌面编辑控件发送Escape取消后，恢复原排序与最新选区。sort-rename-host-final.log整项通过且隔离守卫干净。首轮因反射遗漏Public标志失败（sort-rename-host.log），已修正探针，不将该轮记成功。该证据覆盖原生编辑生命周期，不替代物理F2/方向键、长时间编辑及拖选验收。
 
 普通连续选择回归sort-boundaries-selection-control.log再次整项通过。HostProbe/NativeProbe Release构建均0警告0错误，diff检查通过。本批只扩展诊断入口/测试，没有修改产品实现或重跑宣称整轮30项总检。混合策略正式激活、原生菜单/列头方向同步、剩余交互合同及temp.86集中验收继续推进，不覆盖发布。
+
+
+### 2026-11-05 原生命令后的产品宿主策略校正（候选ABI）
+
+新增显式 --product-user-sort-host-private-desktop（HostProbe.dll、实验adapter.dll）。它只创建一个真实ExplorerBrowserHost，以隔离分类命令合同，保留跨目录/历史/上下文关闭检查；原四宿主输入/编辑/分组测试不删减。夹具最终为5 B、29 B两个目录与17 B文件。
+
+重要调查修正：初版复用分组/筛选后续状态，虽然辅助TrySetGroup(null)返回成功，但再次Refresh恢复了大小分组，view-state实际GroupKey仍为PKEY_Size。此时全列表不应按未分组数值断言；user-sort-policy-value.log / user-sort-compare-trace.log证明上下文匹配、共享policy校验S_OK且比较回调5/17/29正确，不能据该夹具宣布混合比较器失败。独立分类场景现跳过这段分组夹具，仍由普通四宿主场景覆盖分组。辅助分组清除与后续状态恢复的边界另待核查。
+
+真正的未分组旧版反例为user-sort-ungrouped-final.log：原生菜单降序未保持文件夹在前，整项失败且隔离守卫干净。前面两轮并发对照在进入新增断言前已有第三窗格初始排序失败（user-sort-red-native.log、user-sort-list-red.log），不能算新增分类失败证据；也说明初始排序稳定性尚不可关闭。
+
+产品宿主现于DefSubclassProc命令/上下文菜单返回及列头左键释放后合并排队读取当前单一PKEY_Size排序。只有同一browser/视图代际/上下文/provider仍有效时才同步方向；分类模式方向变化复用已有有界恢复、选区/输入保护，混合/分组不做额外校正。跳过自己发送的排序命令，方向不变不重排；暂态期间收到的用户校正延后到暂态结束。视图拆除中止排队与延后请求。不在CompareIDs/GetCurFolder中读Shell状态，不改变右键菜单内容。
+
+user-sort-final-direct.log整项通过：原生命令分类降序29/5/17；再直接更新本标签测试策略并走一次原生命令，混合升序5/17/29、混合降序29/17/5、分类升序5/29/17、分类降序29/5/17全部实际行序正确。没有保留测试中诊断性的额外反向命令。测试修改策略仍是反射到候选上下文，不代表选项菜单已交付。活动IPersistFolder2根已验证属于本标签上下文，测试PIDL克隆与诊断module都有确定释放。
+
+user-sort-queue-four-pane-regression.log四宿主连续输入/选区/实际大小/方向/分组筛选/关闭以及隔离守卫通过（最后仅补provider范围与延后请求清理）。最终30项后台整轮通过：src/.state/background-checks/20261105-023212-5fa9707cb566433b8a4ca20d225c53d8/summary.json。列表模式合同不是图标/详细信息列头、其他排序列或可见重绘性能验收；这些、初始并发排序反例、混合开关入口与正式ABI激活仍待完成，temp.86不发布。
+
+最终源码另通过user-sort-final-four-pane.log四宿主整轮（含最终provider范围/延后清理），隔离守卫干净；不消除之前两轮初始排序失败事实。

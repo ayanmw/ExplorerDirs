@@ -86,6 +86,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         if (owner == 0 || _initialSortTransientOwner != owner) return;
         _initialSortTransientOwner = 0;
         _initialSortStateVersion++;
+        if (_nativeSortReconciliationDeferred)
+        {
+            _nativeSortReconciliationDeferred = false;
+            QueueNativeSortReconciliation();
+        }
     }
     private void PreserveInitialSortInput(long inputVersion, nint inputHwnd = default)
     {
@@ -234,6 +239,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private long _folderSizeRedirectVersion;
     private FolderSizeSortContextFactory? _folderSizeSortContextFactory;
     private FolderSizeSortContext? _folderSizeSortContext;
+    private int _folderSizeSortDirection = 1;
+    private DispatcherOperation? _nativeSortReconciliation;
+    private bool _nativeSortReconciliationDeferred;
     internal bool IsFolderSizeProvider => _nativeDirectoryIdentity is { } identity &&
         QdrShellPathCodec.TryGetProviderPath(identity, _folderSizeProfileClassId, out _);
 
@@ -262,9 +270,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             if (!_folderSizeSortContextFactory(source, intended.MixedSizeSort, direction,
                 out var context, out var prepared)) return 0;
             _folderSizeSortContext = context;
+            _folderSizeSortDirection = direction;
             return prepared;
         }
         _folderSizeSortContext.Update(intended.MixedSizeSort, direction);
+        _folderSizeSortDirection = direction;
         return _folderSizeSortContext.Contains(source) ? 0 : _folderSizeSortContext.Prepare(source);
     }
 
@@ -272,6 +282,50 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     {
         var direction = sorts.FirstOrDefault(sort => sort.Key == FolderSizeLocationPolicy.SizeColumn)?.Direction ?? 1;
         _folderSizeSortContext?.Update(_viewState.MixedSizeSort, direction);
+        _folderSizeSortDirection = direction;
+    }
+
+    private void QueueNativeSortReconciliation()
+    {
+        if (_folderSizeSortContext is null || _browser is null || !IsFolderSizeProvider) return;
+        var browser = _browser;
+        var generation = _viewReadiness.Generation;
+        var context = _folderSizeSortContext;
+        bool Current() => ReferenceEquals(browser, _browser) && generation == _viewReadiness.Generation &&
+            ReferenceEquals(context, _folderSizeSortContext) && IsFolderSizeProvider;
+        _nativeSortReconciliation?.Abort();
+        _nativeSortReconciliation = Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+        {
+            _nativeSortReconciliation = null;
+            if (!Current()) return;
+            if (_initialSortTransientOwner != 0)
+            {
+                _nativeSortReconciliationDeferred = true;
+                return;
+            }
+            var view = GetFolderView2Pointer();
+            if (view == 0) return;
+            try
+            {
+                var source = new NativeViewStateSource(view);
+                if (source.GetSortColumnCount(out var count) < 0 || !Current() || count != 1 ||
+                    source.GetSortColumns(count, out var sorts) < 0 || !Current() ||
+                    sorts[0].Key != FolderSizeLocationPolicy.SizeColumn ||
+                    sorts[0].Direction == _folderSizeSortDirection) return;
+                var saved = CaptureViewState();
+                if (!Current() || ViewCaptureFailed || !saved.SortColumns.SequenceEqual(sorts)) return;
+                UpdateFolderSizeSortPolicy(sorts);
+                if (!Current() || saved.MixedSizeSort || saved.GroupKey is not null) return;
+                // The original Shell sort used the previous direction's category compensation.
+                // Reuse the bounded native recovery, with its selection and input protections.
+                ScheduleInitialVirtualSort(sorts[0], Current);
+            }
+            catch (COMException error)
+            {
+                if (Current()) MenuError?.Invoke(this, error.Message);
+            }
+            finally { Marshal.Release(view); }
+        }));
     }
 
     internal bool HasNativeView => _browser is not null && _viewWindow != IntPtr.Zero;
@@ -5946,6 +6000,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private void DetachViewWindow()
     {
+        _nativeSortReconciliation?.Abort();
+        _nativeSortReconciliation = null;
+        _nativeSortReconciliationDeferred = false;
         ReleaseInitialVirtualSortRedrawLease(requestRedraw: false);
         foreach (var hwnd in _subclassedWindows)
         {
@@ -6134,6 +6191,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         IntPtr result;
         try { result = DefSubclassProc(hwnd, message, wParam, lParam); }
         finally { if (contextDispatch) NativeShellTheme.EndMenu(); }
+        if (Volatile.Read(ref _shellSortCommandDispatchDepth) == 0 &&
+            (contextDispatch || message == 0x0111 && lParam == IntPtr.Zero ||
+                message == 0x0202 && IsColumnHeaderInputWindow(hwnd)))
+            QueueNativeSortReconciliation();
         if (_traceNativeUserMessages && _nativePaintTransitionStartedAt != 0)
         {
             var elapsed = Stopwatch.GetElapsedTime(_nativePaintTransitionStartedAt);

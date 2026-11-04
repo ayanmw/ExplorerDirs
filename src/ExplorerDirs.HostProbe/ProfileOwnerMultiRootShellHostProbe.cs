@@ -14,6 +14,26 @@ internal static class ProfileOwnerMultiRootShellHostProbe
 
     private static string? _sortContextAdapter;
     private static bool _inputDuringSort;
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int GetProbeFolder(nint self, in Guid iid, out nint folder);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int GetProbeFolderIdentity(nint self, out nint identity);
+    [DllImport("shell32.dll", EntryPoint = "ILClone")]
+    private static extern nint CloneProbeRoot(nint root);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int VerifyProbePolicy(nint root, uint expected);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int GetProbeComparisonCount();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)]
+    private delegate int ReadProbeComparison(int index, StringBuilder text, uint capacity);
+    private static bool _reconcileUserSort;
+    internal static int RunUserSortReconciliationForProbe(string adapterPath)
+    {
+        _reconcileUserSort = true;
+        try { return RunWithSortContextForProbe(adapterPath); }
+        finally { _reconcileUserSort = false; }
+    }
+
     private static bool _renameDuringSort;
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int SelectProbeItem(nint self, int index, uint flags);
@@ -72,6 +92,7 @@ internal static class ProfileOwnerMultiRootShellHostProbe
         object? owner = null;
         HwndSource? source = null;
         nint adapterModule = 0;
+        nint sortPolicyModule = 0, sortPolicyRoot = 0;
         var hosts = new List<HwndHost>();
         var sortContexts = new List<object>();
         DispatcherTimer? deadlineStall = null;
@@ -143,7 +164,9 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             grid.RowDefinitions.Add(new RowDefinition());
             grid.ColumnDefinitions.Add(new ColumnDefinition());
             grid.ColumnDefinitions.Add(new ColumnDefinition());
-            for (var index = 0; index < folders.Length; index++)
+            // Isolate the category-command contract from concurrent initial-sort races.
+            // Ordinary input/rename/history probes retain all four simultaneous hosts.
+            for (var index = 0; index < (_reconcileUserSort ? 1 : folders.Length); index++)
             {
                 Console.WriteLine($"profile-owner-multi-root-shell-host: stage=create-host-{index + 1}");
                 var identity = (string)codec.GetMethod("ToProviderIdentity", BindingFlags.Static | BindingFlags.NonPublic)!
@@ -477,7 +500,8 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                 }
             }
 
-            if (!large)
+            // Keep this targeted case ungrouped; ordinary four-host tests retain grouping coverage.
+            if (!large && !_reconcileUserSort)
             {
                 // Property getters can be correct while DefView leaves every folder
                 // cell blank. Assert the actual displayed text in the production host.
@@ -584,11 +608,134 @@ internal static class ProfileOwnerMultiRootShellHostProbe
             Console.WriteLine("profile-owner-multi-root-shell-host: warm-size-read-ms=[" + string.Join('|',
                 paneWarmReadMilliseconds.Select(value => value.ToString("F2", System.Globalization.CultureInfo.InvariantCulture))) + "]");
             Console.WriteLine($"profile-owner-multi-root-shell-host: large={large}; diagnostic-notification-identity-capture={(adapterModule != 0 ? captureNotificationIdentities.ToString() : "unavailable")}; simultaneous-hosts={hosts.Count}; rows-per-pane={expectedItemCount}; roots=independent; value-ready-ms=[{string.Join('|', paneValueReadyMilliseconds)}]; sort-ready-ms=[{string.Join('|', paneSortReadyMilliseconds)}]; recursive-sort-value-edges=[{string.Join(" || ", valueEdges)}]; source-cache-capacity={cacheCapacity}; cache=[{cacheMetrics}]; selections=[{string.Join('|', paneSelections.Select(values => string.Join(',', values)))}]; focused-rows=[{string.Join('|', paneFocus)}]; parents-hidden=True; foreground-unchanged=True");
+            if (_reconcileUserSort)
+            {
+                var host = hosts[0];
+                var window = (nint)hostViewWindow.GetValue(host)!;
+                File.WriteAllBytes(Path.Combine(folders[0], "file-middle.bin"), new byte[17]);
+                hostType.GetMethod("Refresh", BindingFlags.Instance | BindingFlags.Public)!.Invoke(host, null);
+                WaitUntil(() =>
+                {
+                    var rows = readNativeRows.Invoke(null, [window])!;
+                    return (int)rows.GetType().GetField("Item1")!.GetValue(rows)! == 3;
+                }, TimeSpan.FromSeconds(8), "Sort category fixture did not enumerate its third row.");
+                PumpDispatcher(TimeSpan.FromMilliseconds(500));
+                var styleType = appAssembly.GetType("ExplorerDirs.App.ViewStyle", true)!;
+                if (!(bool)hostType.GetMethod("SetViewStyle")!.Invoke(host, [Activator.CreateInstance(styleType, ["List", 3u, -1])])!)
+                    throw new InvalidOperationException("Could not select list mode for native command reconciliation.");
+                PumpDispatcher(TimeSpan.FromMilliseconds(250));
+                // Use the actual Shell menu without the host's programmatic-sort suppression.
+                var menu = hostType.GetMethod("OpenFileCommandMenu", BindingFlags.Instance | BindingFlags.NonPublic, null, [typeof(bool), typeof(bool)], null)!
+                    .Invoke(host, [true, true]) ?? throw new InvalidOperationException("No native background menu.");
+                try
+                {
+                    var result = menu.GetType().GetMethod("InvokeCanonicalVerb", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(menu, ["sortdescending"]);
+                    if (result is not int code || code < 0) throw new InvalidOperationException("Native descending verb failed.");
+                }
+                finally { ((IDisposable)menu).Dispose(); }
+                string[] names = [];
+                WaitUntil(() =>
+                {
+                    var rows = readNativeRows.Invoke(null, [window])!;
+                    names = (string[])rows.GetType().GetField("Item2")!.GetValue(rows)!;
+                    return names.SequenceEqual(["folder-large", "folder-small", "file-middle.bin"]);
+                }, TimeSpan.FromSeconds(8), "Independent descending user sort did not keep folders before files.");
+                var values = (string[])readValues.Invoke(null, [hostType, host, 3])!;
+                if (!values.SequenceEqual(["29", "5", "17"]))
+                    throw new InvalidOperationException($"Wrong independent descending values: {string.Join('|', values)}.");
+                var captured = hostType.GetMethod("CaptureViewState")!.Invoke(host, null)!;
+                var sort = ((System.Collections.IEnumerable)captured.GetType().GetProperty("SortColumns")!.GetValue(captured)!).Cast<object>().Single();
+                Console.WriteLine($"product-user-sort-view-state: {captured}");
+                var sortKey = sort.GetType().GetProperty("Key")!.GetValue(sort)!;
+                if ((Guid)sortKey.GetType().GetProperty("FormatId")!.GetValue(sortKey)! != new Guid("b725f130-47ef-101a-a5f1-02608c9eebac") ||
+                    (uint)sortKey.GetType().GetProperty("PropertyId")!.GetValue(sortKey)! != 12 ||
+                    (bool)hostType.GetProperty("ViewCaptureFailed")!.GetValue(host)!)
+                    throw new InvalidOperationException($"Menu did not retain a complete standard size sort: {sortKey}.");
+                if ((int)sort.GetType().GetProperty("Direction")!.GetValue(sort)! != -1)
+                    throw new InvalidOperationException("Expected actual descending sort state after native menu command.");
+                Console.WriteLine("product-user-sort-reconciliation: mode=list; native-menu=True; folders-first=True; descending-values=29|5|17");
+                var contextField = hostType.GetField("_folderSizeSortContext", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                var context = contextField.GetValue(host)!;
+                var contextUpdate = context.GetType().GetMethod("Update", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                var activeView = (nint)hostType.GetMethod("GetFolderView2Pointer", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(host, null)!;
+                nint activeFolder = 0, activeRoot = 0;
+                try
+                {
+                    var persistFolder2 = new Guid("1ac3d9f0-175c-11d1-95be-00609797ea4f");
+                    var getFolder = Marshal.GetDelegateForFunctionPointer<GetProbeFolder>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(activeView), 5 * IntPtr.Size));
+                    Marshal.ThrowExceptionForHR(getFolder(activeView, in persistFolder2, out activeFolder));
+                    var getRoot = Marshal.GetDelegateForFunctionPointer<GetProbeFolderIdentity>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(activeFolder), 5 * IntPtr.Size));
+                    Marshal.ThrowExceptionForHR(getRoot(activeFolder, out activeRoot));
+                    var contextMatches = (bool)context.GetType().GetMethod("Contains", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(context, [activeRoot])!;
+                    Console.WriteLine($"product-user-sort-active-context: matches={contextMatches}");
+                    if (!contextMatches) throw new InvalidOperationException("Active folder binding lost the tab sort context.");
+                    sortPolicyRoot = CloneProbeRoot(activeRoot);
+                    if (sortPolicyRoot == 0) throw new OutOfMemoryException();
+                }
+                finally
+                {
+                    if (activeRoot != 0) Marshal.FreeCoTaskMem(activeRoot);
+                    if (activeFolder != 0) Marshal.Release(activeFolder);
+                    if (activeView != 0) Marshal.Release(activeView);
+                }
+
+                sortPolicyModule = NativeLibrary.Load(_sortContextAdapter!);
+                var verifyPolicy = Marshal.GetDelegateForFunctionPointer<VerifyProbePolicy>(NativeLibrary.GetExport(sortPolicyModule, "VerifySizeSortContextValueForProbe"));
+                foreach (var mixed in new[] { true, false })
+                foreach (var direction in new[] { 1, -1 })
+                {
+                    contextUpdate.Invoke(context, [mixed, direction]);
+                    var expectedPolicy = (mixed ? 1u : 0u) | (direction < 0 ? 2u : 0u);
+                    Marshal.ThrowExceptionForHR(verifyPolicy(sortPolicyRoot, expectedPolicy));
+                    var state = hostType.GetField("_viewState", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)!;
+                    state.GetType().GetProperty("MixedSizeSort")!.SetValue(state, mixed);
+                    var nextMenu = hostType.GetMethod("OpenFileCommandMenu", BindingFlags.Instance | BindingFlags.NonPublic, null, [typeof(bool), typeof(bool)], null)!.Invoke(host, [true, true])!;
+                    try
+                    {
+                        var code = nextMenu.GetType().GetMethod("InvokeCanonicalVerb", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(nextMenu, [direction > 0 ? "sortascending" : "sortdescending"]);
+                        if (code is not int result || result < 0) throw new InvalidOperationException("Policy switch sort verb failed.");
+                    }
+                    finally { ((IDisposable)nextMenu).Dispose(); }
+                    string[] expectedNames = mixed
+                        ? direction > 0 ? ["folder-small", "file-middle.bin", "folder-large"] : ["folder-large", "file-middle.bin", "folder-small"]
+                        : direction > 0 ? ["folder-small", "folder-large", "file-middle.bin"] : ["folder-large", "folder-small", "file-middle.bin"];
+                    string[] actualPolicyNames = [];
+                    try
+                    {
+                        WaitUntil(() =>
+                        {
+                            var rows = readNativeRows.Invoke(null, [window])!;
+                            actualPolicyNames = (string[])rows.GetType().GetField("Item2")!.GetValue(rows)!;
+                            return actualPolicyNames.SequenceEqual(expectedNames);
+                        }, TimeSpan.FromSeconds(5), $"Product mixed={mixed}/direction={direction} did not produce the required native row order.");
+                    }
+                    catch (TimeoutException error)
+                    {
+                        if (NativeLibrary.TryGetExport(sortPolicyModule, "GetProductCompareDiagnosticCount", out var countAddress) &&
+                            NativeLibrary.TryGetExport(sortPolicyModule, "GetProductCompareDiagnostic", out var readAddress))
+                        {
+                            var count = Marshal.GetDelegateForFunctionPointer<GetProbeComparisonCount>(countAddress)();
+                            var read = Marshal.GetDelegateForFunctionPointer<ReadProbeComparison>(readAddress);
+                            for (var index = Math.Max(0, count - 24); index < count; index++)
+                            {
+                                var text = new StringBuilder(4096);
+                                Marshal.ThrowExceptionForHR(read(index, text, (uint)text.Capacity));
+                                Console.WriteLine("product-user-sort-compare: " + text);
+                            }
+                        }
+                        throw new InvalidOperationException($"Policy row failure: mixed={mixed}; direction={direction}; policy-verify=0x{verifyPolicy(sortPolicyRoot, expectedPolicy):X8}; actual={string.Join('|', actualPolicyNames)}; values={string.Join('|', (string[])readValues.Invoke(null, [hostType, host, 3])!)}", error);
+                    }
+                    Console.WriteLine($"product-user-sort-policy-switch: mixed={mixed}; direction={direction}; names={string.Join('|', expectedNames)}");
+                }
+
+            }
             return 0;
         }
         finally
         {
             deadlineStall?.Stop();
+            if (sortPolicyRoot != 0) Marshal.FreeCoTaskMem(sortPolicyRoot);
+            if (sortPolicyModule != 0) NativeLibrary.Free(sortPolicyModule);
             transientCaptureTimer?.Stop();
             Console.WriteLine("profile-owner-multi-root-shell-host: stage=cleanup");
             if (source is not null)
