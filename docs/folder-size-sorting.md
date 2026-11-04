@@ -329,3 +329,10 @@ The host now remembers that a policy/direction update occurred while grouped. It
 ungroup-final.log completed with exit 0 for actual mixed/separated asc/desc row order after ungrouping. Each subsequent case waits for the preceding recovery to finish, matching the product setting's busy guard. ungroup-four-input.log and ungroup-hidden-regression.log both exited 0 with foreground/input/cleanup guards passing. No visible native group-none menu click or true application restart is claimed. Grouped within-group policy application remains a separate boundary; this change corrects the deferred ungrouped order.
 
 Final 30-check background gate Passed: src/.state/background-checks/20261105-041246-8a941b2dc0b84d71b8749fb48b3a4c56/summary.json (source 458e81f plus current host/probe edits). No real release or visible GUI.
+
+
+### 2026-11-05 Actual native Size group identities
+
+An initial assertion incorrectly required global mixed order while Size grouping was enabled. The failure was file-middle.bin|folder-large|folder-small. Reading actual LVIF_GROUPID via LVM_GETITEMW showed IDs 0|1|1: native Size grouping puts the file in a different group from folders. Therefore crossing those groups is not a valid mixed-sort requirement; no product change was made for this failed assumption.
+
+Added an owned-buffer native group-ID reader to the existing HostProbe. The final fixture checks actual file/folder group separation and descending numeric folder order with mixed policy both on/off, while retaining group/state/INI assertions. group-contract.log exit 0 includes those checks plus all four ungroup transition combinations and isolation/cleanup guards. This covers this native Size-group fixture, not every property/group or a same-group cross-type comparison. No visible UI, application restart or full background rerun for these probe-only additions. Production source is unchanged from ffe7d08.

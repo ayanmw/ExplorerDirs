@@ -874,6 +874,22 @@ internal static class ProfileOwnerMultiRootShellHostProbe
                             (long)hostType.GetField("_initialSortRecoverySerial", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)! != beforeSerial)
                             throw new InvalidOperationException($"Grouped policy update mismatch: group={groupedState.GetType().GetProperty("GroupKey")!.GetValue(groupedState)}; mixed={groupedState.GetType().GetProperty("MixedSizeSort")!.GetValue(groupedState)}; expected={mixed}; before-serial={beforeSerial}; after-serial={hostType.GetField("_initialSortRecoverySerial", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)}.");
                         VerifyMixedPolicyReload(appAssembly, Path.Combine(profile, $"grouped-mixed-{mixed}.ini"), folders[0], groupedState, mixed);
+                        // Native Size grouping assigns files and folders to separate groups.
+                        // Mixed policy must not flatten those groups into one global order.
+                        WaitUntil(() =>
+                        {
+                            var rows = readNativeRows.Invoke(null, [window])!;
+                            var names = (string[])rows.GetType().GetField("Item2")!.GetValue(rows)!;
+                            if (names.Length != 3) return false;
+                            var groups = ShellProviderLocationProbe.ReadNativeGroupIds(window);
+                            var fileIndex = Array.IndexOf(names, "file-middle.bin");
+                            var smallIndex = Array.IndexOf(names, "folder-small");
+                            var largeIndex = Array.IndexOf(names, "folder-large");
+                            return fileIndex >= 0 && smallIndex >= 0 && largeIndex >= 0 &&
+                                groups.Length == 3 && groups[smallIndex] == groups[largeIndex] &&
+                                groups[fileIndex] != groups[smallIndex] && largeIndex < smallIndex;
+                        }, TimeSpan.FromSeconds(5), "Size grouping lost native categories or descending order within the folder group.");
+                        Console.WriteLine($"product-grouped-row-order: mixed={mixed}; file-folder-groups=separate; folder-group-descending=True");
                     }
                     foreach (var mixed in new[] { true, false })
                     foreach (var direction in new[] { 1, -1 })

@@ -2249,6 +2249,26 @@ internal static class ShellProviderLocationProbe
         }
     }
 
+    internal static int[] ReadNativeGroupIds(nint viewWindow)
+    {
+        var list = FindNativeListView(viewWindow);
+        var count = checked((int)SendMessageW(list, 0x1004, 0, 0));
+        var pointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeListViewItem>());
+        try
+        {
+            var groups = new int[count];
+            for (var index = 0; index < count; index++)
+            {
+                Marshal.StructureToPtr(new NativeListViewItem { Mask = 0x100, Item = index, GroupId = -1 }, pointer, false);
+                if (SendMessageW(list, 0x104B, 0, pointer) == 0)
+                    throw new InvalidOperationException("Native grouped row identity was not readable.");
+                groups[index] = Marshal.PtrToStructure<NativeListViewItem>(pointer).GroupId;
+            }
+            return groups;
+        }
+        finally { Marshal.FreeHGlobal(pointer); }
+    }
+
     private static string[][] ReadNativeListViewCells(nint viewWindow, int subItemCount)
     {
         var listView = FindNativeListView(viewWindow);
