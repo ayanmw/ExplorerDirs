@@ -109,6 +109,7 @@ namespace
 #if defined(EXPLORERDIRS_NOTIFICATION_TRACE_EXPERIMENT)
         if (strcmp(stage, "physical-view-event") && strcmp(stage, "provider-view-forwarded") &&
             strcmp(stage, "provider-identity-live") && strcmp(stage, "provider-identity-missing") &&
+            strcmp(stage, "same-name-metadata-compare") &&
             strcmp(stage, "view-enumeration") && strcmp(stage, "view-enumerator") &&
             strcmp(stage, "enum-next-external") && strcmp(stage, "size-publish-external") &&
             strcmp(stage, "size-publish-directory") &&
@@ -4011,6 +4012,14 @@ namespace
             const auto* leftChild = SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(left));
             const auto* rightChild = SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(right));
             if (!leftChild || !rightChild) return E_INVALIDARG;
+#if defined(EXPLORERDIRS_NOTIFICATION_TRACE_EXPERIMENT)
+            if (!_wcsnicmp(leftChild->name, L"external-", 9) &&
+                !_wcsicmp(leftChild->name, rightChild->name) &&
+                (leftChild->size != rightChild->size || leftChild->attributes != rightChild->attributes))
+                ED_SIZE_TRACE("same-name-metadata-compare", this, leftChild->name,
+                    static_cast<DWORD>(column), leftChild->attributes ^ rightChild->attributes,
+                    (leftChild->size << 32) | (rightChild->size & 0xffffffff));
+#endif
             ED_PROBE_METRIC_INCREMENT(g_syntheticCompareCount);
             const auto compareColumn = LOWORD(column);
             const auto customCount = InterlockedCompareExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0, 0) ? 4u : 3u;
