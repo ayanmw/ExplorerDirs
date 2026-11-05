@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -51,7 +52,9 @@ internal sealed class FavoritesManagerWindow : Window
         }));
         buttons.Children.Add(MakeButton("添加目录…", () =>
         {
-            var picker = new Microsoft.Win32.OpenFolderDialog { Title = "选择要添加的目录", InitialDirectory = currentPath };
+            // The active pane can be a virtual Shell location, not a filesystem picker path.
+            var picker = new Microsoft.Win32.OpenFolderDialog { Title = "选择要添加的目录",
+                InitialDirectory = Path.IsPathFullyQualified(currentPath) ? currentPath : "" };
             if (picker.ShowDialog(this) != true) return;
             var selectedPath = picker.FolderName;
             if (AllEntries().Any(item => FavoritesStore.SamePath(item.Path, selectedPath)))
@@ -100,7 +103,8 @@ internal sealed class FavoritesManagerWindow : Window
         };
         _tree.DragOver += (_, e) =>
         {
-            e.Effects = e.Data.GetData(typeof(TreeViewItem)) is TreeViewItem item && Owns(item) ? DragDropEffects.Move : DragDropEffects.None;
+            var item = e.Data.GetData(typeof(TreeViewItem)) as TreeViewItem;
+            e.Effects = item is not null && Owns(item) ? DragDropEffects.Move : DragDropEffects.None;
             if (e.Effects == DragDropEffects.Move)
             {
                 var target = ItemAt(e.OriginalSource as DependencyObject);

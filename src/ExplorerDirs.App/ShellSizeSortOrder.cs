@@ -66,7 +66,8 @@ internal static class ShellSizeSortOrder
                         var isFolder = (attributes & 0x20000000) != 0;
                         if (index > 0)
                         {
-                            if (!mixed && !previousFolder && isFolder) return false;
+                            if (!mixed && previousFolder != isFolder &&
+                                (direction > 0 ? !previousFolder : previousFolder)) return false;
                             if ((mixed || previousFolder == isFolder) &&
                                 (direction > 0 ? previous > bytes : previous < bytes)) return false;
                         }

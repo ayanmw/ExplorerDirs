@@ -34,6 +34,13 @@ public static partial class SyntheticShellSortProbe
             }
             File.WriteAllBytes(Path.Combine(fixture, "file-2048.bin"), new byte[2048]);
             Directory.CreateDirectory(Path.Combine(fixture, "folder-empty"));
+            if (dynamicSortPolicy)
+            {
+                Directory.SetLastWriteTimeUtc(Path.Combine(fixture, "folder-empty"), new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+                File.SetLastWriteTimeUtc(Path.Combine(fixture, "file-2048.bin"), new DateTime(2021, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+                Directory.SetLastWriteTimeUtc(Path.Combine(fixture, "folder-12288"), new DateTime(2022, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+                Directory.SetLastWriteTimeUtc(Path.Combine(fixture, "folder-25600"), new DateTime(2023, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+            }
             if (source == FolderSizeSource.Everything)
                 WaitForIndex(fixture, new Dictionary<string, ulong>
                     { ["folder-12288"] = 12 * 1024, ["folder-25600"] = 25 * 1024, ["folder-empty"] = 0 });
@@ -278,7 +285,7 @@ public static partial class SyntheticShellSortProbe
                             ? direction > 0 ? new[] { "folder-empty", "file-2048.bin", "folder-25600", "folder-12288" }
                                 : new[] { "folder-12288", "folder-25600", "file-2048.bin", "folder-empty" }
                             : direction > 0 ? new[] { "folder-empty", "folder-25600", "folder-12288", "file-2048.bin" }
-                                : new[] { "folder-12288", "folder-25600", "folder-empty", "file-2048.bin" };
+                                : new[] { "file-2048.bin", "folder-12288", "folder-25600", "folder-empty" };
                         var clock = System.Diagnostics.Stopwatch.StartNew();
                         do { Pump(20); sortedNames = SendMessageW(listView, LvmGetItemCount, 0, 0).ToInt32() == 4
                             ? ReadColumnTextsForRows(listView, 0, 4) : []; }
@@ -324,6 +331,37 @@ public static partial class SyntheticShellSortProbe
                             Console.WriteLine($"product-size-sort-peer: main-mixed={mixed}; main-direction={direction}; peer=mixed-desc; independent=True; same-list=True");
                         }
                     }
+                    if (dynamicSortPolicy)
+                    {
+                        foreach (var mixed in new[] { false, true })
+                        foreach (var direction in new[] { 1, -1 })
+                        {
+                            Check(At<SetSizePolicy>(sortPolicy, 4)(sortPolicy, (mixed ? 1 : 0) | (direction < 0 ? 2 : 0)));
+                            Check(target.SetSorting([new(new PropertyKeyState(SizeFormatId, 10), direction)]));
+                            var ascending = mixed
+                                ? new[] { "file-2048.bin", "folder-12288", "folder-25600", "folder-empty" }
+                                : new[] { "folder-12288", "folder-25600", "folder-empty", "file-2048.bin" };
+                            var expectedNames = direction > 0 ? ascending : ascending.Reverse().ToArray();
+                            var deadline = Stopwatch.StartNew();
+                            string[] ReadNamesWhenReady() => SendMessageW(listView, LvmGetItemCount, 0, 0).ToInt32() == 4
+                                ? ReadColumnTextsForRows(listView, 0, 4) : [];
+                            while (!ReadNamesWhenReady().SequenceEqual(expectedNames) && deadline.Elapsed < TimeSpan.FromSeconds(3)) Pump(20);
+                            var actualNames = ReadNamesWhenReady();
+                            if (!actualNames.SequenceEqual(expectedNames))
+                                throw new InvalidOperationException($"Name sort policy mismatch: mixed={mixed};direction={direction};actual={string.Join('|', actualNames)}");
+                            Console.WriteLine($"product-general-sort-name: mixed={mixed};direction={direction};names={string.Join('|', actualNames)}");
+                            Check(target.SetSorting([new(new PropertyKeyState(SizeFormatId, 14), direction)]));
+                            var dateAscending = mixed
+                                ? new[] { "folder-empty", "file-2048.bin", "folder-12288", "folder-25600" }
+                                : new[] { "folder-empty", "folder-12288", "folder-25600", "file-2048.bin" };
+                            var expectedDates = direction > 0 ? dateAscending : dateAscending.Reverse().ToArray();
+                            deadline.Restart();
+                            while (!ReadNamesWhenReady().SequenceEqual(expectedDates) && deadline.Elapsed < TimeSpan.FromSeconds(3)) Pump(20);
+                            var actualDates = ReadNamesWhenReady();
+                            if (!actualDates.SequenceEqual(expectedDates)) throw new InvalidOperationException($"Date sort policy mismatch: mixed={mixed};direction={direction};actual={string.Join('|', actualDates)}");
+                            Console.WriteLine($"product-general-sort-date: mixed={mixed};direction={direction};names={string.Join('|', actualDates)}");
+                        }
+                    }
                     if (dynamicSortPolicy && enumBeforePolicies is { } initialEnums && enumCounter!() != initialEnums)
                         throw new InvalidOperationException("Changing sort policy re-enumerated the directory.");
                 }
@@ -342,6 +380,31 @@ public static partial class SyntheticShellSortProbe
             sizeEnabled = false;
             Check(At<RefreshView>(view, 8)(view));
             WaitForSizes("disabled-ordinary-file-preserved");
+            if (dynamicSortPolicy)
+            {
+                foreach (var direction in new[] { 1, -1 })
+                {
+                    string[]? unmixed = null;
+                    foreach (var mixed in new[] { false, true })
+                    {
+                        sortContext!.Update(mixed, direction);
+                        Check(target.SetSorting([new(new PropertyKeyState(SizeFormatId, 10), 1)]));
+                        Pump(30);
+                        Check(target.SetSorting([new(new PropertyKeyState(SizeFormatId, 12), direction)]));
+                        var clock = Stopwatch.StartNew();
+                        string[] names = [];
+                        do
+                        {
+                            Pump(30);
+                            names = SendMessageW(listView, LvmGetItemCount, 0, 0).ToInt32() == 4 ? ReadColumnTextsForRows(listView, 0, 4) : [];
+                        } while (names.Length != 4 && clock.Elapsed < TimeSpan.FromSeconds(3));
+                        if (names.Length != 4) throw new InvalidOperationException("Size-disabled sort lost rows.");
+                        if (unmixed is null) unmixed = names;
+                        else if (!names.SequenceEqual(unmixed)) throw new InvalidOperationException("Mixed policy changed native Size sorting while totals were disabled.");
+                        Console.WriteLine($"product-size-disabled-sort: mixed={mixed};direction={direction};names={string.Join('|', names)}");
+                    }
+                }
+            }
             owner.SetFolderSizeSource(source, true);
             sizeEnabled = true;
             Check(At<RefreshView>(view, 8)(view));

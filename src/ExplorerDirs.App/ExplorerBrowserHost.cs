@@ -264,7 +264,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private nint PrepareFolderSizeSortLocation(nint source, Func<bool> isCurrent)
     {
-        if (!isCurrent() || !_folderSizesEnabled || _folderSizeSortContextFactory is null ||
+        if (!isCurrent() || _folderSizeSortContextFactory is null ||
             !ShellLocationIdentity.TryGetProviderParsingIdentity(source, _folderSizeProfileClassId, out _) ||
             !isCurrent()) return 0;
         var intended = FolderSizeLocationPolicy.MigrateLegacySizeKey(_viewState, isProvider: true);
@@ -294,7 +294,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private bool _sizeSortPendingUngroup;
 
     internal bool MixedSizeSort => _viewState.MixedSizeSort;
-    internal bool CanSetMixedSizeSort => _folderSizesEnabled && _folderSizeSortContext is not null &&
+    internal bool CanSetMixedSizeSort => _folderSizeSortContext is not null &&
         _browser is not null && IsFolderSizeProvider && IsVisible && !_viewReadiness.Pending &&
         !_viewRestoreFailed && _initialSortRecoveryActiveSerial == 0 && _nativeSortReconciliation is null;
 
@@ -309,37 +309,34 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             ReferenceEquals(context, _folderSizeSortContext);
         var saved = CaptureViewState();
         if (!Current() || ViewCaptureFailed) return false;
-        var sizeSort = saved.SortColumns.Count == 1 && saved.SortColumns[0].Key == FolderSizeLocationPolicy.SizeColumn
-            ? saved.SortColumns[0] : null;
+        var direction = saved.SortColumns.FirstOrDefault()?.Direction ?? 1;
+        nint view = 0;
         ShellViewSelectionSnapshot? selection = null;
         try
         {
-            if (sizeSort is not null && saved.GroupKey is null)
-            {
-                var view = GetFolderView2Pointer();
-                try
-                {
-                    if (view == 0 || !Current()) return false;
-                    selection = ShellViewSelectionSnapshot.Capture(view);
-                }
-                finally { if (view != 0) Marshal.Release(view); }
-            }
-            if (!Current()) return false;
-            var direction = sizeSort?.Direction ?? 1;
+            view = GetFolderView2Pointer();
+            if (view == 0 || !Current()) return false;
+            selection = ShellViewSelectionSnapshot.Capture(view);
             context.Update(enabled, direction);
-            if (!Current()) return false;
-            _folderSizeSortDirection = direction;
             _viewState = saved with { MixedSizeSort = enabled };
-            _sizeSortPendingUngroup = sizeSort is not null && saved.GroupKey is not null;
-            if (sizeSort is not null && saved.GroupKey is null)
+            _folderSizeSortDirection = direction;
+            // Change a secondary key to make DefView reapply the comparator policy;
+            // retain the requested primary direction and never use Refresh or reverse-sort verbs.
+            if (saved.SortColumns.Count > 0)
             {
-                var ownedSelection = selection;
-                selection = null;
-                ScheduleInitialVirtualSort(sizeSort, Current, ownedSelection);
+                var nameKey = new PropertyKeyState(new Guid("b725f130-47ef-101a-a5f1-02608c9eebac"), 10);
+                var secondary = saved.SortColumns.Any(sort => sort.Key == nameKey) ? FolderSizeLocationPolicy.SizeColumn : nameKey;
+                var temporary = saved.SortColumns.Where(sort => sort.Key != secondary).Append(new SortColumnState(secondary, 1)).ToArray();
+                var target = new NativeViewStateTarget(view, Current);
+                Check(target.SetSorting(temporary));
+                if (!Current()) return false;
+                Check(target.SetSorting(saved.SortColumns));
             }
+            if (!Current()) return false;
+            if (selection is not null) RestoreInitialVirtualSortSelection(selection, Current);
             return Current();
         }
-        finally { selection?.Dispose(); }
+        finally { selection?.Dispose(); if (view != 0) Marshal.Release(view); }
     }
 
     private void ClearNativeSortCommandSelection()
@@ -2627,7 +2624,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             if (ShellLocationIdentity.TryGetAttributes(pidl, out var attributes))
             {
                 var nativeIdentity = FolderSizeLocationPolicy.NativeIdentity(issuedPath, attributes,
-                    _folderSizeProfileClassId, _folderSizesEnabled);
+                    _folderSizeProfileClassId, enabled: true);
                 if (!string.Equals(nativeIdentity, issuedPath, StringComparison.OrdinalIgnoreCase))
                 {
                     Check(SHParseDisplayName(nativeIdentity, IntPtr.Zero, out var routedPidl, 0, out _));
@@ -3061,443 +3058,97 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private void ScheduleInitialVirtualSort(SortColumnState sort, Func<bool> isCurrent, ShellViewSelectionSnapshot? selectionToPreserve = null, bool grouped = false)
     {
-        if (!isCurrent()) { selectionToPreserve?.Dispose(); return; }
-        var traceSerial = ++_initialSortRecoverySerial;
+        if (!_folderSizesEnabled || !isCurrent()) { selectionToPreserve?.Dispose(); return; }
+        var serial = ++_initialSortRecoverySerial;
         ReleaseInitialVirtualSortRedrawLease();
         EndInitialSortTransient(_initialSortTransientOwner);
-        _initialSortRecoveryActiveSerial = traceSerial;
-        var oppositeApplied = false;
-        var savedApplied = false;
-        ShellViewSelectionSnapshot? initialSortSelection = selectionToPreserve;
-        string? initialSortSelectionReadiness = null;
-        var readinessWait = Stopwatch.StartNew();
-        var expectedInputVersion = Interlocked.Read(ref _nativeUserInputVersion);
-        var readinessRow = 0;
-        int? readinessItemCount = null;
-        var readinessFoundPendingValue = false;
-        var incorrectOrderSamples = 0;
-        var recoveryTickRunning = false;
-        (long Owner, Action<long> Complete)? inputHandlerForRetry = null;
-        var traceTicks = 0;
-        bool IsCurrent() => traceSerial == _initialSortRecoverySerial && isCurrent() &&
-            expectedInputVersion == Interlocked.Read(ref _nativeUserInputVersion);
-        void Trace(string stage)
+        _initialSortRecoveryActiveSerial = serial;
+        var inputVersion = Interlocked.Read(ref _nativeUserInputVersion);
+        bool Current() => serial == _initialSortRecoverySerial && isCurrent() &&
+            inputVersion == Interlocked.Read(ref _nativeUserInputVersion);
+        _ = RecoverAsync();
+        async Task RecoverAsync()
         {
-            if (_initialSortRecoveryTrace is null) return;
-            RecordInitialSortRecovery($"{traceSerial}:{stage};ms={readinessWait.ElapsedMilliseconds};tick={traceTicks};opposite={oppositeApplied};saved={savedApplied};current={IsCurrent()};visit-current={isCurrent()};input={expectedInputVersion}/{Interlocked.Read(ref _nativeUserInputVersion)};row={readinessRow}/{readinessItemCount};pending-value={readinessFoundPendingValue}");
-        }
-        Trace("scheduled");
-        void FinishSortRecovery()
-        {
-            Trace("finish");
+            var clock = Stopwatch.StartNew();
+            var attempts = 0;
+            var selection = selectionToPreserve;
             try
             {
-                // A deadline between the two native verbs must not leave the temporary
-                // opposite direction in the live view. Navigation/user input still cancels it.
-                if (oppositeApplied && !savedApplied && IsCurrent())
+                RecordInitialSortRecovery($"{serial}:direct-wait");
+                while (Current() && clock.Elapsed < TimeSpan.FromSeconds(30))
                 {
-                    var savedSortVerb = sort.Direction > 0 ? "sortascending" : "sortdescending";
-                    savedApplied = InvokeVirtualSortVerb(savedSortVerb, IsCurrent);
-                    Trace("saved-verb-returned");
-                    if (savedApplied) EndInitialSortTransient(traceSerial);
-                    if (IsCurrent())
-                    {
-                        if (!savedApplied)
-                        {
-                            _viewRestoreFailed = true;
-                            MenuError?.Invoke(this, "保存的排序方向未能恢复，暂不保存视图状态；请重新打开目录后重试。");
-                        }
-                        else if (initialSortSelection is not null)
-                            RestoreInitialVirtualSortSelection(initialSortSelection, IsCurrent);
-                    }
-                }
-            }
-            finally
-            {
-                initialSortSelection?.Dispose();
-                initialSortSelection = null;
-                EndInitialSortTransient(traceSerial);
-                if (traceSerial == _initialSortRecoverySerial)
-                {
-                    _initialSortRecoveryActiveSerial = 0;
-                    ReleaseInitialVirtualSortRedrawLease();
-                }
-            }
-        }
-        void FinishGroupedRecovery(string stage)
-        {
-            Trace(stage);
-            FinishSortRecovery();
-            // The full-App soft-refresh control reproduces missing startup groups:
-            // DefView must enumerate once to materialize saved groups after values arrive.
-            if (IsCurrent()) RefreshWithPresentation(traceAsUserRefresh: false, forceFullEnumeration: true);
-        }
-        var timer = new DispatcherTimer(DispatcherPriority.Background)
-        {
-            Interval = TimeSpan.FromMilliseconds(100)
-        };
-        // Four-pane recursive-value readiness can exceed the former 12-second cutoff on large folders; keep a finite 30-second bound.
-        async Task RunRecoveryTick()
-        {
-            traceTicks++;
-            if ((traceTicks & (traceTicks - 1)) == 0) Trace("tick");
-            // Do not reorder underneath an active inline editor or a mouse selection gesture.
-            // Navigation still retires this work immediately; resume after native input settles.
-            if (IsCurrent() && oppositeApplied && (IsRenameEditorFocused() || GetKeyState(1) < 0))
-            {
-                timer.Start();
-                return;
-            }
-            if (!IsCurrent() || readinessWait.Elapsed >= TimeSpan.FromSeconds(30))
-            {
-                Trace("cancel-or-deadline");
-                if (grouped && IsCurrent()) FinishGroupedRecovery("grouped-unknown-deadline-refresh");
-                else FinishSortRecovery();
-                return;
-            }
-
-            if (oppositeApplied)
-            {
-                if (ReadDirectoryMonitorItemCount() != readinessItemCount)
-                {
-                    timer.Start();
-                    return;
-                }
-
-                if (!savedApplied)
-                {
-                    var savedSortVerb = sort.Direction > 0 ? "sortascending" : "sortdescending";
+                    await Task.Delay(100);
+                    if (!Current()) return;
+                    var view = GetFolderView2Pointer();
+                    if (view == 0) continue;
                     try
                     {
-                        savedApplied = InvokeVirtualSortVerb(savedSortVerb, IsCurrent);
-                        Trace("saved-verb-returned");
-                        if (savedApplied) EndInitialSortTransient(traceSerial);
-                    }
-                    catch
-                    {
-                        FinishSortRecovery();
-                        throw;
-                    }
-                    if (!savedApplied)
-                    {
-                        FinishSortRecovery();
-                        return;
-                    }
-                    expectedInputVersion = Interlocked.Read(ref _nativeUserInputVersion);
-                    timer.Start();
-                    return;
-                }
-
-                if (IsFolderSizeProvider && sort.Key == FolderSizeLocationPolicy.SizeColumn && readinessItemCount is { } expectedRows)
-                {
-                    var orderView = GetFolderView2Pointer();
-                    if (orderView == 0) { timer.Start(); return; }
-                    bool? ordered;
-                    try { ordered = await ShellSizeSortOrder.IsOrderedAsync(orderView, expectedRows, sort.Direction, _viewState.MixedSizeSort, IsCurrent); }
-                    finally { Marshal.Release(orderView); }
-                    if (!IsCurrent()) { FinishSortRecovery(); return; }
-                    // Explicit isolated-probe injection; normal hosts never enable a trace/counter.
-                    if (_initialSortRecoveryTrace is not null && _initialSortIncorrectResultsForProbe > 0 && ordered == true)
-                    {
-                        _initialSortIncorrectResultsForProbe--;
-                        ordered = false;
-                        Trace("injected-wrong-row-order");
-                    }
-                    if (ordered != true)
-                    {
-                        if (ordered == false && ++incorrectOrderSamples >= 2 && IsCurrent())
-                        {
-                            incorrectOrderSamples = 0;
-                            BeginInitialSortTransient(traceSerial);
-                            _initialSortInputCompletion = inputHandlerForRetry;
-                            savedApplied = false;
-                            try { oppositeApplied = InvokeVirtualSortVerb(sort.Direction > 0 ? "sortdescending" : "sortascending", IsCurrent); }
-                            catch { FinishSortRecovery(); throw; }
-                            Trace("retry-incorrect-row-order");
-                            if (!oppositeApplied) { FinishSortRecovery(); return; }
-                        }
-                        timer.Start();
-                        return;
-                    }
-                    incorrectOrderSamples = 0;
-                }
-
-                if (initialSortSelection is not null)
-                {
-                    var selectionView = GetFolderView2Pointer();
-                    if (selectionView == IntPtr.Zero)
-                    {
-                        timer.Start();
-                        return;
-                    }
-                    try
-                    {
-                        var readiness = initialSortSelection.ReadTargetReadiness(selectionView,
-                            initialSortSelectionReadiness, out _);
-                        if (readiness is null || readiness.Contains('0'))
-                        {
-                            initialSortSelectionReadiness = readiness;
-                            timer.Start();
-                            return;
-                        }
-                        initialSortSelectionReadiness = readiness;
-                    }
-                    finally { Marshal.Release(selectionView); }
-
-                    var restored = RestoreInitialVirtualSortSelection(initialSortSelection, IsCurrent);
-                    if (!restored.SelectionRestored || !restored.FocusRestored)
-                    {
-                        timer.Start();
-                        return;
-                    }
-                }
-                FinishSortRecovery();
-                return;
-            }
-
-            var itemCount = ReadDirectoryMonitorItemCount();
-            if (_viewReadiness.Pending || itemCount is not > 0)
-            {
-                timer.Start();
-                return;
-            }
-
-            var view = GetFolderView2Pointer();
-            if (view == IntPtr.Zero)
-            {
-                timer.Start();
-                return;
-            }
-            ShellFileViewExportCapture.ReadinessSession? readinessSession = null;
-            try
-            {
-                if (!IsCurrent()) { FinishSortRecovery(); return; }
-                if (IsFolderSizeProvider && sort.Key == FolderSizeLocationPolicy.SizeColumn &&
-                    (grouped || !ShellFileViewExportCapture.HasVisibleUnresolvedColumn(view, sort.Key, includeResolved: true)))
-                {
-                    // A saved Size sort remains valid when the display column is hidden.
-                    var count = ReadDirectoryMonitorItemCount();
-                    if (count is null or < 0) { timer.Start(); return; }
-                    var ready = await ShellSizeSortOrder.AreValuesReadyAsync(view, count.Value, IsCurrent, allowUnavailable: grouped);
-                    readinessItemCount = count;
-                    readinessFoundPendingValue = ready != true;
-                }
-                else
-                {
-                    readinessSession = ShellFileViewExportCapture.CreateReadinessSession(
-                        view, _viewWindow, sort.Key, out var capturedItemCount,
-                        // The provider's standard Size column is named, but its folder
-                        // values are still asynchronous after restoring the saved sort.
-                        includeResolved: IsFolderSizeProvider && sort.Key == FolderSizeLocationPolicy.SizeColumn);
-                    if (capturedItemCount < 0)
-                    {
-                        timer.Start();
-                        return;
-                    }
-                    if (readinessSession is null) { Trace("no-readiness-session"); timer.Start(); return; }
-
-                    while (IsCurrent() && readinessWait.Elapsed < TimeSpan.FromSeconds(30))
-                    {
-                        bool batchPending;
-                        int shellItemCount;
+                        var count = ReadDirectoryMonitorItemCount();
+                        if (count is null or <= 0) continue;
+                        var ready = await ShellSizeSortOrder.AreValuesReadyAsync(view, count.Value, Current, allowUnavailable: true);
+                        if (!Current()) return;
+                        if (ready != true) continue;
+                        selection ??= ShellViewSelectionSnapshot.Capture(view);
+                        var sorts = _viewState.SortColumns.Count > 0 ? _viewState.SortColumns : new[] { sort };
+                        var nameKey = new PropertyKeyState(new Guid("b725f130-47ef-101a-a5f1-02608c9eebac"), 10);
+                        var target = new NativeViewStateTarget(view, Current, UpdateFolderSizeSortPolicy);
+                        BeginInitialSortTransient(serial);
                         try
                         {
-                            batchPending = readinessSession.HasPendingUnresolvedValues(readinessRow,
-                                ShellFileViewExportCapture.ReadinessBatchSize, out shellItemCount);
+                            // Preserve the primary direction; changing a secondary key invalidates
+                            // DefView's cached sort without reverse verbs or a directory refresh.
+                            var secondary = sorts.Any(value => value.Key == nameKey) ? FolderSizeLocationPolicy.SizeColumn : nameKey;
+                            var temporary = sorts.Where(value => value.Key != secondary).Append(new SortColumnState(secondary, 1)).ToArray();
+                            Check(target.SetSorting(temporary));
+                            if (!Current()) return;
+                            Check(target.SetSorting(sorts));
                         }
-                        // DefView may replace row PIDLs during a concurrent sort; Shell reports that short read as E_INVALIDARG.
-                        catch (Exception exception) when (exception is COMException or InvalidDataException ||
-                            exception is ArgumentException { HResult: unchecked((int)0x80070057) })
+                        finally { EndInitialSortTransient(serial); }
+                        if (!Current()) return;
+                        if (grouped)
                         {
-                            batchPending = true;
-                            shellItemCount = -1;
+                            // Saved grouping requires one initial enumeration after asynchronous values arrive.
+                            RefreshWithPresentation(traceAsUserRefresh: false, forceFullEnumeration: true);
                         }
-
-                        if (shellItemCount < 0 || readinessItemCount is not null && readinessItemCount.Value != shellItemCount ||
-                            shellItemCount != capturedItemCount)
+                        if (!grouped)
                         {
-                            // A changing Shell row count invalidates the current scan; retry from row zero next timer turn.
-                            readinessItemCount = null;
-                            readinessRow = 0;
-                            readinessFoundPendingValue = false;
-                            timer.Start();
-                            return;
+                            await Task.Delay(350);
+                            if (!Current()) return;
+                            var ordered = await ShellSizeSortOrder.IsOrderedAsync(view, count.Value, sort.Direction, _viewState.MixedSizeSort, Current);
+                            if (!Current()) return;
+                            if (_initialSortIncorrectResultsForProbe > 0 && ordered is not null)
+                            { _initialSortIncorrectResultsForProbe--; ordered = false; }
+                            var knownValues = await ShellSizeSortOrder.AreValuesReadyAsync(view, count.Value, Current);
+                            if (!Current()) return;
+                            if (ordered == false || ordered is null && knownValues == true)
+                            {
+                                if (++attempts < 3) continue;
+                                throw new InvalidOperationException("原生行序未能稳定，已停止排序重试。");
+                            }
                         }
-                        readinessItemCount ??= shellItemCount;
-                        readinessFoundPendingValue |= batchPending;
-                        readinessRow = Math.Min(readinessItemCount.Value,
-                            readinessRow + ShellFileViewExportCapture.ReadinessBatchSize);
-                        if (readinessRow >= readinessItemCount.Value) break;
-                        await Dispatcher.Yield(DispatcherPriority.Background);
+                        if (selection is not null && Current()) RestoreInitialVirtualSortSelection(selection, Current);
+                        RecordInitialSortRecovery($"{serial}:direct-finish");
+                        return;
                     }
+                    finally { Marshal.Release(view); }
+                }
+                if (Current())
+                {
+                    _viewRestoreFailed = true;
+                    MenuError?.Invoke(this, "文件夹大小尚未就绪，暂不覆盖已保存的视图设置。");
                 }
             }
-            catch (Exception exception) when (exception is COMException or InvalidDataException ||
-                exception is ArgumentException { HResult: unchecked((int)0x80070057) })
+            catch (Exception error)
             {
-                // A failed Shell context read is retried on the next background turn.
-                timer.Start();
-                return;
+                if (Current()) { _viewRestoreFailed = true; MenuError?.Invoke(this, $"排序恢复失败：{error.Message}"); }
             }
             finally
             {
-                readinessSession?.Dispose();
-                Marshal.Release(view);
-            }
-
-            if (!IsCurrent() || readinessWait.Elapsed >= TimeSpan.FromSeconds(30))
-            {
-                if (grouped && IsCurrent()) FinishGroupedRecovery("grouped-unknown-deadline-refresh");
-                else FinishSortRecovery();
-                return;
-            }
-            if (readinessFoundPendingValue)
-            {
-                readinessItemCount = null;
-                readinessRow = 0;
-                readinessFoundPendingValue = false;
-                timer.Start();
-                return;
-            }
-            if (grouped)
-            {
-                // A saved group can be accepted before DefView builds its groups.
-                // One refresh after all Size values exist materializes native grouping;
-                // refreshing before values are ready only creates an unsorted empty group.
-                FinishGroupedRecovery("grouped-values-ready-refresh");
-                return;
-            }
-            // SetSortColumns restores state but does not always execute a provider's
-            // comparator on the first view fill. A direction transition asks Shell to
-            // run its own sort callback without a full IShellView.Refresh. Separate the
-            // two native commands across dispatcher turns so Shell can finish each one.
-            var oppositeVerb = sort.Direction > 0 ? "sortdescending" : "sortascending";
-            var savedVerb = sort.Direction > 0 ? "sortascending" : "sortdescending";
-            if (!oppositeApplied)
-            {
-                var sortView = GetFolderView2Pointer();
-                if (sortView != IntPtr.Zero)
-                {
-                    try
-                    {
-                        initialSortSelection ??= ShellViewSelectionSnapshot.Capture(sortView);
-                        if ((initialSortSelection is null || initialSortSelection.SelectedCount == 0) &&
-                            _lastNativeSelection is { SelectedCount: > 0 } cachedSelection &&
-                            _lastNativeSelectionNavigationVersion == _viewReadiness.NavigationVersion &&
-                            _lastNativeSelectionInputVersion == Interlocked.Read(ref _nativeUserInputVersion) &&
-                            string.Equals(_lastNativeSelectionPath, CurrentPath, StringComparison.OrdinalIgnoreCase))
-                        {
-                            // Provider value notifications can trigger a native resort before this delayed sort runs;
-                            // in that case the live selection is empty but the confirmed user snapshot still applies.
-                            initialSortSelection?.Dispose();
-                            initialSortSelection = null;
-                            initialSortSelection = cachedSelection.Clone();
-                        }
-                        if (IsCurrent())
-                        {
-                            var redraw = ShellViewRedrawLease.TrySuppress(sortView);
-                            if (IsCurrent())
-                            {
-                                _initialVirtualSortRedrawLease = redraw;
-                                if (redraw is not null) _initialVirtualSortRedrawWindow = _viewWindow;
-                            }
-                            else redraw?.Dispose();
-                        }
-                    }
-                    catch (COMException)
-                    {
-                        if (traceSerial == _initialSortRecoverySerial)
-                            ReleaseInitialVirtualSortRedrawLease(requestRedraw: false);
-                    }
-                    finally { Marshal.Release(sortView); }
-                }
-
-                if (!IsCurrent()) { FinishSortRecovery(); return; }
-                // Capture during this deliberate reverse sort must retain the user's
-                // intended view, including navigation callbacks pumped by the command.
-                BeginInitialSortTransient(traceSerial);
-                try { oppositeApplied = InvokeVirtualSortVerb(oppositeVerb, IsCurrent); Trace("opposite-verb-returned"); }
-                catch
-                {
-                    FinishSortRecovery();
-                    throw;
-                }
-                if (!oppositeApplied)
-                {
-                    timer.Stop();
-                    FinishSortRecovery();
-                }
-                else
-                {
-                    expectedInputVersion = Interlocked.Read(ref _nativeUserInputVersion);
-                    _initialSortInputCompletion = (traceSerial, inputVersion =>
-                    {
-                        if (traceSerial != _initialSortRecoverySerial || !isCurrent()) return;
-                        expectedInputVersion = inputVersion;
-                        timer.Stop();
-                        // Let Shell apply the gesture before a direction command can empty its rows.
-                        Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
-                        {
-                            if (!IsCurrent()) { FinishSortRecovery(); return; }
-                            if (inputVersion != Interlocked.Read(ref _nativeUserInputVersion)) return;
-                            var inputView = GetFolderView2Pointer();
-                            if (inputView == 0) { FinishSortRecovery(); return; }
-                            try
-                            {
-                                var latest = ShellViewSelectionSnapshot.Capture(inputView);
-                                if (!IsCurrent()) { latest?.Dispose(); FinishSortRecovery(); return; }
-                                // A getter can pump a newer gesture/capture; never replace its snapshot with this older one.
-                                if (inputVersion != Interlocked.Read(ref _nativeUserInputVersion)) { latest?.Dispose(); return; }
-                                if (latest is not null)
-                                {
-                                    initialSortSelection?.Dispose();
-                                    initialSortSelection = latest;
-                                    initialSortSelectionReadiness = null;
-                                }
-                            }
-                            catch (COMException)
-                            {
-                                FinishSortRecovery();
-                                return;
-                            }
-                            finally { Marshal.Release(inputView); }
-                            if (IsCurrent()) timer.Start();
-                        }));
-                    });
-                    inputHandlerForRetry = _initialSortInputCompletion;
-                }
-                if (oppositeApplied) timer.Start();
-                return;
-            }
-
-            try
-            {
-                savedApplied = InvokeVirtualSortVerb(savedVerb, IsCurrent);
-                Trace("saved-verb-returned");
-                if (savedApplied) EndInitialSortTransient(traceSerial);
-                if (savedApplied)
-                {
-                    expectedInputVersion = Interlocked.Read(ref _nativeUserInputVersion);
-                    timer.Start();
-                }
-                else FinishSortRecovery();
-            }
-            catch
-            {
-                FinishSortRecovery();
-                throw;
+                selection?.Dispose();
+                EndInitialSortTransient(serial);
+                if (serial == _initialSortRecoverySerial) _initialSortRecoveryActiveSerial = 0;
             }
         }
-        timer.Tick += async (_, _) =>
-        {
-            // A nested Tick must not cancel a retry armed by the still-running async body.
-            if (recoveryTickRunning) return;
-            timer.Stop();
-            recoveryTickRunning = true;
-            try { await RunRecoveryTick(); }
-            finally { recoveryTickRunning = false; }
-        };
-        timer.Start();
     }
 
     private (bool SelectionRestored, bool FocusRestored) RestoreInitialVirtualSortSelection(
@@ -5880,7 +5531,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var browser = _browser;
         var request = _navigationRequestVersion;
         var redirectVersion = _folderSizeRedirectVersion;
-        if (!_folderSizesEnabled || _folderSizeProfileClassId is null || browser is null ||
+        if (_folderSizeProfileClassId is null || browser is null ||
             _searchHistory.TryResolve(pidl, out _)) return false;
         string path;
         if (ShellLocationIdentity.TryGetProviderParsingIdentity(pidl, _folderSizeProfileClassId, out var providerIdentity))
@@ -5899,7 +5550,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         Dispatcher.BeginInvoke(DispatcherPriority.Normal, new Action(() =>
         {
             if (ReferenceEquals(browser, _browser) && request == _navigationRequestVersion &&
-                redirectVersion == _folderSizeRedirectVersion && _folderSizesEnabled)
+                redirectVersion == _folderSizeRedirectVersion)
                 Navigate(path);
         }));
         return true;

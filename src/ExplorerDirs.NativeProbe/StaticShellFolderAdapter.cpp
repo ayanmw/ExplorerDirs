@@ -4022,6 +4022,58 @@ namespace
 #endif
             ED_PROBE_METRIC_INCREMENT(g_syntheticCompareCount);
             const auto compareColumn = LOWORD(column);
+#if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
+            // Canonical equality must never depend on current sort policy or metadata.
+            const bool canonical = (column & (SHCIDS_CANONICALONLY | SHCIDS_ALLFIELDS)) != 0;
+            const bool nativeSize = compareColumn == 1 && !InterlockedCompareExchange(&g_folderSizeEnabled, 0, 0);
+            const bool mixed = CurrentMixedSizeSort() && !nativeSize;
+            const bool leftFolder = (leftChild->attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+            const bool rightFolder = (rightChild->attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+            if (!canonical && !nativeSize && !mixed && leftFolder != rightFolder)
+                return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, leftFolder ? static_cast<USHORT>(-1) : 1);
+            if (!canonical && (nativeSize || compareColumn == 2 ||
+                (compareColumn >= 3 && !(compareColumn == 3 && InterlockedCompareExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0, 0)))))
+            {
+                PITEMID_CHILD originalLeft = nullptr, originalRight = nullptr;
+                auto result = BackingChildPidl(left, &originalLeft);
+                if (SUCCEEDED(result)) result = BackingChildPidl(right, &originalRight);
+                SHCOLUMNID key{};
+                if (SUCCEEDED(result)) result = MapColumnToSCID(compareColumn, &key);
+                if (SUCCEEDED(result) && nativeSize)
+                {
+                    UINT ordinal = 0;
+                    for (; ordinal < 1024; ++ordinal)
+                    {
+                        SHCOLUMNID candidate{};
+                        result = _inner->MapColumnToSCID(ordinal, &candidate);
+                        if (FAILED(result) || candidate == PKEY_Size) break;
+                    }
+                    if (SUCCEEDED(result)) result = _inner->CompareIDs(ordinal, originalLeft, originalRight);
+                }
+                else if (SUCCEEDED(result))
+                {
+                    VARIANT a{}, b{};
+                    result = _inner->GetDetailsEx(originalLeft, &key, &a);
+                    if (SUCCEEDED(result)) result = _inner->GetDetailsEx(originalRight, &key, &b);
+                    if (SUCCEEDED(result))
+                    {
+                        const auto compared = VarCmp(&a, &b, LOCALE_USER_DEFAULT, 0);
+                        if (FAILED(compared)) result = compared;
+                        else
+                        {
+                            const auto order = compared == VARCMP_LT ? -1 : compared == VARCMP_GT ? 1 :
+                                StrCmpLogicalW(leftChild->name, rightChild->name);
+                            result = MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL,
+                                order < 0 ? static_cast<USHORT>(-1) : order > 0 ? 1 : 0);
+                        }
+                    }
+                    VariantClear(&a); VariantClear(&b);
+                }
+                if (originalLeft) CoTaskMemFree(originalLeft);
+                if (originalRight) CoTaskMemFree(originalRight);
+                return result;
+            }
+#endif
             const auto customCount = InterlockedCompareExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0, 0) ? 4u : 3u;
             if (compareColumn >= customCount)
             {
@@ -4042,7 +4094,13 @@ namespace
             short comparison = 0;
             switch (LOWORD(column))
             {
-            case 0: comparison = static_cast<short>(_wcsicmp(leftChild->name, rightChild->name)); break;
+            case 0:
+            {
+                const auto nameOrder = (column & SHCIDS_CANONICALONLY)
+                    ? _wcsicmp(leftChild->name, rightChild->name) : StrCmpLogicalW(leftChild->name, rightChild->name);
+                comparison = nameOrder < 0 ? -1 : nameOrder > 0 ? 1 : 0;
+                break;
+            }
             case 1:
             {
 #if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
@@ -4053,8 +4111,6 @@ namespace
 #endif
                 if (!g_syntheticSizeMetricsObservation) ED_PROBE_METRIC_INCREMENT(g_syntheticSizeCompareCount);
 #if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
-                const bool leftFolder = (leftChild->attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-                const bool rightFolder = (rightChild->attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
                 if (!InterlockedCompareExchange(&g_sizeSortShellPartition, 0, 0) && !CurrentMixedSizeSort() && leftFolder != rightFolder)
                 {
                     // Match Explorer's two-state ordering: descending reverses the category
@@ -4432,6 +4488,9 @@ namespace
                 UINT backingColumn = 0;
                 auto result = BackingColumnOrdinal(column, &backingColumn);
                 if (SUCCEEDED(result)) result = _inner->GetDefaultColumnState(backingColumn, state);
+#if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
+                if (SUCCEEDED(result)) *state |= SHCOLSTATE_NOSORTBYFOLDERNESS;
+#endif
                 RecordSyntheticColumnMetadata(2, column, SUCCEEDED(result) ? *state : SHCOLSTATEF{}, result, nullptr);
                 return result;
             }
@@ -4441,7 +4500,7 @@ namespace
                 column == 3 ? relativePercentType : SHCOLSTATE_TYPE_STR);
 #if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
             // Keep Shell from applying an independent folder partition before our size policy.
-            if (column == 1 && (!InterlockedCompareExchange(&g_sizeSortShellPartition, 0, 0) || CurrentMixedSizeSort()))
+            if (column != 1 || InterlockedCompareExchange(&g_folderSizeEnabled, 0, 0))
                 *state |= SHCOLSTATE_NOSORTBYFOLDERNESS;
 #endif
             if (column == 1 && InterlockedCompareExchange(&g_syntheticCustomSizeColumnForProbe, 0, 0) &&

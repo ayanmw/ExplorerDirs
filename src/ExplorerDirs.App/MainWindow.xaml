@@ -173,7 +173,7 @@
                         </MenuItem>
                         <Separator/>
                         <MenuItem x:Name="MixedSizeSortMenu" Header="混合排序（文件夹与文件）" IsCheckable="True" IsEnabled="False"
-                                  ToolTip="仅影响当前标签的大小排序。关闭时文件夹与文件分别排序，类别先后随升降序切换；开启时统一按大小排序。需启用文件夹大小并等待视图就绪。"
+                                  ToolTip="作用于当前标签的排序。关闭时文件夹与文件分别排序；开启时统一排序。未显示文件夹大小时，Size排序保持资源管理器行为。"
                                   Click="MixedSizeSort_Click"/>
                     </MenuItem>
                     <MenuItem Header="地址栏样式">
