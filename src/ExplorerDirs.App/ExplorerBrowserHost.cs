@@ -4065,6 +4065,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 var viewPointer = Marshal.GetIUnknownForObject(viewObject);
                 try
                 {
+#if EXPLORERDIRS_REFRESH_ORIGIN_TRACE
+                    // Opt-in isolated diagnosis: distinguish host Refresh calls from DefView's own enumeration.
+                    File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "refresh-origin.log"),
+                        $"{Environment.TickCount64} host={GetHashCode():X};manual={traceAsUserRefresh};full={forceFullEnumeration};soft={_softRefresh}\n{new StackTrace(1, false)}\n");
+#endif
                     refreshResult = ShellRefreshPolicy.Invoke(traceAsUserRefresh || forceFullEnumeration, _softRefresh,
                         enabled => ShellFolderViewOptions.SetNoEnumRefresh(viewPointer, enabled),
                         shellView.Refresh, IsCurrentRefreshRequest, () => _softRefresh);

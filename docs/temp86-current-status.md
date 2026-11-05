@@ -188,3 +188,10 @@ Windows SDK 常量核实：SHCNE_UPDATEDIR=0x1000，SHCNE_UPDATEITEM=0x2000；�
 ## 根条目更新过滤负对照（2026-11-05）
 
 临时过滤物理backingRoot自身UPDATEITEM转发，保留缓存失效和子项转发，并组合异步删除原型；载荷 `.state/gui-smoke/20261105-000718-231-9aab6c`，`root-update-filter-run.log` 第一进程批量阶段通过但累计127次空列表，连续创建耗时6.188秒；第二进程再次单文件删除失败。该负对照不支持将根UPDATEITEM过滤作为修复，全部临时接线及过滤均已撤回。下一步给实际IShellView.Refresh调用增加仅诊断来源标记，区分宿主主动完整刷新与DefView内部枚举；不把计数归零直接当成宿主调用Refresh的证据。
+
+
+## 实际宿主 Refresh 来源（2026-11-05）
+
+临时显式编译EXPLORERDIRS_REFRESH_ORIGIN_TRACE，标记真正调用ShellRefreshPolicy/IShellView.Refresh的位置和堆栈。载荷 `.state/gui-smoke/20261105-000944-468-896213`，`refresh-origin-run.log` 1025行仍在普通文件删除失败且多次空列表。`.state/app-session-process/f268364ed4a448b3b66d3387756b42d2/app/refresh-origin.log` 全程仅1条：tick382513187，manual=False/full=True/soft=True，来自ScheduleInitialVirtualSort.FinishGroupedRecovery启动分组恢复；外部变化期间没有新增宿主Refresh调用。
+
+因此当前反例不支持“监控反复调用这条宿主Refresh路径导致空列表”的判断；后续定位DefView通知处理/内部枚举，并检查是否存在其他刷新入口。保留条件编译诊断块，文件顶部临时#define已移除，普通构建不写日志；不将该结论扩大为所有刷新入口或可见绘制均已排除。不发布。
