@@ -200,3 +200,10 @@ Windows SDK 常量核实：SHCNE_UPDATEDIR=0x1000，SHCNE_UPDATEITEM=0x2000；�
 ## 名称排序控制夹具（2026-11-05）
 
 NativeProbe增加显式环境控制EXPLORERDIRS_PROBE_NAME_SORT_CONTROL=1，仅改变测试种入的排序列为名称，保留四窗格、大小列及一窗格Size分组；未设置时原夹具不变，产品不读取该开关。构建通过。`name-sort-control-run.log` 默认软刷新/正常DLL/1025行：创建1209ms、未采样空列表，但目录删除四窗格全残留，整项失败并隔离清理完成。故删除缺陷不是大小排序特有；创建阶段无空列表不能证明后续所有变化无闪烁，控制测试在目录删除阶段已停止。后续需独立处理通知删除可靠性和大小排序/枚举时序，不用关闭大小排序规避需求。
+
+
+## 原生 RemoveObject 定向移除对照（2026-11-05，未采用）
+
+本机SDK ShlObj.h声明ShellFolderView_RemoveObject通过SHShellFolderView_Message(hwnd,SFVM_REMOVEOBJECT=6,relativePidl)。在异步原始PIDL原型中改为QI IShellView/GetWindow，以保留行PIDL末段调用该入口，不做文件系统删除。`direct-remove-prepare2.log` 构建通过，载荷 `.state/gui-smoke/20261105-001602-689-61ff86`；`direct-remove-run.log` 仍在批量删除失败且多次空列表，不能认为旧接口有效解决当前DefView场景。实验保存为 `experiments/direct-view-remove.patch`，产品三文件接线已恢复。
+
+首次准备因旧零上下文补丁插入方法落在新增诊断行后的错误位置而编译失败，修正方法边界后才构建/执行；失败准备没有运行。不将SDK仍声明该旧接口等同于现代DefView兼容性证明。下一步回到通知/枚举交错，不接入该替代方案。
