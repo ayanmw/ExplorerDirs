@@ -2795,27 +2795,25 @@ public partial class MainWindow : Window
 
     private void ManageFavorites()
     {
-        var dialog = new FavoritesManagerWindow(this, _favorites.Select(_favoritesStore.Describe), ActivePane.CurrentPath, _favoritesStore.Folders);
-        if (dialog.ShowDialog() != true || dialog.Result is not { } result) return;
-        try
-        {
-            _favoritesStore.SaveEntries(result, dialog.ResultFolders);
-            _favorites.Clear(); _favorites.AddRange(result.Select(item => item.Path));
-            EnvironmentStatus.Text = $"已保存 {_favorites.Count} 个收藏目录。";
-        }
-        catch (Exception ex) { EnvironmentStatus.Text = $"收藏夹保存失败：{ex.Message}"; }
+        var dialog = new FavoritesManagerWindow(this, _favorites.Select(_favoritesStore.Describe), ActivePane.CurrentPath,
+            _favoritesStore.Folders, (entries, folders) =>
+            {
+                _favoritesStore.SaveEntries(entries, folders);
+                _favorites.Clear(); _favorites.AddRange(entries.Select(item => item.Path));
+                EnvironmentStatus.Text = $"已保存 {_favorites.Count} 个收藏目录。";
+            });
+        dialog.ShowDialog();
     }
 
     private void ManageCommonLocations()
     {
-        var dialog = new FavoritesManagerWindow(this, _commonLocations, ActivePane.CurrentPath, _commonLocationsStore.Folders) { Title = "管理常用位置" };
-        if (dialog.ShowDialog() != true || dialog.Result is not { } result) return;
-        try
-        {
-            _commonLocationsStore.SaveEntries(result, dialog.ResultFolders);
-            _commonLocations.Clear(); _commonLocations.AddRange(result);
-        }
-        catch (Exception ex) { EnvironmentStatus.Text = $"常用位置保存失败：{ex.Message}"; }
+        var dialog = new FavoritesManagerWindow(this, _commonLocations, ActivePane.CurrentPath,
+            _commonLocationsStore.Folders, (entries, folders) =>
+            {
+                _commonLocationsStore.SaveEntries(entries, folders);
+                _commonLocations.Clear(); _commonLocations.AddRange(entries);
+            }) { Title = "管理常用位置" };
+        dialog.ShowDialog();
     }
 
     private void UpdateFolderSizeSourceMenus()

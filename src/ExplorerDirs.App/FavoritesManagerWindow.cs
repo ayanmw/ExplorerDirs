@@ -12,13 +12,18 @@ internal sealed class FavoritesManagerWindow : Window
     private readonly TreeView _tree = new() { AllowDrop = true };
     private readonly TextBox _name = new() { MinWidth = 150 };
     private readonly TextBlock _path = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 6) };
+    private readonly Action<IReadOnlyList<FavoriteEntry>, IReadOnlyList<string>>? _persist;
+    private readonly TextBlock _dropHint = new() { TextWrapping = TextWrapping.Wrap };
+    private bool _saveFailed;
     private Point _dragStart;
     private TreeViewItem? _dragItem;
     private sealed record Folder(string Name);
 
     internal FavoritesManagerWindow(Window owner, IEnumerable<FavoriteEntry> entries, string currentPath,
-        IEnumerable<string>? folders = null)
+        IEnumerable<string>? folders = null,
+        Action<IReadOnlyList<FavoriteEntry>, IReadOnlyList<string>>? persist = null)
     {
+        _persist = persist;
         Owner = owner; Title = "管理收藏夹";
         Width = 760; Height = 500; MinWidth = 540; MinHeight = 340;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
@@ -30,6 +35,7 @@ internal sealed class FavoritesManagerWindow : Window
         var hint = new TextBlock { Text = "分组在前、目录在后；拖动调整顺序，放到分组中间移入，放到空白处移回根目录。分组不嵌套。工作区仍由收藏夹菜单独立管理。",
             TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
         DockPanel.SetDock(hint, Dock.Top); root.Children.Add(hint);
+        DockPanel.SetDock(_dropHint, Dock.Top); root.Children.Add(_dropHint);
         var bottom = new StackPanel { Margin = new Thickness(0, 8, 0, 0) };
         DockPanel.SetDock(bottom, Dock.Bottom); root.Children.Add(bottom);
         var edit = new DockPanel(); bottom.Children.Add(edit);
@@ -43,13 +49,16 @@ internal sealed class FavoritesManagerWindow : Window
             while (FindFolder(name) is not null) name = original + " " + suffix++;
             Select(AddFolder(name)); _name.Focus(); _name.SelectAll();
         }));
-        buttons.Children.Add(MakeButton("添加当前目录", () =>
+        buttons.Children.Add(MakeButton("添加目录…", () =>
         {
-            if (AllEntries().Any(item => FavoritesStore.SamePath(item.Path, currentPath)))
-            { _path.Text = "当前目录已在收藏夹中。"; return; }
+            var picker = new Microsoft.Win32.OpenFolderDialog { Title = "选择要添加的目录", InitialDirectory = currentPath };
+            if (picker.ShowDialog(this) != true) return;
+            var selectedPath = picker.FolderName;
+            if (AllEntries().Any(item => FavoritesStore.SamePath(item.Path, selectedPath)))
+            { _path.Text = "所选目录已在收藏夹中。"; return; }
             var selected = _tree.SelectedItem as TreeViewItem;
             var parent = selected?.Tag is Folder ? selected : FolderParent(selected);
-            var item = MakeEntry(new FavoriteEntry(currentPath));
+            var item = MakeEntry(new FavoriteEntry(selectedPath));
             (parent?.Items ?? _tree.Items).Add(item); Select(item);
         }));
         buttons.Children.Add(MakeButton("删除", () =>
@@ -61,14 +70,12 @@ internal sealed class FavoritesManagerWindow : Window
         }));
         buttons.Children.Add(MakeButton("上移", () => Move(-1)));
         buttons.Children.Add(MakeButton("下移", () => Move(1)));
-        buttons.Children.Add(MakeButton("保存", () =>
+        buttons.Children.Add(MakeButton("关闭", Close));
+        Closing += (_, e) =>
         {
-            var result = AllEntries().ToArray();
-            var names = _tree.Items.Cast<TreeViewItem>().Where(item => item.Tag is Folder).Select(item => ((Folder)item.Tag).Name).ToArray();
-            if (result.Length > 200 || names.Length > 200) { _path.Text = "最多保存 200 个收藏项和 200 个分组。"; return; }
-            Result = result; ResultFolders = names; DialogResult = true;
-        }));
-        buttons.Children.Add(MakeButton("取消", () => DialogResult = false));
+            if (_saveFailed && MessageBox.Show(this, "有改动未能保存。仍要关闭并放弃未保存改动？", Title,
+                    MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) e.Cancel = true;
+        };
         foreach (var folder in folders ?? []) if (FindFolder(folder) is null) AddFolder(folder);
         foreach (var entry in entries)
             if (entry.Group.Length == 0) _tree.Items.Add(MakeEntry(entry));
@@ -94,8 +101,24 @@ internal sealed class FavoritesManagerWindow : Window
         _tree.DragOver += (_, e) =>
         {
             e.Effects = e.Data.GetData(typeof(TreeViewItem)) is TreeViewItem item && Owns(item) ? DragDropEffects.Move : DragDropEffects.None;
+            if (e.Effects == DragDropEffects.Move)
+            {
+                var target = ItemAt(e.OriginalSource as DependencyObject);
+                if (target == item || FolderParent(target) == item)
+                {
+                    e.Effects = DragDropEffects.None; _dropHint.Text = "不能移动到自身或自身分组内";
+                    e.Handled = true; return;
+                }
+                var destination = target?.Tag is Folder && e.GetPosition(target).Y is >= 5 and <= 20
+                    ? target : FolderParent(target);
+                if ((e.Data.GetData(typeof(TreeViewItem)) as TreeViewItem)?.Tag is Folder) destination = null;
+                _dropHint.Text = destination?.Tag is Folder group ? $"放开后移入分组：{group.Name}" : "放开后移动到根目录／目标项旁";
+                if (destination is not null) destination.IsExpanded = true;
+            }
+            else _dropHint.Text = "此处不可放置";
             e.Handled = true;
         };
+        _tree.DragLeave += (_, _) => _dropHint.Text = "";
         _tree.Drop += (_, e) =>
         {
             e.Handled = true;
@@ -117,15 +140,33 @@ internal sealed class FavoritesManagerWindow : Window
             }
             collection.Insert(index, item);
             if (destination is not null) destination.IsExpanded = true;
-            Select(item);
+            Select(item); _dropHint.Text = ""; SaveChanges();
         };
         root.Children.Add(_tree); Content = root;
     }
 
-    private static Button MakeButton(string text, Action action)
+    private void SaveChanges()
+    {
+        var result = AllEntries().ToArray();
+        var folders = _tree.Items.Cast<TreeViewItem>().Where(item => item.Tag is Folder)
+            .Select(item => ((Folder)item.Tag).Name).ToArray();
+        try
+        {
+            if (result.Length > 200 || folders.Length > 200) throw new InvalidOperationException("最多保存 200 个收藏项和 200 个分组。");
+            _persist?.Invoke(result, folders);
+            Result = result; ResultFolders = folders; _saveFailed = false;
+        }
+        catch (Exception error)
+        {
+            _saveFailed = true;
+            MessageBox.Show(this, $"改动未保存：{error.Message}", Title, MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private Button MakeButton(string text, Action action)
     {
         var button = new Button { Content = text, Padding = new Thickness(10, 5, 10, 5), Margin = new Thickness(0, 0, 8, 0) };
-        button.Click += (_, _) => action(); return button;
+        button.Click += (_, _) => { action(); if (text is not "关闭" and not "重命名") SaveChanges(); }; return button;
     }
     private TreeViewItem AddFolder(string name)
     {
@@ -173,7 +214,7 @@ internal sealed class FavoritesManagerWindow : Window
             var replacement = MakeEntry(entry); var header = replacement.Header; replacement.Header = null;
             item.Tag = entry; item.Header = header;
         }
-        _tree.Focus();
+        _tree.Focus(); SaveChanges();
     }
     private void Move(int delta)
     {
