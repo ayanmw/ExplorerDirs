@@ -207,3 +207,8 @@ NativeProbe增加显式环境控制EXPLORERDIRS_PROBE_NAME_SORT_CONTROL=1，仅�
 本机SDK ShlObj.h声明ShellFolderView_RemoveObject通过SHShellFolderView_Message(hwnd,SFVM_REMOVEOBJECT=6,relativePidl)。在异步原始PIDL原型中改为QI IShellView/GetWindow，以保留行PIDL末段调用该入口，不做文件系统删除。`direct-remove-prepare2.log` 构建通过，载荷 `.state/gui-smoke/20261105-001602-689-61ff86`；`direct-remove-run.log` 仍在批量删除失败且多次空列表，不能认为旧接口有效解决当前DefView场景。实验保存为 `experiments/direct-view-remove.patch`，产品三文件接线已恢复。
 
 首次准备因旧零上下文补丁插入方法落在新增诊断行后的错误位置而编译失败，修正方法边界后才构建/执行；失败准备没有运行。不将SDK仍声明该旧接口等同于现代DefView兼容性证明。下一步回到通知/枚举交错，不接入该替代方案。
+
+
+## 暂停遗留四次重验实验已收尾（2026-11-05）
+
+按用户要求原样复验暂停遗留源码。大目录四轮重验仍有两个窗格批量删除残留，小目录第二进程重命名超时；恢复基线后小目录两进程功能流程通过。各运行有外部输入活动，隔离守卫不通过，不能记整轮全绿。原型另有总数判定不等同路径判定、同名重建未保护的源码缺口；结论不采用。三个接线文件已恢复、正常构建重新生成，实验存档并结束。详见 [delete-recheck-experiment-conclusion.md](delete-recheck-experiment-conclusion.md)。原问题和temp.86门槛仍未关闭，不发布。
