@@ -195,3 +195,8 @@ Windows SDK 常量核实：SHCNE_UPDATEDIR=0x1000，SHCNE_UPDATEITEM=0x2000；�
 临时显式编译EXPLORERDIRS_REFRESH_ORIGIN_TRACE，标记真正调用ShellRefreshPolicy/IShellView.Refresh的位置和堆栈。载荷 `.state/gui-smoke/20261105-000944-468-896213`，`refresh-origin-run.log` 1025行仍在普通文件删除失败且多次空列表。`.state/app-session-process/f268364ed4a448b3b66d3387756b42d2/app/refresh-origin.log` 全程仅1条：tick382513187，manual=False/full=True/soft=True，来自ScheduleInitialVirtualSort.FinishGroupedRecovery启动分组恢复；外部变化期间没有新增宿主Refresh调用。
 
 因此当前反例不支持“监控反复调用这条宿主Refresh路径导致空列表”的判断；后续定位DefView通知处理/内部枚举，并检查是否存在其他刷新入口。保留条件编译诊断块，文件顶部临时#define已移除，普通构建不写日志；不将该结论扩大为所有刷新入口或可见绘制均已排除。不发布。
+
+
+## 名称排序控制夹具（2026-11-05）
+
+NativeProbe增加显式环境控制EXPLORERDIRS_PROBE_NAME_SORT_CONTROL=1，仅改变测试种入的排序列为名称，保留四窗格、大小列及一窗格Size分组；未设置时原夹具不变，产品不读取该开关。构建通过。`name-sort-control-run.log` 默认软刷新/正常DLL/1025行：创建1209ms、未采样空列表，但目录删除四窗格全残留，整项失败并隔离清理完成。故删除缺陷不是大小排序特有；创建阶段无空列表不能证明后续所有变化无闪烁，控制测试在目录删除阶段已停止。后续需独立处理通知删除可靠性和大小排序/枚举时序，不用关闭大小排序规避需求。

@@ -42,6 +42,8 @@ internal static class AppSessionProcessProbe
         }
         var profile = Path.Combine(app, "profile");
         Directory.CreateDirectory(profile);
+        var nameSortControl = Environment.GetEnvironmentVariable("EXPLORERDIRS_PROBE_NAME_SORT_CONTROL") == "1";
+        Console.WriteLine($"app-session-sort-control: name-sort={nameSortControl}");
         var panes = new List<List<TabSettings>>();
         var key = new PropertyKeyState(new Guid("b725f130-47ef-101a-a5f1-02608c9eebac"), 12);
         for (var pane = 0; pane < 4; pane++)
@@ -58,7 +60,7 @@ internal static class AppSessionProcessProbe
                 }
                 for (var filler = 0; filler < fillerCount; filler++)
                     File.WriteAllBytes(Path.Combine(directory, $"filler-{filler:D5}.txt"), new byte[1024]);
-                var view = new ViewState(4, 16, [new(key, pane % 2 == 0 ? 1 : -1)], pane == 1 ? key : null, true,
+                var view = new ViewState(4, 16, [new(nameSortControl ? new(key.FormatId, 10) : key, pane % 2 == 0 ? 1 : -1)], pane == 1 ? key : null, true,
                     [new(new(key.FormatId, 10), 240), new(key, 160), new(new(key.FormatId, 4), 140)])
                     { MixedSizeSort = pane % 2 != 0 };
                 tabs.Add(new(directory, view));
