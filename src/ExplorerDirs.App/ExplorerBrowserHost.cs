@@ -423,9 +423,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 }
                 var reconcileUngroup = _sizeSortPendingUngroup;
                 _sizeSortPendingUngroup = false;
-                if (saved.MixedSizeSort && !reconcileUngroup) return;
-                // The original Shell sort used the previous direction's category compensation.
-                // Reuse the bounded native recovery, with its selection and input protections.
+                if (!reconcileUngroup) return;
+                // Ordinary direction changes are entirely Shell-owned. The comparator no
+                // longer compensates category direction, so reversing twice here is redundant.
+                // Only grouping removal retains its independent recovery requirement.
                 ShellViewSelectionSnapshot? preserved = null;
                 if (selection is { } candidate && candidate.Generation == generation &&
                     candidate.InputVersion == Interlocked.Read(ref _nativeUserInputVersion))

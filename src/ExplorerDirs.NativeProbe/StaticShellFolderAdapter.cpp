@@ -4057,9 +4057,9 @@ namespace
                 const bool rightFolder = (rightChild->attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
                 if (!InterlockedCompareExchange(&g_sizeSortShellPartition, 0, 0) && !CurrentMixedSizeSort() && leftFolder != rightFolder)
                 {
-                    // Shell reverses CompareIDs for descending; compensate only the category
-                    // boundary so folders remain first while each category follows the requested direction.
-                    comparison = static_cast<short>((leftFolder ? -1 : 1) * CurrentSizeSortDirection());
+                    // Match Explorer's two-state ordering: descending reverses the category
+                    // boundary too. Do not compensate it back to folders-first and re-sort the view.
+                    comparison = static_cast<short>(leftFolder ? -1 : 1);
 #if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
                     RecordProductCompareDiagnostic(column, leftChild->name, 0, rightChild->name, 0, comparison, true, this);
 #endif
