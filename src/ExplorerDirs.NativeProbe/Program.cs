@@ -108,6 +108,8 @@ internal static class Program
         if (args is ["--product-user-sort-host-private-desktop", var modeHostProbe, var modeHostAdapter, var requestedSortMode] &&
             uint.TryParse(requestedSortMode, out var sortMode) && sortMode is 1 or 2 or 3 or 4 or 6 or 8)
             return PrivateDesktopShellProbe.RunProductUserSortHost(modeHostProbe, modeHostAdapter, sortMode);
+        if (args is ["--sort-presentation-host-private-desktop", var paintHost, var paintAdapter])
+            return PrivateDesktopShellProbe.RunSortPresentationHost(paintHost, paintAdapter);
         if (args is ["--product-user-sort-host-private-desktop", var userSortHostProbe, var userSortHostAdapter])
             return PrivateDesktopShellProbe.RunProductUserSortHost(userSortHostProbe, userSortHostAdapter);
         if (args is ["--product-sort-rename-host-private-desktop", var renameHostProbe, var renameHostAdapter])

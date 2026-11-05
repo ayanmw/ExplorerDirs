@@ -946,6 +946,14 @@ public partial class PaneControl : UserControl
         var style = state?.Browser.ReadViewStyle();
         return Current == state ? style : null;
     }
+    private bool? _globalMixedSort;
+    internal void ConfigureGlobalMixedSort(bool enabled)
+    {
+        _globalMixedSort = enabled;
+        foreach (var state in _tabOrder.Select(tab => (TabState)tab.Tag).ToArray())
+            if (state.Owner == this && _tabOrder.Contains(state.Tab)) state.Browser.ConfigureGlobalMixedSort(enabled);
+    }
+
     internal bool MixedSizeSort => Current?.Browser.MixedSizeSort == true;
     internal bool CanSetMixedSizeSort => Current?.Browser.CanSetMixedSizeSort == true;
     internal bool SetMixedSizeSort(bool enabled)
@@ -1848,6 +1856,7 @@ public partial class PaneControl : UserControl
             previewPaneVisible, detailsPaneVisible, _hiddenItemsPreference, _selectionCheckBoxes, _fullRowSelection,
             _disableGrouping, _softRefresh);
         browser.ConfigureFolderSizeLocations(_shellNamespaceProfileClassId, _folderSizesEnabled);
+        if (_globalMixedSort is { } globalMixed) browser.ConfigureGlobalMixedSort(globalMixed);
         if (Application.Current is App application)
             browser.ConfigureFolderSizeSortContextFactory(application.TryCreateFolderSizeSortContext);
         var tab = new TabItem();

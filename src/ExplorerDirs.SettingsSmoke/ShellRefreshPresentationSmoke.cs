@@ -13,7 +13,7 @@ internal static class ShellRefreshPresentationSmoke
         var modeEnd = host.IndexOf("private void QueueViewStyleCapture", modeStart, StringComparison.Ordinal);
         var modePath = modeStart >= 0 && modeEnd > modeStart ? host[modeStart..modeEnd] : string.Empty;
         var sortStart = host.IndexOf("private void ScheduleInitialVirtualSort", StringComparison.Ordinal);
-        var sortEnd = host.IndexOf("private bool HasPendingUnresolvedColumnValues", sortStart, StringComparison.Ordinal);
+        var sortEnd = host.IndexOf("private (bool SelectionRestored", sortStart, StringComparison.Ordinal);
         var sortPath = sortStart >= 0 && sortEnd > sortStart ? host[sortStart..sortEnd] : string.Empty;
         var refreshStart = host.IndexOf("private void Refresh(Action? afterRefresh, bool traceAsUserRefresh", StringComparison.Ordinal);
         var refreshEnd = host.IndexOf("private (bool SelectionRestored", refreshStart, StringComparison.Ordinal);
@@ -28,23 +28,27 @@ internal static class ShellRefreshPresentationSmoke
                 modePath.IndexOf("ShellViewRedrawLease.TrySuppress(view)", StringComparison.Ordinal) &&
             !modePath.Contains("Refresh(", StringComparison.Ordinal) && !modePath.Contains("Navigate(", StringComparison.Ordinal),
             "view-style changes invalidate the existing native view after restoring redraw from the scoped mode setter");
-        var cleanupStart = sortPath.IndexOf("void FinishSortRecovery()", StringComparison.Ordinal);
-        var cleanupEnd = sortPath.IndexOf("var timer =", cleanupStart, StringComparison.Ordinal);
-        var cleanup = sortPath[cleanupStart..cleanupEnd];
-        Check(cleanup.Contains("oppositeApplied && !savedApplied && IsCurrent()", StringComparison.Ordinal) &&
-            cleanup.Contains("savedApplied = InvokeVirtualSortVerb(savedSortVerb, IsCurrent)", StringComparison.Ordinal) &&
-            cleanup.IndexOf("InvokeVirtualSortVerb", StringComparison.Ordinal) <
-                cleanup.IndexOf("ReleaseInitialVirtualSortRedrawLease", StringComparison.Ordinal) &&
-            cleanup.Contains("_viewRestoreFailed = true", StringComparison.Ordinal),
-            "deadline cleanup compensates a temporary sort before releasing redraw and protects failed restoration");
-        var sortLeaseCall = sortPath.IndexOf("ShellViewRedrawLease.TrySuppress(sortView)", StringComparison.Ordinal);
-        var oppositeSortCall = sortPath.IndexOf("InvokeVirtualSortVerb(oppositeVerb, IsCurrent)", StringComparison.Ordinal);
-        Check(sortLeaseCall >= 0 && oppositeSortCall > sortLeaseCall &&
-            sortPath.Contains("ReadDirectoryMonitorItemCount() != readinessItemCount", StringComparison.Ordinal) &&
-            sortPath.Contains("savedApplied", StringComparison.Ordinal) &&
-            sortPath.Contains("ReleaseInitialVirtualSortRedrawLease", StringComparison.Ordinal) &&
-            host.Contains("private void ReleaseInitialVirtualSortRedrawLease", StringComparison.Ordinal),
-            "initial virtual sorting freezes native redraw across both Shell sort directions and releases after rows return");
+        // Recovery now keeps the requested primary direction. Checking the deleted
+        // opposite/saved-verb implementation would reward the oscillation reported by users.
+        Check(!sortPath.Contains("InvokeVirtualSortVerb", StringComparison.Ordinal) &&
+            sortPath.Contains("target.SetSorting(temporary)", StringComparison.Ordinal) &&
+            sortPath.Contains("target.SetSorting(sorts)", StringComparison.Ordinal) &&
+            sortPath.Contains("finally { EndInitialSortTransient(serial); }", StringComparison.Ordinal),
+            "initial sorting preserves the primary direction and protects transient secondary keys");
+        Check(sortPath.Contains("ShellSizeSortOrder.IsOrderedAsync", StringComparison.Ordinal) &&
+            sortPath.Contains("++attempts < 3", StringComparison.Ordinal) &&
+            sortPath.Contains("_viewRestoreFailed = true", StringComparison.Ordinal) &&
+            sortPath.Contains("inputVersion == Interlocked.Read", StringComparison.Ordinal),
+            "initial sorting verifies native row order, bounds retries and retires on user input");
+        var paintStart = host.IndexOf("private void EndSortPresentation", StringComparison.Ordinal);
+        var paintEnd = host.IndexOf("private void ClearNativeSortCommandSelection", paintStart, StringComparison.Ordinal);
+        var paintPath = host[paintStart..paintEnd];
+        Check(paintPath.Contains("ShellViewRedrawLease.TrySuppress(view)", StringComparison.Ordinal) &&
+            paintPath.Contains("stable >= 2", StringComparison.Ordinal) &&
+            paintPath.Contains("started.ElapsedMilliseconds >= 1500", StringComparison.Ordinal) &&
+            paintPath.Contains("lease.Dispose()", StringComparison.Ordinal) &&
+            !paintPath.Contains("RefreshWithPresentation", StringComparison.Ordinal),
+            "column sorting holds the last frame with bounded release instead of refreshing the directory");
         var disposeStart = host.IndexOf("private void DisposeBrowser()", StringComparison.Ordinal);
         var detachStart = host.IndexOf("private void DetachViewWindow()", StringComparison.Ordinal);
         Check(disposeStart >= 0 && host.IndexOf("ReleaseInitialVirtualSortRedrawLease(requestRedraw: false)", disposeStart, StringComparison.Ordinal) >= 0 &&
@@ -73,7 +77,8 @@ internal static class ShellRefreshPresentationSmoke
         Check(redrawLease.Contains("activeLease.Count++", StringComparison.Ordinal) &&
             redrawLease.Contains("--activeLease.Count == 0", StringComparison.Ordinal),
             "overlapping redraw leases for the same native Shell view restore painting only after the last owner releases");
-        Check(host.Contains("if (IsCurrent()) RefreshWithPresentation(traceAsUserRefresh: false, forceFullEnumeration: true)", StringComparison.Ordinal),
+        Check(sortPath.Contains("if (grouped)", StringComparison.Ordinal) &&
+            sortPath.Contains("RefreshWithPresentation(traceAsUserRefresh: false, forceFullEnumeration: true)", StringComparison.Ordinal),
             "saved startup groups bypass automatic soft enumeration without pretending user F5 input");
         Console.WriteLine("Shell refresh presentation smoke: PASS (source contract; no Shell view created)");
     }

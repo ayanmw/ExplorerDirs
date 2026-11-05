@@ -55,7 +55,7 @@ try {
     Invoke-BackgroundCheck 'folder-size-native-bridge-smoke' 'dotnet' @('run', '--project', $settings, '-c', 'Release', '--no-build', '--',
         '--folder-size-native-bridge-smoke', 'src/ExplorerDirs.NativeProbe/bin/native-x64/ExplorerDirs.StaticShellFolderAdapter.dll')
     $hostProject = 'src/ExplorerDirs.HostProbe/ExplorerDirs.HostProbe.csproj'
-    foreach ($flag in @('folder-navigation-callbacks', 'pane-tab-copy-order')) {
+    foreach ($flag in @('global-mixed-sort', 'favorites-live-manager', 'folder-navigation-callbacks', 'pane-tab-copy-order')) {
         Invoke-BackgroundCheck $flag 'dotnet' @('run', '--project', $hostProject, '-c', 'Release', '--no-build', '--', "--$flag")
     }
     # This probe registers a random temporary namespace and removes it; it creates no browser or view.

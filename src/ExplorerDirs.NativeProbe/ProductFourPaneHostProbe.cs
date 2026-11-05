@@ -6,7 +6,7 @@ using System.Runtime.Loader;
 // Loading HostProbe here keeps its WPF/App types out of the desktop-monitor thread.
 internal static class ProductFourPaneHostProbe
 {
-    internal static int Run(string hostProbePath, bool large = false, bool observeNotifications = true, bool forceSortDeadline = false, string? sortContextAdapter = null, bool inputDuringSort = false, bool commandDuringSort = false, bool renameDuringSort = false, bool reconcileUserSort = false, bool retrySort = false, uint userSortMode = 3, bool hideSizeColumn = false, string? persistedSessionPath = null, bool readPersistedSession = false, bool unavailableSizes = false, bool holdUnavailable = false, bool initialSizeGrouping = false, int groupedFolderCount = 1025, bool realEverything = false)
+    internal static int Run(string hostProbePath, bool large = false, bool observeNotifications = true, bool forceSortDeadline = false, string? sortContextAdapter = null, bool inputDuringSort = false, bool commandDuringSort = false, bool renameDuringSort = false, bool reconcileUserSort = false, bool retrySort = false, uint userSortMode = 3, bool hideSizeColumn = false, string? persistedSessionPath = null, bool readPersistedSession = false, bool unavailableSizes = false, bool holdUnavailable = false, bool initialSizeGrouping = false, int groupedFolderCount = 1025, bool realEverything = false, bool sortPresentation = false)
     {
         hostProbePath = Path.GetFullPath(hostProbePath);
         var directory = Path.GetDirectoryName(hostProbePath)!;
@@ -17,6 +17,8 @@ internal static class ProductFourPaneHostProbe
         try
         {
             var assembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(hostProbePath);
+            if (sortPresentation)
+                return (int)assembly.GetType("SortPresentationHostProbe", true)!.GetMethod("Run", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, [sortContextAdapter])!;
             var type = assembly.GetType("ProfileOwnerMultiRootShellHostProbe", throwOnError: true)!;
             var run = type.GetMethod(realEverything ? "RunEverythingHostsForProbe" : initialSizeGrouping && sortContextAdapter is not null ? "RunGroupedLargeForProbe" : persistedSessionPath is not null ? "RunPersistedSortForProbe" : sortContextAdapter is null ? "Run" : retrySort ? "RunSortRetryForProbe" : reconcileUserSort ? "RunUserSortReconciliationForProbe" : renameDuringSort ? "RunRenameDuringSortForProbe" : commandDuringSort ? "RunCommandDuringSortForProbe" : inputDuringSort ? "RunInputDuringSortForProbe" : "RunWithSortContextForProbe", BindingFlags.Static | BindingFlags.NonPublic)!;
             // The large case reproduces the previously failing four-root, 1,025-folders-per-root

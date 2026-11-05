@@ -70,6 +70,13 @@ internal static class AppSessionProcessProbe
         var expected = new SessionState(4, 4, panes, 2, [1, 0, 0, 0], 16, [false, false, false, false], TreeDisplayMode.None);
         var sessionPath = Path.Combine(profile, "ExplorerDirs.ini");
         new SessionStore(sessionPath, sessionPath + ".legacy").Save(expected);
+        // The seed deliberately contains historical per-tab policies. The new global
+        // preference is absent, so default false must win when the App saves it back.
+        var expectedPersisted = expected with
+        {
+            Panes = expected.Panes.Select(tabs => tabs.Select(tab =>
+                tab with { View = tab.View with { MixedSizeSort = false } }).ToList()).ToList()
+        };
         const string seed = ";full-process-seed-must-be-rewritten\n";
         File.WriteAllText(sessionPath, seed + File.ReadAllText(sessionPath));
         File.WriteAllText(Path.Combine(profile, "FolderSize.ini"), "[FolderSize]\nFormatVersion=1\nEnabled=true\nSource=BuiltIn\n");
@@ -137,7 +144,7 @@ internal static class AppSessionProcessProbe
                     throw new InvalidOperationException($"Owned app exited with code {exit}.");
                 if (File.ReadAllText(sessionPath).Contains(seed, StringComparison.Ordinal))
                     throw new InvalidOperationException("App did not actually rewrite its seeded session.");
-                VerifySession(expected, new SessionStore(sessionPath, sessionPath + ".legacy").Load());
+                VerifySession(expectedPersisted, new SessionStore(sessionPath, sessionPath + ".legacy").Load());
                 var savedPlacement = new WindowPlacementStore(WindowPlacementStore.PathForSession(sessionPath)).Load();
                 if (savedPlacement != expectedPlacement) throw new InvalidOperationException("App saved a different window placement.");
                 Console.WriteLine($"app-session-process: pass={pass + 1}; pid={child.ProcessId}; exit=0; session-rewritten=True; five-tabs-four-panes=True; placement={savedPlacement}");

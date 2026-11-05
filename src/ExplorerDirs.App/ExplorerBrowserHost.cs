@@ -293,6 +293,37 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     // Defer native row-order recovery until grouping is removed; never ungroup the user view.
     private bool _sizeSortPendingUngroup;
 
+    private bool? _globalMixedSort;
+    private bool _globalMixedSortPending;
+    private DispatcherTimer? _globalMixedSortTimer;
+    internal void ConfigureGlobalMixedSort(bool enabled)
+    {
+        var needsReorder = _viewState.MixedSizeSort != enabled || _globalMixedSortPending;
+        _globalMixedSort = enabled;
+        _viewState = _viewState with { MixedSizeSort = enabled };
+        _folderSizeSortContext?.Update(enabled, _folderSizeSortDirection);
+        // Uncreated views will use this policy during their first native binding;
+        // they do not need a second sort immediately after becoming visible.
+        _globalMixedSortPending = HasNativeView && IsFolderSizeProvider && needsReorder;
+        if (!_globalMixedSortPending) { _globalMixedSortTimer?.Stop(); return; }
+        if (!IsVisible) return;
+        _globalMixedSortTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(100), DispatcherPriority.Background,
+            (_, _) =>
+            {
+                if (!HasNativeView || !IsVisible) { _globalMixedSortTimer?.Stop(); return; }
+                if (_viewRestoreFailed) { _globalMixedSortTimer?.Stop(); return; }
+                if (!CanSetMixedSizeSort) return;
+                try
+                {
+                    if (_globalMixedSort is { } value && SetMixedSizeSort(value) && _globalMixedSort == value)
+                    { _globalMixedSortPending = false; _globalMixedSortTimer?.Stop(); }
+                }
+                catch (Exception error)
+                { _globalMixedSortTimer?.Stop(); MenuError?.Invoke(this, $"应用全局排序失败：{error.Message}"); }
+            }, Dispatcher);
+        _globalMixedSortTimer.Start();
+    }
+
     internal bool MixedSizeSort => _viewState.MixedSizeSort;
     internal bool CanSetMixedSizeSort => _folderSizeSortContext is not null &&
         _browser is not null && IsFolderSizeProvider && IsVisible && !_viewReadiness.Pending &&
@@ -300,13 +331,16 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     internal bool SetMixedSizeSort(bool enabled)
     {
-        if (_viewState.MixedSizeSort == enabled) return true;
+        if (_viewState.MixedSizeSort == enabled && !_globalMixedSortPending) return true;
+        var globalPolicy = _globalMixedSort;
+        var inputVersion = Interlocked.Read(ref _nativeUserInputVersion);
         if (!CanSetMixedSizeSort) return false;
         var browser = _browser;
         var context = _folderSizeSortContext!;
         var generation = _viewReadiness.Generation;
         bool Current() => ReferenceEquals(browser, _browser) && generation == _viewReadiness.Generation &&
-            ReferenceEquals(context, _folderSizeSortContext);
+            ReferenceEquals(context, _folderSizeSortContext) && globalPolicy == _globalMixedSort &&
+            inputVersion == Interlocked.Read(ref _nativeUserInputVersion);
         var saved = CaptureViewState();
         if (!Current() || ViewCaptureFailed) return false;
         var direction = saved.SortColumns.FirstOrDefault()?.Direction ?? 1;
@@ -324,19 +358,86 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             // retain the requested primary direction and never use Refresh or reverse-sort verbs.
             if (saved.SortColumns.Count > 0)
             {
+                BeginSortPresentation();
                 var nameKey = new PropertyKeyState(new Guid("b725f130-47ef-101a-a5f1-02608c9eebac"), 10);
                 var secondary = saved.SortColumns.Any(sort => sort.Key == nameKey) ? FolderSizeLocationPolicy.SizeColumn : nameKey;
                 var temporary = saved.SortColumns.Where(sort => sort.Key != secondary).Append(new SortColumnState(secondary, 1)).ToArray();
                 var target = new NativeViewStateTarget(view, Current);
-                Check(target.SetSorting(temporary));
+                var temporaryResult = target.SetSorting(temporary);
                 if (!Current()) return false;
-                Check(target.SetSorting(saved.SortColumns));
+                Check(temporaryResult);
+                var restoreResult = target.SetSorting(saved.SortColumns);
+                if (!Current()) return false;
+                Check(restoreResult);
             }
             if (!Current()) return false;
             if (selection is not null) RestoreInitialVirtualSortSelection(selection, Current);
             return Current();
         }
         finally { selection?.Dispose(); if (view != 0) Marshal.Release(view); }
+    }
+
+    private ShellViewRedrawLease? _sortPaintLease;
+    private DispatcherTimer? _sortPaintTimer;
+    private int _sortNativeDispatchDepth;
+    [ThreadStatic] private static int _nativeSortSetterDepth;
+    internal string LastSortPresentationStatus { get; private set; } = "idle";
+    internal long SortPresentationCount { get; private set; }
+
+    private void EndSortPresentation(string status)
+    {
+        _sortPaintTimer?.Stop(); _sortPaintTimer = null;
+        var lease = _sortPaintLease; _sortPaintLease = null;
+        if (lease is null) return;
+        var window = _viewWindow;
+        var generation = _viewReadiness.Generation;
+        lease.Dispose();
+        // Releasing COM redraw can pump navigation; do not repaint a replacement view.
+        if (window != _viewWindow || generation != _viewReadiness.Generation) return;
+        LastSortPresentationStatus = status;
+        if (window != 0 && IsWindow(window))
+            _ = RedrawWindow(window, 0, 0, RedrawInvalidateNoEraseChildrenAndFrame);
+    }
+
+    private void BeginSortPresentation()
+    {
+        if (_sortPaintLease is not null || _browser is null || _viewReadiness.Pending) return;
+        var browser = _browser;
+        var window = _viewWindow;
+        var generation = _viewReadiness.Generation;
+        var expected = ReadDirectoryMonitorItemCount();
+        if (window == 0 || expected is null or <= 0) return;
+        var view = GetFolderView2Pointer();
+        if (view == 0) return;
+        try { _sortPaintLease = ShellViewRedrawLease.TrySuppress(view); }
+        finally { Marshal.Release(view); }
+        if (_sortPaintLease is null) return;
+        if (!ReferenceEquals(browser, _browser) || window != _viewWindow || generation != _viewReadiness.Generation)
+        { EndSortPresentation("retired"); return; }
+        SortPresentationCount++;
+        LastSortPresentationStatus = "holding-last-frame";
+        var started = Stopwatch.StartNew();
+        var stable = 0;
+        var timer = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(25) };
+        _sortPaintTimer = timer;
+        timer.Tick += (_, _) =>
+        {
+            if (!ReferenceEquals(timer, _sortPaintTimer)) return;
+            if (!ReferenceEquals(browser, _browser) || window != _viewWindow || generation != _viewReadiness.Generation)
+            { EndSortPresentation("retired"); return; }
+            // Native setters may pump messages; never reenter their COM getters.
+            if (_sortNativeDispatchDepth != 0 || _nativeSortSetterDepth != 0) return;
+            try
+            {
+                var count = ReadDirectoryMonitorItemCount();
+                stable = count == expected ? stable + 1 : 0;
+                if (started.ElapsedMilliseconds >= 120 && stable >= 2) EndSortPresentation("ready");
+                else if (started.ElapsedMilliseconds >= 1500) EndSortPresentation("bounded-release");
+            }
+            catch (Exception error)
+            { EndSortPresentation("failed"); MenuError?.Invoke(this, $"排序显示恢复失败：{error.Message}"); }
+        };
+        timer.Start();
     }
 
     private void ClearNativeSortCommandSelection()
@@ -812,6 +913,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             throw new ArgumentException("预览窗格和详情窗格不能同时开启。", nameof(showDetailsPane));
         _location = new ShellNavigationState(initialPath);
         _viewState = initialView.Copy();
+        IsVisibleChanged += (_, _) =>
+        {
+            if (IsVisible && _globalMixedSortPending && _globalMixedSort is { } desired) ConfigureGlobalMixedSort(desired);
+            else if (!IsVisible) _globalMixedSortTimer?.Stop();
+        };
         _quickFilterSettings = quickFilter;
         _hiddenItemsPreference = hiddenItemsPreference;
         _selectionCheckBoxes = selectionCheckBoxes;
@@ -2730,7 +2836,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             {
                 captured = PreserveQuickFilterGroup(captured);
                 captured = ShellGroupingPolicy.PreserveCachedGrouping(captured, _viewState, _disableGrouping);
-                _viewState = captured;
+                _viewState = _globalMixedSort is { } globalMixed ? captured with { MixedSizeSort = globalMixed } : captured;
             }
             return _viewState.Copy();
         }
@@ -3254,7 +3360,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 Key = new NativePropertyKey { FormatId = sort.Key.FormatId, PropertyId = sort.Key.PropertyId },
                 Direction = sort.Direction
             }).ToArray();
-            return GetMethod<SetSortColumnsDelegate>(view, 27)(view, native, native.Length);
+            _nativeSortSetterDepth++;
+            try { return GetMethod<SetSortColumnsDelegate>(view, 27)(view, native, native.Length); }
+            finally { _nativeSortSetterDepth--; }
         }
         public int SetGrouping(PropertyKeyState? key, bool ascending)
         {
@@ -5655,10 +5763,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
             {
                 if (!_viewReadiness.IsCurrent(navigationVersion) || CurrentPath != path || _location.IsSearchActive) return;
+                if (_globalMixedSort is { } desired) _viewState = _viewState with { MixedSizeSort = desired };
                 try { ApplyViewState(); }
                 catch (Exception ex) { MenuError?.Invoke(this, $"恢复视图配置失败：{ex.Message}"); }
                 if (!_viewReadiness.IsCurrent(navigationVersion)) return;
                 QueueColumnHeaderGeometryRefresh();
+                if (_globalMixedSortPending && _globalMixedSort is { } pendingMixed) ConfigureGlobalMixedSort(pendingMixed);
                 if (isFileSystemLocation) StartDirectoryChangeMonitor(path, navigationVersion);
                 else StopDirectoryChangeMonitor();
                 if (CanCompleteNavigationRequest(requestVersion)) RestoreNavigationFocus(navigationVersion);
@@ -5876,6 +5986,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private void DetachViewWindow()
     {
+        _globalMixedSortTimer?.Stop();
+        EndSortPresentation("detached");
         ClearNativeSortCommandSelection();
         _nativeSortReconciliation?.Abort();
         _nativeSortReconciliation = null;
@@ -5906,7 +6018,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             // Finish the mouse gesture before caching selection; a button-down snapshot can be an intermediate range.
             var childCommandNotification = message == 0x0111 && lParam != IntPtr.Zero;
             var programmaticSortCommand = message == 0x0111 && lParam == IntPtr.Zero &&
-                Volatile.Read(ref _shellSortCommandDispatchDepth) > 0;
+                (Volatile.Read(ref _shellSortCommandDispatchDepth) > 0 || _nativeSortSetterDepth > 0);
+            if (_sortPaintLease is not null && !IsColumnHeaderInputWindow(hwnd) &&
+                message is 0x0100 or 0x0104 or 0x0201 or 0x0203 or 0x0204 or 0x0207 or 0x020A)
+                EndSortPresentation("input-release");
             if (!childCommandNotification && !programmaticSortCommand &&
                 message is 0x0100 or 0x0104 or 0x0111 or 0x0201 or 0x0202 or 0x0203 or 0x0204 or 0x0207)
                 // Explicit native commands may change sorting; they must cancel recovery,
@@ -6039,6 +6154,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 case 0x0210: // WM_PARENTNOTIFY: apply theme to newly created native children.
                     if ((wParam.ToInt64() & 0xFFFF) == 1)
                     {
+                        // Shell may create the header after our first child enumeration.
+                        // Attach the same input/presentation observer to these late children.
+                        if (lParam != IntPtr.Zero && (_viewWindow == hwnd || IsChild(_viewWindow, lParam)))
+                        {
+                            SubclassWindow(lParam);
+                            EnumChildWindows(lParam, (child, _) => { SubclassWindow(child); return true; }, IntPtr.Zero);
+                        }
                         QueueNativeThemeRefresh();
                         QueueColumnHeaderGeometryRefresh();
                     }
@@ -6073,9 +6195,25 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             CaptureNativeSortCommandSelection();
             NativeShellTheme.BeginMenu(hwnd);
         }
+        var sortGesture = message == 0x0202 && IsColumnHeaderInputWindow(hwnd);
+        if (sortGesture)
+        {
+            try { BeginSortPresentation(); }
+            catch (Exception error) { EndSortPresentation("failed"); MenuError?.Invoke(this, error.Message); }
+        }
+        if (_sortPaintLease is not null && (_viewWindow == hwnd || IsChild(_viewWindow, hwnd)))
+        {
+            if (message == 0x0014) return (IntPtr)1; // Preserve pixels instead of erasing an empty intermediate list.
+            if (message == 0x000B && wParam != IntPtr.Zero) return IntPtr.Zero;
+        }
         IntPtr result;
+        if (sortGesture) _sortNativeDispatchDepth++;
         try { result = DefSubclassProc(hwnd, message, wParam, lParam); }
-        finally { if (contextDispatch) NativeShellTheme.EndMenu(); }
+        finally
+        {
+            if (sortGesture) _sortNativeDispatchDepth--;
+            if (contextDispatch) NativeShellTheme.EndMenu();
+        }
         if (Volatile.Read(ref _shellSortCommandDispatchDepth) == 0 &&
             (contextDispatch || message == 0x0111 && lParam == IntPtr.Zero ||
                 message == 0x0202 && IsColumnHeaderInputWindow(hwnd)))

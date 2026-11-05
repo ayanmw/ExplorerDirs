@@ -64,6 +64,9 @@ internal static class PrivateDesktopShellProbe
     internal static int RunProductPersistedSortHost(string hostProbePath, string adapterPath, string sessionPath, bool read, bool unavailable = false, bool holdUnavailable = false) => Run("product-persisted-sort-host",
         () => ProductFourPaneHostProbe.Run(hostProbePath, sortContextAdapter: adapterPath, persistedSessionPath: sessionPath, readPersistedSession: read, unavailableSizes: unavailable, holdUnavailable: holdUnavailable), TimeSpan.FromSeconds(90), initializeOle: true);
 
+    internal static int RunSortPresentationHost(string host, string adapter) => Run("sort-presentation-host",
+        () => ProductFourPaneHostProbe.Run(host, sortContextAdapter: adapter, sortPresentation: true), TimeSpan.FromSeconds(90), initializeOle: true);
+
     internal static int RunProductSortRetryHost(string hostProbePath, string adapterPath) => Run("product-sort-retry-host",
         () => ProductFourPaneHostProbe.Run(hostProbePath, sortContextAdapter: adapterPath, retrySort: true), TimeSpan.FromSeconds(90), initializeOle: true);
 

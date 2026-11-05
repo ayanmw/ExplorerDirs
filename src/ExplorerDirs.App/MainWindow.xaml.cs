@@ -66,6 +66,7 @@ public partial class MainWindow : Window
     private readonly FullRowSelectionStore _fullRowSelectionStore;
     private readonly PortableBooleanPreference _disableGroupingStore;
     private readonly SoftRefreshStore _softRefreshStore;
+    private readonly GlobalMixedSortPreference _mixedSortPreference;
     private readonly PortableBooleanPreference _mouseWheelFocusPreferenceStore;
     private TabStripVisibilityMode _tabStripVisibilityMode = TabStripVisibilityMode.Always;
     private bool _multilineTabHeaders;
@@ -319,6 +320,9 @@ public partial class MainWindow : Window
                 ? disableGroupingWarning : $"{EnvironmentStatus.Text} {disableGroupingWarning}";
         _softRefreshStore = new SoftRefreshStore(Path.Combine(_profileDirectory, "SoftRefresh.ini"));
         _softRefresh = _softRefreshStore.Load();
+        _mixedSortPreference = GlobalMixedSortPreference.ForProfile(_profileDirectory, Dispatcher);
+        _mixedSortPreference.Changed += ApplyGlobalMixedSort;
+        Closed += (_, _) => _mixedSortPreference.Changed -= ApplyGlobalMixedSort;
         SoftRefreshMenu.IsChecked = _softRefresh;
         if (_softRefreshStore.LoadWarning is { } softRefreshWarning)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
@@ -420,6 +424,7 @@ public partial class MainWindow : Window
                 _selectionCheckBoxes, _fullRowSelection, _disableGrouping, _softRefresh,
                 _shellNamespaceProfileClassId);
             _panes[index] = pane;
+            pane.ConfigureGlobalMixedSort(_mixedSortPreference.Value);
             pane.ConfigureFolderSizes(_folderSizeOptions.Enabled);
             pane.FavoriteLocations = () => _favorites.Select(_favoritesStore.Describe).ToArray();
             pane.CommonLocations = () => _commonLocations.ToArray();
@@ -2826,16 +2831,22 @@ public partial class MainWindow : Window
 
     private void UpdateMixedSizeSortMenu()
     {
-        MixedSizeSortMenu.IsChecked = ActivePane?.MixedSizeSort == true;
-        MixedSizeSortMenu.IsEnabled = ActivePane?.CanSetMixedSizeSort == true;
+        MixedSizeSortMenu.IsChecked = _mixedSortPreference.Value;
+        MixedSizeSortMenu.IsEnabled = true;
     }
 
     private void FolderOptionsMenu_SubmenuOpened(object sender, RoutedEventArgs e) => UpdateMixedSizeSortMenu();
 
+    private void ApplyGlobalMixedSort()
+    {
+        foreach (var pane in _panes) pane?.ConfigureGlobalMixedSort(_mixedSortPreference.Value);
+        UpdateMixedSizeSortMenu();
+    }
+
     private void MixedSizeSort_Click(object sender, RoutedEventArgs e)
     {
-        if (!ActivePane.SetMixedSizeSort(MixedSizeSortMenu.IsChecked))
-            EnvironmentStatus.Text = "混合排序未更改；请等待当前文件视图就绪后重试。";
+        try { _mixedSortPreference.Set(MixedSizeSortMenu.IsChecked); }
+        catch (Exception error) { EnvironmentStatus.Text = $"混合排序未保存：{error.Message}"; }
         UpdateMixedSizeSortMenu();
     }
 

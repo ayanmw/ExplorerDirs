@@ -96,6 +96,7 @@ internal static class Program
         if (args is ["--product-notification-bridge-message-only", var bridgeAdapter]) return FolderNavigationCallbacksProbe.RunProvider(bridgeAdapter, notificationBridge: true);
         if (args is ["--folder-navigation-provider-callbacks", var callbackAdapter])
             return FolderNavigationCallbacksProbe.RunProvider(callbackAdapter);
+        if (args is ["--global-mixed-sort"]) return GlobalMixedSortProbe.Run();
         if (args is ["--favorites-live-manager"]) return FavoritesLiveManagerProbe.Run();
         if (args is ["--pane-tab-transfer"]) return PaneTabTransferProbe.Run();
         if (args is ["--tab-host-lifetime"]) return TabHostLifetimeProbe.Run();
