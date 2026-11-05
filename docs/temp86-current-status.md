@@ -176,3 +176,10 @@ Windows SDK 常量核实：SHCNE_UPDATEDIR=0x1000，SHCNE_UPDATEITEM=0x2000；�
 ## 删除身份比较定向追踪（2026-11-05）
 
 `delete-compare-run.log` 默认App+显式诊断DLL，1025行批量删除仍失败，隔离清理完成。trace目录 `45a534ee898942209721b73d3cc74377`：同名external-file.txt的37B旧PIDL/0B删除PIDL比较使用code=0x10000000（CANONICALONLY、列0），当前代码走名称比较，而非大小；未观察到“删除身份因大小不同而比较不等”的证据。只在同名external条目元数据不同时记录，常规构建不启用。故不据假设修改CompareIDs；继续追踪批量通知缺失及异步补偿的真实返回。此轮仅增加诊断，未发布。
+
+
+## 删除补偿阶段结果（2026-11-05，诊断通过非稳定性结论）
+
+组合原型仅在两个App文件顶部临时启用DELETE_REPAIR_TRACE，`.state/gui-smoke/20261105-000429-338-a25729`；`combined-delete-stages-run.log` 两进程56428/6340完整通过。阶段文件 `.state/app-session-process/8ce9ab9121fb4ddd9f9a0db46acdbaae/app/delete-repair-stages.log` 显示四窗格找到全部三条保留PIDL、属性读取成功、notified=3且owner current=True。故不能笼统认为原始PIDL助手不能匹配；但上一无诊断轮失败，当前日志写入可能改变时序，不作为产品稳定证据。
+
+第二进程单文件删除3.632秒，累计198次空列表采样，自动更新体验不达标。全部临时原型/诊断产品接线已恢复，保留现有实验补丁；不发布。下一步应分离通知消费/异步枚举完成与补偿发出时序，并追踪导致空列表的原生刷新路径，而非将本轮一次PASS升级为最终修复。
