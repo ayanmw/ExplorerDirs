@@ -183,3 +183,8 @@ Windows SDK 常量核实：SHCNE_UPDATEDIR=0x1000，SHCNE_UPDATEITEM=0x2000；�
 组合原型仅在两个App文件顶部临时启用DELETE_REPAIR_TRACE，`.state/gui-smoke/20261105-000429-338-a25729`；`combined-delete-stages-run.log` 两进程56428/6340完整通过。阶段文件 `.state/app-session-process/8ce9ab9121fb4ddd9f9a0db46acdbaae/app/delete-repair-stages.log` 显示四窗格找到全部三条保留PIDL、属性读取成功、notified=3且owner current=True。故不能笼统认为原始PIDL助手不能匹配；但上一无诊断轮失败，当前日志写入可能改变时序，不作为产品稳定证据。
 
 第二进程单文件删除3.632秒，累计198次空列表采样，自动更新体验不达标。全部临时原型/诊断产品接线已恢复，保留现有实验补丁；不发布。下一步应分离通知消费/异步枚举完成与补偿发出时序，并追踪导致空列表的原生刷新路径，而非将本轮一次PASS升级为最终修复。
+
+
+## 根条目更新过滤负对照（2026-11-05）
+
+临时过滤物理backingRoot自身UPDATEITEM转发，保留缓存失效和子项转发，并组合异步删除原型；载荷 `.state/gui-smoke/20261105-000718-231-9aab6c`，`root-update-filter-run.log` 第一进程批量阶段通过但累计127次空列表，连续创建耗时6.188秒；第二进程再次单文件删除失败。该负对照不支持将根UPDATEITEM过滤作为修复，全部临时接线及过滤均已撤回。下一步给实际IShellView.Refresh调用增加仅诊断来源标记，区分宿主主动完整刷新与DefView内部枚举；不把计数归零直接当成宿主调用Refresh的证据。
