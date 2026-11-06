@@ -5987,7 +5987,10 @@ namespace
             child->cb = sizeof(SyntheticChild);
             child->id = 1;
             STRRET displayName{};
-            auto result = backingFolder->GetDisplayNameOf(original, SHGDN_INFOLDER, &displayName);
+            // Retain the physical parsing leaf, not a friendly label. Shortcut
+            // labels can hide .lnk and collide with a different real directory.
+            auto result = backingFolder->GetDisplayNameOf(original,
+                SHGDN_INFOLDER | SHGDN_FORPARSING, &displayName);
             if (FAILED(result))
             {
                 char message[128]{};

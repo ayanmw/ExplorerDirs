@@ -125,7 +125,7 @@ public static partial class SyntheticShellSortProbe
     private delegate int DropAttributes(nint self, uint count, nint children, ref uint attributes);
     private static void VerifyProductDragSource(nint folder, string expectedPath)
     {
-        Check(At<ParseDisplayName>(folder, 3)(folder, 0, 0, "start.bat", 0, out var child, 0));
+        Check(At<ParseDisplayName>(folder, 3)(folder, 0, 0, Path.GetFileName(expectedPath), 0, out var child, 0));
         var children = Marshal.AllocHGlobal(nint.Size);
         nint data = 0;
         try
@@ -150,7 +150,7 @@ public static partial class SyntheticShellSortProbe
                     if (DropQueryFile(medium.unionmember, uint.MaxValue, null, 0) != 1 ||
                         DropQueryFile(medium.unionmember, 0, path, (uint)path.Capacity) == 0 ||
                         !string.Equals(path.ToString(), expectedPath, StringComparison.OrdinalIgnoreCase))
-                        throw new InvalidOperationException("Projected source did not provide the physical CF_HDROP path.");
+                        throw new InvalidOperationException($"Projected source did not provide the physical CF_HDROP path; expected-leaf={Path.GetFileName(expectedPath)}; actual-leaf={Path.GetFileName(path.ToString())}.");
                 }
                 finally { DropReleaseMedium(ref medium); }
             }

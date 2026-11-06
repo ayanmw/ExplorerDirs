@@ -62,6 +62,8 @@ try {
     Invoke-BackgroundCheck 'folder-navigation-provider-callbacks' 'dotnet' @('run', '--project', $hostProject, '-c', 'Release', '--no-build', '--',
         '--folder-navigation-provider-callbacks', 'src/ExplorerDirs.NativeProbe/bin/native-product-x64/ExplorerDirs.ShellNamespace.dll')
     $nativeProject = 'src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj'
+    Invoke-BackgroundCheck 'product-parsing-identity' 'dotnet' @('run', '--project', $nativeProject, '-c', 'Release', '--no-build', '--',
+        '--product-parsing-identity', 'src/ExplorerDirs.NativeProbe/bin/native-product-x64/ExplorerDirs.ShellNamespace.dll')
     Invoke-BackgroundCheck 'product-item-comparison' 'dotnet' @('run', '--project', $nativeProject, '-c', 'Release', '--no-build', '--',
         '--product-item-comparison', 'src/ExplorerDirs.NativeProbe/bin/native-product-x64/ExplorerDirs.ShellNamespace.dll')
     Invoke-BackgroundCheck 'product-drop-attributes' 'dotnet' @('run', '--project', $nativeProject, '-c', 'Release', '--no-build', '--',
