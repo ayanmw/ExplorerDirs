@@ -37,6 +37,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunProjectedNotificationBridge(projectedBridgeAdapter);
         if (args is ["--product-navigation-selection-private-desktop", var navigationSelectionAdapter])
             return PrivateDesktopShellProbe.RunNavigationSelection(navigationSelectionAdapter);
+        if (args is ["--product-projected-lifecycle-private-desktop", var projectedLifecycleHost, var projectedLifecycleAdapter])
+            return PrivateDesktopShellProbe.RunProjectedLifecycleHost(projectedLifecycleHost, projectedLifecycleAdapter);
         if (args is ["--product-drop-registration-private-desktop", var registrationHost, var registrationAdapter])
             return PrivateDesktopShellProbe.RunDropRegistrationHost(registrationHost, registrationAdapter);
         if (args is ["--product-grouped-recovery-private-desktop", var groupedHost, var groupedAdapter])

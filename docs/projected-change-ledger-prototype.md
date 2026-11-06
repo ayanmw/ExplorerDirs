@@ -1,5 +1,15 @@
 # 通知事件队列协调实验
 
+## 真实宿主导航与关闭生命周期
+
+2026-11-06：新增HostProbe的 `ProjectedMonitorLifecycleHostProbe`，经NativeProbe `--product-projected-lifecycle-private-desktop <HostProbe.dll> <prototypeDLL>` 在从未切换的独立Desktop调用实际产品HwndHost。HostProbe必须先以 `-p:ProjectedNotificationExperiment=true` 构建；普通构建缺少字段时明确拒绝该测试。通过反射调用实际Navigate和Dispose，不注入键鼠或运行文件传输。
+
+测试在A目录的真实FileSystemWatcher事件已排队但UI尚未消费时导航B，断言旧队列三元组(0,0,true)、旧原生arrival返回CO_E_OBJNOTCONNECTED；继续修改旧目录和B，确认B更新且不混入旧目录行。再带着B的实际待办导航回A，要求使用新队列，旧A/B队列不复活、持有的两个旧原生能力依然拒绝，回访A的新事件仍更新。最后在A又有真实待办时Dispose，断言队列清空失效、当前原生能力退休、metadata roots/facts=0，然后再修改已关闭目录。
+
+`src/.state/projected-lifecycle-first.log` 的A→B→关闭及 `src/.state/projected-lifecycle-revisit.log` 的A→B→A→关闭功能断言均通过。前台保持不变、共享输入守卫失败，整体退出1，不记完整隔离通过。无窗口dispatch合同回归通过。最后恢复普通HostProbe及App，并逐一核查两个输出中的App程序集不含实验入口。
+
+这是一个实际产品宿主的确定性排队事件退休，不是完整应用四窗格中人工快速导航、正在执行COM回调时导航或持续高负载后台生产者的验收。后两种回调重入仅有此前无窗口合同；积压/错误恢复等门槛仍待做，未发布。
+
 ## 同目录多视图与改名后删除
 
 2026-11-06：新增 `--full-app-session-same-root-private-desktop <preparedRun> --adapter <prototypeDLL>`，五个标签/四活动窗格指向同一物理目录，物理文件变更去重执行，仍检查四份实际视图。日志新增原生view HWND owner，测试必须观察四个独立owner并逐个确认最后派发数与完成数，不能用同路径的一份日志替代全部窗格。
