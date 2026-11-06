@@ -73,13 +73,16 @@ internal sealed partial class ExplorerBrowserHost
         var lastLoggedDispatch = 0;
         var lastLoggedSettled = 0;
         long nativeTicks = 0, readTicks = 0, ackTicks = 0;
+        long lastTick = Stopwatch.GetTimestamp(), maximumActiveGap = 0, sampledPendingTicks = 0;
+        var activeTicks = 0;
+        var notReadyChecks = 0;
         T Measure<T>(ref long total, Func<T> action)
         {
             var started = Stopwatch.GetTimestamp();
             try { return action(); }
             finally { total += Stopwatch.GetTimestamp() - started; }
         }
-        string Timing() => $"native-ms={nativeTicks * 1000.0 / Stopwatch.Frequency:F1};read-ms={readTicks * 1000.0 / Stopwatch.Frequency:F1};ack-ms={ackTicks * 1000.0 / Stopwatch.Frequency:F1}";
+        string Timing() => $"native-ms={nativeTicks * 1000.0 / Stopwatch.Frequency:F1};read-ms={readTicks * 1000.0 / Stopwatch.Frequency:F1};ack-ms={ackTicks * 1000.0 / Stopwatch.Frequency:F1};active-gap-max-ms={maximumActiveGap * 1000.0 / Stopwatch.Frequency:F1};sampled-pending-ms={sampledPendingTicks * 1000.0 / Stopwatch.Frequency:F1};active-ticks={activeTicks};not-ready={notReadyChecks}";
 
         bool Current() => ReferenceEquals(_projectedQueue, queue) &&
             _directoryChangeVersion == monitorVersion && _viewReadiness.NavigationVersion == navigationVersion &&
@@ -88,6 +91,16 @@ internal sealed partial class ExplorerBrowserHost
         timer.Tick += (_, _) =>
         {
             if (!Current()) { queue.Invalidate(); timer.Stop(); return; }
+            var now = Stopwatch.GetTimestamp();
+            var gap = now - lastTick;
+            lastTick = now;
+            if (enumerationBaseline is not null && (dispatch.PendingCount > 0 || queue.Snapshot.Queued > 0))
+            {
+                maximumActiveGap = Math.Max(maximumActiveGap, gap);
+                activeTicks++;
+                // Sampled wall intervals, not exclusive CPU or exact notification latency.
+                if (dispatch.PendingCount > 0) sampledPendingTicks += gap;
+            }
             // Navigation can synchronously dispose the owner during any Shell call.
             // Keep this turn's capability alive until Advance has stopped using it.
             Marshal.AddRef(bridge);
@@ -140,12 +153,17 @@ internal sealed partial class ExplorerBrowserHost
                         if (result != 0) throw new InvalidOperationException($"Projected {work.Kind}: 0x{result:X8}");
                         return new ProjectedDispatchResult(ticket);
                     }),
-                    work => Measure(ref readTicks, () => work.Kind switch
+                    work => Measure(ref readTicks, () =>
                     {
-                        ProjectedChangeKind.Created => ProjectedRowExists(viewWindow, work.Name, Current),
-                        ProjectedChangeKind.Deleted => !ProjectedRowExists(viewWindow, work.Name, Current),
-                        ProjectedChangeKind.Renamed => !ProjectedRowExists(viewWindow, work.Name, Current) && ProjectedRowExists(viewWindow, work.NewName!, Current),
-                        _ => true
+                        var ready = work.Kind switch
+                        {
+                            ProjectedChangeKind.Created => ProjectedRowExists(viewWindow, work.Name, Current),
+                            ProjectedChangeKind.Deleted => !ProjectedRowExists(viewWindow, work.Name, Current),
+                            ProjectedChangeKind.Renamed => !ProjectedRowExists(viewWindow, work.Name, Current) && ProjectedRowExists(viewWindow, work.NewName!, Current),
+                            _ => true
+                        };
+                        if (!ready) notReadyChecks++;
+                        return ready;
                     }),
                     (work, ticket) => Measure(ref ackTicks, () =>
                     {
