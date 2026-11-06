@@ -1688,6 +1688,14 @@ namespace
             *attributes = child->second;
             return true;
         }
+        bool RecordObservedChild(PCWSTR root, const SyntheticChild& child)
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            const auto found = _observedRoots.find(root);
+            if (found == _observedRoots.end()) return false;
+            found->second.children[child.name] = child.attributes;
+            return true;
+        }
         void ForgetObservedChild(PCWSTR root, PCWSTR leaf)
         {
             std::lock_guard<std::mutex> lock(_mutex);
@@ -3295,13 +3303,15 @@ namespace
 #endif
 #if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
     // Isolated prototype ABI: not part of the shipped adapter contract.
-    struct __declspec(uuid("B0B7756F-4BDD-479F-B52C-18C4EC55258D")) IExplorerDirsProjectedNotificationProbe : public IUnknown
+    struct __declspec(uuid("F4962CBB-36B7-420B-8A14-7EE85A191C22")) IExplorerDirsProjectedNotificationProbe : public IUnknown
     {
         virtual HRESULT STDMETHODCALLTYPE PausePhysicalNotificationsForProbe() = 0;
         virtual HRESULT STDMETHODCALLTYPE NotifyProjectedRemovalForProbe(PCWSTR leaf) = 0;
         virtual HRESULT STDMETHODCALLTYPE GetEnumerationCountForProbe(ULONG* count) = 0;
         virtual HRESULT STDMETHODCALLTYPE GetObservedMetadataCountsForProbe(ULONG* roots, ULONG* children) = 0;
         virtual HRESULT STDMETHODCALLTYPE AcknowledgeRemovalForProbe(PCWSTR leaf) = 0;
+        virtual HRESULT STDMETHODCALLTYPE NotifyProjectedArrivalForProbe(PCWSTR leaf) = 0;
+        virtual HRESULT STDMETHODCALLTYPE NotifyProjectedRenameForProbe(PCWSTR oldLeaf, PCWSTR newLeaf) = 0;
     };
 #endif
     class SyntheticSortFolder final : public IShellFolder2, public IPersistFolder2, public IShellFolderViewCB
@@ -5118,6 +5128,113 @@ namespace
 #endif
             return S_OK;
         }
+        // Preserve Windows unaligned PIDL pointers rather than casting away their qualifier.
+        struct ProjectedPidlDeleter
+        {
+            using pointer = PIDLIST_ABSOLUTE;
+            void operator()(PIDLIST_ABSOLUTE value) const noexcept { CoTaskMemFree(value); }
+        };
+        using ProjectedPidl = std::unique_ptr<ITEMIDLIST, ProjectedPidlDeleter>;
+        static bool IsProjectedLeaf(PCWSTR leaf)
+        {
+            // FindFirstFile interprets wildcards; a notification must name one actual child.
+            return leaf && *leaf && !wcschr(leaf, L'\\') && !wcschr(leaf, L'/') && !wcschr(leaf, L':') &&
+                !wcschr(leaf, L'*') && !wcschr(leaf, L'?') &&
+                wcscmp(leaf, L".") != 0 && wcscmp(leaf, L"..") != 0;
+        }
+        HRESULT DescribeProjectedLiveChild(PCWSTR leaf, SyntheticChild* child)
+        {
+            if (!IsProjectedLeaf(leaf) || !child) return E_INVALIDARG;
+            if (!_notificationWindow || _bridgeObservedPath != _backingPath) return CO_E_OBJNOTCONNECTED;
+            const auto path = _backingPath + L"\\" + leaf;
+            WIN32_FIND_DATAW data{};
+            const auto search = FindFirstFileW(path.c_str(), &data);
+            if (search == INVALID_HANDLE_VALUE) return HRESULT_FROM_WIN32(GetLastError());
+            FindClose(search);
+            *child = {};
+            child->cb = sizeof(*child);
+            child->id = 1;
+            child->attributes = data.dwFileAttributes;
+            child->size = (static_cast<ULONGLONG>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
+            if (FAILED(StringCchCopyW(child->name, ARRAYSIZE(child->name), data.cFileName))) return E_INVALIDARG;
+            if (child->attributes & FILE_ATTRIBUTE_DIRECTORY) TryGetSyntheticFileIdentity(path.c_str(), &child->identity);
+            return S_OK;
+        }
+        PIDLIST_ABSOLUTE CloneProjectedAbsoluteChild(const SyntheticChild& child)
+        {
+            auto* relative = CloneSyntheticChild(child);
+            if (!relative) return nullptr;
+            auto* absolute = ILCombine(_root, relative);
+            CoTaskMemFree(relative);
+            return absolute;
+        }
+        HRESULT STDMETHODCALLTYPE NotifyProjectedArrivalForProbe(PCWSTR leaf) override
+        {
+            try
+            {
+                SyntheticChild child{};
+                const auto result = DescribeProjectedLiveChild(leaf, &child);
+                if (FAILED(result)) return result;
+                DWORD previousAttributes = 0;
+                const bool known = _recursiveSizeStore->TryGetObservedAttributes(_bridgeObservedPath.c_str(), child.name, &previousAttributes);
+                if (known && ((previousAttributes ^ child.attributes) & FILE_ATTRIBUTE_DIRECTORY)) return S_FALSE;
+                ProjectedPidl absolute(CloneProjectedAbsoluteChild(child));
+                if (!absolute) return E_OUTOFMEMORY;
+                if (!_recursiveSizeStore->RecordObservedChild(_bridgeObservedPath.c_str(), child)) return CO_E_OBJNOTCONNECTED;
+                const LONG event = known ? SHCNE_UPDATEITEM : (child.attributes & FILE_ATTRIBUTE_DIRECTORY) ? SHCNE_MKDIR : SHCNE_CREATE;
+                SHChangeNotify(event, SHCNF_IDLIST | SHCNF_FLUSHNOWAIT, absolute.get(), nullptr);
+                return S_OK;
+            }
+            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+        }
+        HRESULT STDMETHODCALLTYPE NotifyProjectedRenameForProbe(PCWSTR oldLeaf, PCWSTR newLeaf) override
+        {
+            if (!IsProjectedLeaf(oldLeaf) || !IsProjectedLeaf(newLeaf)) return E_INVALIDARG;
+            if (!_notificationWindow || _bridgeObservedPath != _backingPath) return CO_E_OBJNOTCONNECTED;
+            if (wcscmp(oldLeaf, newLeaf) == 0) return S_FALSE;
+            const bool caseOnly = CompareStringOrdinal(oldLeaf, -1, newLeaf, -1, TRUE) == CSTR_EQUAL;
+            try
+            {
+                DWORD oldAttributes = 0, targetAttributes = 0;
+                if (!_recursiveSizeStore->TryGetObservedAttributes(_bridgeObservedPath.c_str(), oldLeaf, &oldAttributes))
+                    return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+                if (!caseOnly && _recursiveSizeStore->TryGetObservedAttributes(_bridgeObservedPath.c_str(), newLeaf, &targetAttributes)) return S_FALSE;
+                const auto oldPath = _backingPath + L"\\" + oldLeaf;
+                SyntheticChild oldChild{}, newChild{};
+                const auto result = DescribeProjectedLiveChild(newLeaf, &newChild);
+                if (FAILED(result)) return result;
+                if (wcscmp(newChild.name, newLeaf) != 0) return S_FALSE; // A later rename already changed the canonical spelling.
+                if (caseOnly)
+                {
+                    SyntheticChild oldLive{};
+                    if (FAILED(DescribeProjectedLiveChild(oldLeaf, &oldLive)) || wcscmp(oldLive.name, newChild.name) != 0) return S_FALSE;
+                    SyntheticFileIdentity oldIdentity{}, newIdentity{};
+                    const auto newPath = _backingPath + L"\\" + newLeaf;
+                    if (!TryGetSyntheticFileIdentity(oldPath.c_str(), &oldIdentity) || !TryGetSyntheticFileIdentity(newPath.c_str(), &newIdentity) ||
+                        oldIdentity.volumeSerial != newIdentity.volumeSerial ||
+                        memcmp(oldIdentity.fileId, newIdentity.fileId, sizeof(oldIdentity.fileId)) != 0) return S_FALSE;
+                }
+                else
+                {
+                    if (GetFileAttributesW(oldPath.c_str()) != INVALID_FILE_ATTRIBUTES) return S_FALSE;
+                    const auto error = GetLastError();
+                    if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) return HRESULT_FROM_WIN32(error);
+                }
+                if ((oldAttributes ^ newChild.attributes) & FILE_ATTRIBUTE_DIRECTORY) return S_FALSE;
+                oldChild.cb = sizeof(oldChild);
+                oldChild.id = 1;
+                oldChild.attributes = oldAttributes;
+                if (FAILED(StringCchCopyW(oldChild.name, ARRAYSIZE(oldChild.name), oldLeaf))) return E_INVALIDARG;
+                ProjectedPidl oldAbsolute(CloneProjectedAbsoluteChild(oldChild));
+                ProjectedPidl newAbsolute(CloneProjectedAbsoluteChild(newChild));
+                if (!oldAbsolute || !newAbsolute) return E_OUTOFMEMORY;
+                if (!_recursiveSizeStore->RecordObservedChild(_bridgeObservedPath.c_str(), newChild)) return CO_E_OBJNOTCONNECTED;
+                SHChangeNotify((oldAttributes & FILE_ATTRIBUTE_DIRECTORY) ? SHCNE_RENAMEFOLDER : SHCNE_RENAMEITEM,
+                    SHCNF_IDLIST | SHCNF_FLUSHNOWAIT, oldAbsolute.get(), newAbsolute.get());
+                return S_OK;
+            }
+            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+        }
         HRESULT STDMETHODCALLTYPE AcknowledgeRemovalForProbe(PCWSTR leaf) override
         {
             if (!leaf || !*leaf) return E_INVALIDARG;
@@ -5129,8 +5246,7 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE NotifyProjectedRemovalForProbe(PCWSTR leaf) override
         {
-            if (!leaf || !*leaf || wcschr(leaf, L'\\') || wcschr(leaf, L'/') || wcschr(leaf, L':') ||
-                wcscmp(leaf, L".") == 0 || wcscmp(leaf, L"..") == 0) return E_INVALIDARG;
+            if (!IsProjectedLeaf(leaf)) return E_INVALIDARG;
             if (!_notificationWindow || !_root) return CO_E_OBJNOTCONNECTED;
             try
             {

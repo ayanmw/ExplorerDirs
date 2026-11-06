@@ -8,7 +8,7 @@
 
 接口的暂停物理订阅方法只用于隔离测试：先切断原有物理通知路径，确认磁盘删除后旧行仍在，再验证直接投影通知确实移除对应行。暂停不影响视图自身的投影命名空间订阅。此暂停方法不得接入产品或用户选项。
 
-初版原型由测试提供项目叶名和文件/目录类型；当前原型只接收叶名，类型取自既有原生EnumObjects输出的记录，不在删除后猜类型；拒绝空叶名、点目录、斜线、反斜线及冒号。只有路径明确不存在才发删除通知；重建路径返回S_FALSE。该存在性检查不是并发同名重建的完整保证，仍有检查后发送前的竞态；不据此宣称生产安全性完成。
+初版原型由测试提供项目叶名和文件/目录类型；当前原型只接收叶名，类型取自既有原生EnumObjects输出的记录，不在删除后猜类型；拒绝空叶名、点目录、斜线、反斜线、冒号及通配符。只有路径明确不存在才发删除通知；重建路径返回S_FALSE。该存在性检查不是并发同名重建的完整保证，仍有检查后发送前的竞态；不据此宣称生产安全性完成。
 
 ## 实测证据
 
@@ -30,7 +30,7 @@ dotnet run --project src/ExplorerDirs.NativeProbe -c Release --no-build -- --pro
 
 ## 产品接线前剩余项
 
-1. 初始枚举类型来源已完成原型验证；新增/重命名时的记录更新、文件身份和并发枚举覆盖仍待做。删除查找使用有序映射，不增加同步全列表扫描；仍须评估大目录和多标签的实际成本。
+1. 初始枚举、新建及普通/大小写重命名的类型记录已完成原型验证；文件身份世代和并发枚举覆盖仍待做。删除查找使用有序映射，不增加同步全列表扫描；仍须评估大目录和多标签的实际成本。
 2. 保留已存在/同名重建保护，并验证异步投递期间的重建、导航退休、关闭和COM重入。当前测试只有“调用前已重建”的子项。
 3. 将已有FileSystemWatcher事件定向到当前目录能力，保留普通物理/虚拟Shell位置后备语义和手动F5；不增加自动完整刷新。
 4. 真实四窗格、分组、大小排序、突发多项、名称变更、会话切换与重启的完整App验证；原型单视图通过不能替代。
@@ -51,3 +51,22 @@ dotnet run --project src/ExplorerDirs.NativeProbe -c Release --no-build -- --pro
 补充通知确认边界：SHChangeNotify返回不等于行已移除。最终`src/.state/projected-observed-kind-ack.log`验证发送后类型记录仍在；测试观察实际行移除后才通过独立确认调用退役记录。之后同样验证关闭时零记录及旧能力拒绝。此确认目前由隔离探针完成，产品的确认/世代机制仍未接线，尤其不能把旧确认误用于同名新项目。
 
 后台回归报告`src/.state/background-checks/20261106-162343-0ed9ec4115f348e5b373fbf5bf3eff4d/summary.json`：36项中35项通过，publish-isolation-smoke在自己的临时fixture重命名staging目录时访问被拒绝，整体Passed=False。该夹具按脚本finally自动清理，未取得占用者证据，原因未确定。单独重跑`scripts/publish-smoke.ps1`成功，日志`src/.state/projected-kind-publish-recheck.log`；不改写首轮失败报告，不声称首轮36/36，也未运行真实发布。最后的试验确认协议另有上面的定向运行，普通构建恢复并检查能力排除。
+
+
+## 2026-11-06 新建、普通改名与大小写改名
+
+新试验能力从磁盘单项WIN32_FIND_DATA取得新条目属性/文件大小，发布投影MKDIR/CREATE；已有同类型条目使用UPDATEITEM，不重新枚举根目录。普通改名要求源记录已知、旧路径不存在、目标当前实际拼写匹配、目标未被其他已知条目占用且类型一致；投影RENAMEFOLDER/RENAMEITEM后由测试观察新行/旧行再确认退役旧记录。覆盖已有目标、并发同名事件及确认世代仍待验证，当前不会将这些情况当普通改名成功。
+
+仅改大小写时，确认旧/新拼写解析到相同实际目录项和相同卷号/文件ID，再发送改名；新旧元数据键等价，不执行普通“删除旧键”的确认。反向过期的大小写通知会因为实际拼写不符返回S_FALSE。调用端测试对真正应用的操作要求精确S_OK，不把S_FALSE也当成已发送。
+
+失败先行证据：`src/.state/projected-arrival-before.log`旧接口拒绝新试验IID；`src/.state/projected-case-rename-before.log`在大小写改名处明确E_NOTIMPL，且该次前台/输入守卫均通过；`src/.state/projected-arrival-wildcard-before.log`复现通配符被FindFirstFile解释为搜索而接受的问题。叶名校验已拒绝*和?，未关闭/W4或/WX；PIDL RAII保留Windows __unaligned指针类型。
+
+`src/.state/projected-arrival-final.log`的1029行视图业务子项通过：文件/目录新建、普通改名、只改大小写、再按记录类型删除；已知文件4KB到8KB UPDATEITEM；未知/非法/缺失条目拒绝；选区/焦点保留；EnumObjects计数不增；销毁后零记录及旧能力拒绝新增/改名/删除。该轮输入变化、前台未变，isolation-clean=False；不是完整App或可见呈现验收。最终精确大小字符串检查另记录在projected-arrival-exact-size.log。
+
+新能力仍完全在试验编译宏下，普通DLL不包含；尚未接入FileSystemWatcher。后续重点是事件世代/确认、防止过期枚举覆盖新记录、同根多视图、分组/排序/突发事件及完整App接线。
+
+
+最终精确值运行`src/.state/projected-arrival-exact-size.log`返回0：actual=8 KB，所有上述业务/生命周期断言通过，foreground-change-observed=False、input-change-observed=False、isolation-clean=True。这是单原生视图原型的完整隔离通过，不能替代完整App多窗格/观察器接线或可见闪烁验收；前述有输入活动的运行记录仍保留。普通DLL重新构建，三个历史试验IID均排除。
+
+
+普通DLL本批重建SHA256仍为CADC37A135D8F0551767976EA0258F0A3075499BDFF6518C4101E90B903904EF，与本批改动前一致。试验范围还未证明覆盖重命名、短名/尾点空格别名、大小写敏感目录及重解析点的所有组合；这些不能由普通NTFS文件/目录的大小写改名通过外推。
