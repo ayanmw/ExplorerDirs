@@ -42,7 +42,10 @@ internal sealed partial class ExplorerBrowserHost
             return true; // The newer navigation owns its own monitor.
         }
         var queue = new ProjectedChangeLedger();
-        var dispatch = new ProjectedChangeDispatch(queue, 8);
+        // Diagnostic control: measure the repeated Shell confirmation round trips
+        // imposed by a small batch. Keep bounded FIFO dispatch and all confirmations.
+        var batchLimit = Environment.GetEnvironmentVariable("EXPLORERDIRS_PROJECTED_BATCH64_CONTROL") == "1" ? 64 : 8;
+        var dispatch = new ProjectedChangeDispatch(queue, batchLimit);
         var viewWindow = _viewWindow;
         Exception? watcherError = null;
         FileSystemWatcher watcher;
@@ -234,7 +237,7 @@ internal sealed partial class ExplorerBrowserHost
             timer.Start();
             LastShellRefreshStatus = "projected-experiment-monitor-started";
             _projectedNeedsRecovery = false;
-            LogProjectedExperiment($"started path={path};owner={viewWindow:X};navigation={navigationVersion};priority={priority}");
+            LogProjectedExperiment($"started path={path};owner={viewWindow:X};navigation={navigationVersion};priority={priority};batch-limit={batchLimit}");
             return true;
         }
         catch

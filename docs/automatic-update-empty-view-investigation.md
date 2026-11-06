@@ -1,5 +1,17 @@
 # 自动变化期间短暂零行：刷新来源调查
 
+## 2026-11-06 批次确认往返与同步flush对照
+
+原始逐owner日志显示每8事件后等待整批行确认，部分派发递增相隔约0.5秒或更多。实验进程级EXPLORERDIRS_PROJECTED_BATCH64_CONTROL=1将上限改为64，默认仍8；原生实验EXPLORERDIRS_PROJECTED_FLUSH_CONTROL=1改为SHCNF_FLUSH，默认仍FLUSHNOWAIT，普通DLL均排除此控制。不改FIFO/逐项确认/队列容量/10秒确认期限，不自动完整枚举兜底。
+
+64+NOWAIT失败：`src/.state/projected-batch64-size32.log`，owned run `src/.state/app-session-process/7e152332bd01461db3fd36470e3b788c`，第一进程32文件新增后四列表仍1027，独立Shell观察器收到各目录0x1000 UPDATEDIR，四monitor随后确认超时，整体退出1。隔离守卫通过不能把功能失败记成通过。官方SHChangeNotifyRegister文档明确多通知可能合为UPDATEDIR；本轮观察符合该机制，但独立观察器不能独自证明每个DefView收到的事件与合并原因。https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shchangenotifyregister
+
+64+FLUSH：`src/.state/projected-batch64-flush-size32.log`，owned run `src/.state/app-session-process/d5442dedfb9b4806949496846ac24cb6`，两个进程功能/逐名/分组/枚举及全部隔离检查通过，整体退出0，自动阶段无零行。新增4269/3331ms，删除1242/1355ms。但累计native派发墙钟变大，最后owner可达1118–1263ms，单次callback628–796ms，Dispatcher也记录255–332ms等长定时操作。FLUSH等待通知交付的定义见 https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shchangenotify 。交付不等于列表最终完成，仍保留现有行确认。这不是可接受的UI方案，不将控制改为默认。
+
+结论：直接扩大NOWAIT批次不能安全解决吞吐；同步FLUSH虽通过该场景但把等待转进UI回调。下一步评审不可变PIDL通知载荷与后台交付的分离，必须处理COM线程归属、导航退休、顺序、生命周期及在途确认，不能从线程池直接调用现有STA Shell接口。尚未实现后台交付。
+
+无窗口dispatch及native metadata generation合同通过；普通原生DLL重建哈希仍CADC37A135D8F0551767976EA0258F0A3075499BDFF6518C4101E90B903904EF，普通HostProbe/App重新构建通过并排除实验入口。未发布，两个实验参数默认仍关闭，运行作用域finally恢复环境变量。
+
 ## 2026-11-06 定位并替换列标题UIA遍历热点
 
 实验新增共享Dispatcher操作观察器，仅在通知实验编译，监视器引用计数归零时解绑；记录超过50ms操作的方法名/优先级/嵌套深度，最多256条，不记录委托参数。使用运行时私有_method字段仅识别诊断标签，不参与产品功能；字段缺失显示unavailable。操作耗时为含嵌套/原生消息循环的墙钟时间，不等于排他CPU或完整原生消息剖析。

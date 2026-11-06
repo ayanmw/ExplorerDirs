@@ -5220,6 +5220,14 @@ namespace
             if (child->attributes & FILE_ATTRIBUTE_DIRECTORY) TryGetSyntheticFileIdentity(path.c_str(), &child->identity);
             return S_OK;
         }
+        static UINT ProjectedNotifyFlagsForProbe()
+        {
+            // Experiment only: compare delivered notifications with NOWAIT batching.
+            // SHCNF_FLUSH can block/reenter; no ordinary product path uses this switch.
+            wchar_t value[2]{};
+            const bool flush = GetEnvironmentVariableW(L"EXPLORERDIRS_PROJECTED_FLUSH_CONTROL", value, ARRAYSIZE(value)) == 1 && value[0] == L'1';
+            return SHCNF_IDLIST | (flush ? SHCNF_FLUSH : SHCNF_FLUSHNOWAIT);
+        }
         PIDLIST_ABSOLUTE CloneProjectedAbsoluteChild(const SyntheticChild& child)
         {
             auto* relative = CloneSyntheticChild(child);
@@ -5242,7 +5250,7 @@ namespace
                 if (!absolute) return E_OUTOFMEMORY;
                 if (!_recursiveSizeStore->RecordObservedChild(_bridgeObservedKey.c_str(), child)) return CO_E_OBJNOTCONNECTED;
                 const LONG event = known ? SHCNE_UPDATEITEM : (child.attributes & FILE_ATTRIBUTE_DIRECTORY) ? SHCNE_MKDIR : SHCNE_CREATE;
-                SHChangeNotify(event, SHCNF_IDLIST | SHCNF_FLUSHNOWAIT, absolute.get(), nullptr);
+                SHChangeNotify(event, ProjectedNotifyFlagsForProbe(), absolute.get(), nullptr);
                 return S_OK;
             }
             catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
@@ -5294,7 +5302,7 @@ namespace
                 if (!_recursiveSizeStore->RecordObservedChild(_bridgeObservedKey.c_str(), newChild)) return CO_E_OBJNOTCONNECTED;
                 *oldTicket = previousVersion;
                 SHChangeNotify((oldAttributes & FILE_ATTRIBUTE_DIRECTORY) ? SHCNE_RENAMEFOLDER : SHCNE_RENAMEITEM,
-                    SHCNF_IDLIST | SHCNF_FLUSHNOWAIT, oldAbsolute.get(), newAbsolute.get());
+                    ProjectedNotifyFlagsForProbe(), oldAbsolute.get(), newAbsolute.get());
                 return S_OK;
             }
             catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
@@ -5331,7 +5339,7 @@ namespace
                 auto* absolute = ILCombine(_root, relative);
                 CoTaskMemFree(relative);
                 if (!absolute) return E_OUTOFMEMORY;
-                SHChangeNotify(directory ? SHCNE_RMDIR : SHCNE_DELETE, SHCNF_IDLIST | SHCNF_FLUSHNOWAIT, absolute, nullptr);
+                SHChangeNotify(directory ? SHCNE_RMDIR : SHCNE_DELETE, ProjectedNotifyFlagsForProbe(), absolute, nullptr);
                 CoTaskMemFree(absolute);
                 return S_OK;
             }
