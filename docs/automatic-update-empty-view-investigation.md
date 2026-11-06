@@ -1,3 +1,13 @@
+## 2026-11-06 Revised confirmation recorder: owner idle is not global idle
+
+Revised recorder executed in prepared payload src/.state/gui-smoke/20261106-155621-940-16bfb6. Actual full two-process/four-pane same-root run src/.state/projected-confirmation-v2.log exited0, with row/name/group/session/placement/registration cleanup and foreground/input guards passed. Create8,725/7,225ms, delete2,394/8,798ms, no sampled empty lists; native trace not truncated. This remains slow and does not supersede prior intermittent failures.
+
+Owned run 1a315df4489b4a61ab0ec2f1924b9c75/app/projected-confirmation-observations.log contains1,873 observations for eight owners. Nineteen work items recorded predicate false while that owner's sampled native pending was0, then later true; longest first-zero-false to first-true interval4,235ms (owner11915FA, Created burst-26, sequence59). These are sampled confirmation intervals including UI scheduling/head-of-line checks, not exact row appearance latency.
+
+Crucially, transport timeline alignment at tick525728796 (the above owner's zero/false point) still found accepted-not-returned intervals in PID23096 contexts3/2/1:61/37/33. Thus one owner's empty queue does not mean the same physical directory's other deliveries are complete; a single-owner idle predicate cannot isolate DefView-only latency. This is timestamp interval evidence, not a claim of atomic global queue state. Analysis scripts retained in src/.state/analyze-confirmation-v2.py, analyze-native-idle-to-ready.py and align-confirmation-transport.py.
+
+Next experiment must measure/coordinate same-root transport across owners while preserving independent prepared metadata/removal tickets; simply waiting longer or treating each empty owner as globally settled is unsupported. No product change, no release. Ordinary HostProbe/App restored (0 warnings/errors) and experiment entrypoints absent from both outputs.
+
 ## 2026-11-06 Bounded per-work confirmation observations
 
 Experiment App now records submission and first predicate transitions for up to256 work sequences per owner, buffering at most768 lines between settled/error flushes. It reuses existing reads and does not add native queries. Timestamps are Environment.TickCount64; elapsed is from managed dispatch submission, including atomic staging/transport and confirmation head-of-line waiting. Changed's true predicate is not proof of an updated property value. History is diagnostic and cannot replace the independent exact8KB/name/group assertions.
