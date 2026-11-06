@@ -65,6 +65,12 @@ internal static class Program
             return PrivateDesktopShellProbe.RunFullAppSession(tracedRun, adapterOverride: tracedAdapter);
         if (args is ["--full-app-session-same-root-private-desktop", var sharedRootRun, "--adapter", var sharedRootAdapter])
             return PrivateDesktopShellProbe.RunFullAppSession(sharedRootRun, adapterOverride: sharedRootAdapter, sameRoot: true);
+        if (args is ["--full-app-session-burst-private-desktop", var burstRun, "--adapter", var burstAdapter, "--burst-count", var burstCountText] &&
+            int.TryParse(burstCountText, out var burstCount) && burstCount is > 0 and <= 1024)
+            return PrivateDesktopShellProbe.RunFullAppSession(burstRun, adapterOverride: burstAdapter, fillerCount: 1025, burstCount: burstCount);
+        if (args is ["--full-app-session-burst-private-desktop", var sharedBurstRun, "--adapter", var sharedBurstAdapter, "--burst-count", var sharedBurstCountText, "--same-root"] &&
+            int.TryParse(sharedBurstCountText, out var sharedBurstCount) && sharedBurstCount is > 0 and <= 1024)
+            return PrivateDesktopShellProbe.RunFullAppSession(sharedBurstRun, adapterOverride: sharedBurstAdapter, sameRoot: true, burstCount: sharedBurstCount);
         if (args is ["--full-app-session-private-desktop", var settledRun, "--settle-external-changes"])
             return PrivateDesktopShellProbe.RunFullAppSession(settledRun, settleExternalChanges: true);
         if (args is ["--full-app-session-private-desktop", var comparisonRun, "--no-soft-refresh"])

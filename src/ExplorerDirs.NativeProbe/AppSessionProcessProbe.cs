@@ -10,7 +10,7 @@ using Microsoft.Win32.SafeHandles;
 // Only processes created here are queried/closed; no input injection or Shell restart.
 internal static class AppSessionProcessProbe
 {
-    internal static int Run(string preparedRun, bool softRefresh = true, bool settleExternalChanges = false, string? adapterOverride = null, int fillerCount = 0, bool sameRoot = false)
+    internal static int Run(string preparedRun, bool softRefresh = true, bool settleExternalChanges = false, string? adapterOverride = null, int fillerCount = 0, bool sameRoot = false, int burstCount = 3)
     {
         preparedRun = Path.GetFullPath(preparedRun);
         using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(preparedRun, "preparation.json")));
@@ -82,7 +82,7 @@ internal static class AppSessionProcessProbe
         File.WriteAllText(sessionPath, seed + File.ReadAllText(sessionPath));
         File.WriteAllText(Path.Combine(profile, "FolderSize.ini"), "[FolderSize]\nFormatVersion=1\nEnabled=true\nSource=BuiltIn\n");
         File.WriteAllText(Path.Combine(profile, "SoftRefresh.ini"), $"[View]\nFormatVersion=1\nSoftRefresh={softRefresh}\n");
-        Console.WriteLine($"app-session-configuration: soft-refresh={softRefresh}; same-root={sameRoot}");
+        Console.WriteLine($"app-session-configuration: soft-refresh={softRefresh}; same-root={sameRoot}; burst-count={burstCount}");
         var executable = Path.Combine(app, "ExplorerDirs.App.exe");
         var expectedPlacement = default(WindowPlacementState);
         var pids = new List<uint>();
@@ -162,7 +162,7 @@ internal static class AppSessionProcessProbe
                         readings.Any(item => item.Grouped == 1);
                 }, TimeSpan.FromSeconds(60), "Full app views/grouping did not become ready.");
                 VerifyProjectedMonitors();
-                VerifyExternalDirectoryChanges(window, child, expected, pass, settleExternalChanges, fillerCount, adapterOverride is null ? null : Path.Combine(app, "ExplorerDirs.ShellNamespace.dll.size-trace.log"));
+                VerifyExternalDirectoryChanges(window, child, expected, pass, settleExternalChanges, fillerCount, adapterOverride is null ? null : Path.Combine(app, "ExplorerDirs.ShellNamespace.dll.size-trace.log"), burstCount);
                 if (projectedExperiment)
                 {
                     string? lastProjectedFailure = null;
@@ -255,7 +255,7 @@ internal static class AppSessionProcessProbe
         Console.WriteLine($"app-session-process-registration-cleanup: profile-identity={identity}; ownership-checked=True");
     }
 
-    private static void VerifyExternalDirectoryChanges(nint window, ProcessInfo child, SessionState session, int pass, bool settleExternalChanges, int fillerCount, string? tracePath)
+    private static void VerifyExternalDirectoryChanges(nint window, ProcessInfo child, SessionState session, int pass, bool settleExternalChanges, int fillerCount, string? tracePath, int burstCount)
     {
         if (settleExternalChanges)
         {
@@ -314,6 +314,8 @@ internal static class AppSessionProcessProbe
         void AwaitRows(int count, string stage)
         {
             count += fillerCount;
+            var emptySamplesAtStart = transientEmptySamples;
+            var zeroWithRetiredHandle = 0;
             var elapsed = Stopwatch.StartNew();
             string? lastState = null;
             try
@@ -326,16 +328,20 @@ internal static class AppSessionProcessProbe
                     var sampleStartedAt = Environment.TickCount64;
                     var samples = lists.Select(list =>
                     {
+                        GetWindowThreadProcessId(list, out var ownerBefore);
                         var visibleBefore = IsWindowVisible(list);
                         var disabledBefore = GetPropW(list, "SysSetRedraw") != 0;
                         var rows = Message(list, 0x1004);
-                        return (Rows: rows, VisibleBefore: visibleBefore, DisabledBefore: disabledBefore,
+                        GetWindowThreadProcessId(list, out var ownerAfter);
+                        return (Window: list, OwnedBefore: ownerBefore == child.ProcessId, OwnedAfter: ownerAfter == child.ProcessId,
+                            Rows: rows, VisibleBefore: visibleBefore, DisabledBefore: disabledBefore,
                             VisibleAfter: IsWindowVisible(list), DisabledAfter: GetPropW(list, "SysSetRedraw") != 0);
                     }).ToArray();
                     var counts = samples.Select(sample => sample.Rows).ToArray();
                     if (counts.Any(rows => rows == 0)) transientEmptySamples++;
                     foreach (var sample in samples.Where(sample => sample.Rows == 0))
                     {
+                        if (!sample.OwnedBefore || !sample.OwnedAfter) zeroWithRetiredHandle++;
                         if (sample.DisabledBefore && sample.DisabledAfter) zeroPaneSamplesWithDisableFlag++;
                         else if (!sample.VisibleBefore || !sample.VisibleAfter) zeroPaneSamplesWithVisibilityChange++;
                         else zeroPaneSamplesWithoutDisableEvidence++;
@@ -343,7 +349,7 @@ internal static class AppSessionProcessProbe
                     // SysSetRedraw==0 also means the property is absent: do not label
                     // that as proven redraw-enabled or equate any zero count with a painted blank.
                     var rendering = string.Join('|', samples.Select(sample =>
-                        $"v{(sample.VisibleBefore ? 1 : 0)}>{(sample.VisibleAfter ? 1 : 0)}/d{(sample.DisabledBefore ? 1 : 0)}>{(sample.DisabledAfter ? 1 : 0)}"));
+                        $"h{sample.Window:X}/o{(sample.OwnedBefore ? 1 : 0)}>{(sample.OwnedAfter ? 1 : 0)}/v{(sample.VisibleBefore ? 1 : 0)}>{(sample.VisibleAfter ? 1 : 0)}/d{(sample.DisabledBefore ? 1 : 0)}>{(sample.DisabledAfter ? 1 : 0)}"));
                     var state = $"counts={string.Join('|', counts)}; grouped={string.Join('|', grouped.Select(list => Message(list, 0x10AF)))}; render-flags={rendering}";
                     if (state != lastState)
                     {
@@ -381,7 +387,7 @@ internal static class AppSessionProcessProbe
                 throw;
             }
             Mark("settled-" + stage);
-            Console.WriteLine($"app-external-change: pass={pass + 1}; stage={stage}; rows-per-pane={count}; ms={elapsed.ElapsedMilliseconds}; transient-empty-samples={transientEmptySamples}; zero-pane-disable-flag={zeroPaneSamplesWithDisableFlag}; zero-pane-hidden={zeroPaneSamplesWithVisibilityChange}; zero-pane-no-disable-evidence={zeroPaneSamplesWithoutDisableEvidence}; grouped-pane-preserved=True");
+            Console.WriteLine($"app-external-change: pass={pass + 1}; stage={stage}; rows-per-pane={count}; ms={elapsed.ElapsedMilliseconds}; transient-empty-samples={transientEmptySamples}; stage-empty-samples={transientEmptySamples - emptySamplesAtStart}; zero-retired-handle={zeroWithRetiredHandle}; zero-pane-disable-flag={zeroPaneSamplesWithDisableFlag}; zero-pane-hidden={zeroPaneSamplesWithVisibilityChange}; zero-pane-no-disable-evidence={zeroPaneSamplesWithoutDisableEvidence}; grouped-pane-preserved=True");
         }
         void AwaitFileRow(string name, ulong bytes, string stage, string? forbiddenName = null)
         {
@@ -447,11 +453,25 @@ internal static class AppSessionProcessProbe
         Mark("file-create-completed");
         foreach (var file in files) File.Delete(file);
         AwaitRows(2, "file-delete");
-        var burstFiles = files.SelectMany(file => Enumerable.Range(0, 3).Select(index => file + $".burst-{index}")).ToArray();
+        var burstFiles = files.SelectMany(file => Enumerable.Range(0, burstCount).Select(index => file + $".burst-{index}")).ToArray();
+        void AwaitBurstIdentities(bool present)
+        {
+            var expectedNames = burstFiles.Select(Path.GetFileName).Distinct(StringComparer.Ordinal).ToArray();
+            Wait(() =>
+            {
+                EnsureRunning(child);
+                var lists = VisibleFileViews(window);
+                return lists.Count == 4 && lists.All(list => expectedNames.All(name =>
+                    (OwnedAppListText.Find(child.Process, child.ProcessId, list, name!) >= 0) == present));
+            }, TimeSpan.FromSeconds(10), $"Actual burst identities did not converge; present={present}.");
+            Console.WriteLine($"app-burst-identities: pass={pass + 1}; names-per-pane={expectedNames.Length}; present={present}; four-panes=True");
+        }
         foreach (var file in burstFiles) File.WriteAllBytes(file, new byte[19]);
-        AwaitRows(5, "file-burst-create");
+        AwaitRows(2 + burstCount, "file-burst-create");
+        AwaitBurstIdentities(present: true);
         foreach (var file in burstFiles) File.Delete(file);
         AwaitRows(2, "file-burst-delete");
+        AwaitBurstIdentities(present: false);
         if (fillerCount > 0) return; // Large mode covers directory/file/burst changes; row-text cases remain separate.
         // Ordinary file rows retain Explorer's KB display rounding. Use whole KB
         // values so replacement metadata is distinguishable in the actual cells.
