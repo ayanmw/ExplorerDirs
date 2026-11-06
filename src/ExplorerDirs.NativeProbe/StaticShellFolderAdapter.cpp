@@ -4080,6 +4080,7 @@ namespace
             context = _sizeSortContext ? _sizeSortContext->id : 0;
 #endif
             TraceProjectedDeliveryFieldsForProbe("enumerate", 0, context, static_cast<LONG>(flags), _backingPath.c_str());
+            FlushProjectedDeliveryTraceForProbe();
 #endif
             ED_SIZE_TRACE("view-enumeration", this, nullptr, flags, 0, 0);
             if (!value) return E_POINTER;
@@ -5348,6 +5349,7 @@ namespace
         {
             _projectedDeliveryRetired = true;
             if (_projectedDelivery) _projectedDelivery->Retire();
+            FlushProjectedDeliveryTraceForProbe();
             return S_OK;
         }
         HRESULT STDMETHODCALLTYPE BeginProjectedDeliveryForProbe() override
@@ -5387,6 +5389,7 @@ namespace
             if (!_projectedDelivery) return S_OK;
             const auto state = _projectedDelivery->Read();
             *pending = static_cast<ULONG>(state.queued + (state.inFlight ? 1 : 0));
+            if (*pending == 0 || FAILED(state.failure)) FlushProjectedDeliveryTraceForProbe();
             return state.failure;
         }
         HRESULT DeliverProjectedNotificationForProbe(LONG event, PCIDLIST_ABSOLUTE first, PCIDLIST_ABSOLUTE second = nullptr)
@@ -5418,25 +5421,75 @@ namespace
         }
         static void TraceProjectedDeliveryForProbe(const char* stage, const ProjectedDeliveryExperiment::Payload& payload)
         { TraceProjectedDeliveryFieldsForProbe(stage, payload.sequence, payload.context, payload.event, payload.name.c_str()); }
+        struct ProjectedTraceBuffer
+        {
+            std::mutex mutex, writeMutex;
+            std::vector<std::string> pending;
+            std::wstring path;
+            ULONG records = 0;
+            bool truncated = false;
+        };
+        static ProjectedTraceBuffer& ProjectedTraceBufferForProbe()
+        { static ProjectedTraceBuffer buffer; return buffer; }
         static void TraceProjectedDeliveryFieldsForProbe(const char* stage, ULONGLONG sequence, DWORD context, LONG event, PCWSTR itemName)
         {
             wchar_t path[4096]{};
             const auto length = GetEnvironmentVariableW(L"EXPLORERDIRS_PROJECTED_DELIVERY_TRACE", path, ARRAYSIZE(path));
             if (!length || length >= ARRAYSIZE(path)) return;
-            static std::atomic<ULONG> records{ 0 };
-            if (++records > 4096) return;
             char name[1040]{};
             WideCharToMultiByte(CP_UTF8, 0, itemName, -1, name, ARRAYSIZE(name), nullptr, nullptr);
             char line[1280]{};
             const auto bytes = sprintf_s(line, "%llu %s;pid=%lu;seq=%llu;context=%lu;event=0x%08lX;name=%s\n",
                 GetTickCount64(), stage, GetCurrentProcessId(), sequence, context, static_cast<ULONG>(event), name);
             if (bytes <= 0) return;
-            const auto file = CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
-                nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-            if (file == INVALID_HANDLE_VALUE) return;
-            DWORD written = 0;
-            WriteFile(file, line, static_cast<DWORD>(bytes), &written, nullptr);
-            CloseHandle(file);
+            // In particular, SFVM_FSNOTIFY must not perform one file open/write
+            // per callback: that materially perturbs the race being measured.
+            try
+            {
+                auto& buffer = ProjectedTraceBufferForProbe();
+                std::lock_guard<std::mutex> lock(buffer.mutex);
+                if (buffer.path.empty()) buffer.path = path;
+                if (buffer.records >= 4096)
+                {
+                    if (!buffer.truncated)
+                    {
+                        buffer.pending.emplace_back("trace-truncated;limit=4096\n");
+                        buffer.truncated = true;
+                    }
+                    return;
+                }
+                ++buffer.records;
+                buffer.pending.emplace_back(line, static_cast<size_t>(bytes));
+            }
+            catch (const std::bad_alloc&) { } // Diagnostics must not fail a Shell callback.
+        }
+        static void FlushProjectedDeliveryTraceForProbe()
+        {
+            try
+            {
+                auto& buffer = ProjectedTraceBufferForProbe();
+                std::lock_guard<std::mutex> writer(buffer.writeMutex);
+                std::vector<std::string> records;
+                std::wstring path;
+                {
+                    std::lock_guard<std::mutex> lock(buffer.mutex);
+                    if (buffer.pending.empty()) return;
+                    path = buffer.path;
+                    records.swap(buffer.pending);
+                }
+                size_t bytes = 0;
+                for (const auto& record : records) bytes += record.size();
+                std::string block;
+                block.reserve(bytes);
+                for (const auto& record : records) block += record;
+                const auto file = CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+                if (file == INVALID_HANDLE_VALUE) return;
+                DWORD written = 0;
+                WriteFile(file, block.data(), static_cast<DWORD>(block.size()), &written, nullptr);
+                CloseHandle(file);
+            }
+            catch (const std::bad_alloc&) { }
         }
         PIDLIST_ABSOLUTE CloneProjectedAbsoluteChild(const SyntheticChild& child)
         {

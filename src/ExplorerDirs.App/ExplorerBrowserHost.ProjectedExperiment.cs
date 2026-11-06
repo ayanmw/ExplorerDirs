@@ -120,7 +120,7 @@ internal sealed partial class ExplorerBrowserHost
                 if (queue.Overflowed) throw new InternalBufferOverflowException("Projected event capacity exceeded; navigate again to reconcile.");
                 if (Volatile.Read(ref watcherError) is { } error) throw error;
                 if (dispatch.PendingCount > 0 && progress.Elapsed > TimeSpan.FromSeconds(10))
-                    throw new TimeoutException($"Projected experiment confirmation timed out; pending={dispatch.PendingCount}; last-unconfirmed={dispatch.LastUnconfirmed}.");
+                    throw new TimeoutException($"Projected experiment confirmation timed out; pending={dispatch.PendingCount}; delivery-pending={_projectedDeliveryPending}; last-unconfirmed={dispatch.LastUnconfirmed}; {queue.DescribePathForDiagnostic(dispatch.LastUnconfirmed)}.");
                 dispatch.Advance(Current,
                     work => Measure(ref nativeTicks, () =>
                     {

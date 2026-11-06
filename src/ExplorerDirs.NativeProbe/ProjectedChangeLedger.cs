@@ -71,6 +71,13 @@ internal sealed class ProjectedChangeLedger(int capacity = 8192)
         }
     }
 
+    internal string DescribePathForDiagnostic(Work? work)
+    {
+        lock (_gate)
+            return work is null ? "none" : _latest.TryGetValue(work.Name, out var latest)
+                ? $"latest-kind={latest.Kind},latest-sequence={latest.Sequence}" : "untracked";
+    }
+
     internal void Release(Work work)
     {
         lock (_gate)

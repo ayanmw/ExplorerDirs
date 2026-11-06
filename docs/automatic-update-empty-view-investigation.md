@@ -1,5 +1,17 @@
 # 自动变化期间短暂零行：刷新来源调查
 
+## 2026-11-06 缓冲热回调日志后再次捕获间歇失败
+
+原生通知实验的TraceProjectedDeliveryFields改为进程内有界缓冲：SFVM_FSNOTIFY只格式化/入缓冲，不逐条CreateFile/WriteFile。状态空闲或失败、退休、枚举诊断点批量flush；总上限仍4096条并显式输出trace-truncated，不丢弃业务事件。flush在缓冲互斥锁外拼接/写文件，独立写锁保持批次不交错；日志仍会分配/加锁且flush有IO，不是零观察开销。未flush时进程被强制终止会丢尾部诊断，不将缺少日志当成事件不存在。
+
+projected-buffered-trace-same-root32.log（owned556828d5897c41a6b7ce574871b8a69b）再次失败：pending64的旧Created burst-0确认超时，没有新增根枚举。因此旧创建补偿仍有未覆盖条件，不能宣称修复全部交错。补充超时delivery-pending及路径latest-kind/sequence诊断；只读DescribePathForDiagnostic不影响排队/确认。
+
+projected-buffered-detailed-same-root32.log（prepared143548-355d3f，owned1baaf39d96734f3d9538b6bd52a2cfa5）整体退出1，这次未超时，而是第二进程枚举5→6。实际tick520989000枚举context3的当前shared-root，已不局限context4。对应App刷新请求日志只有第一进程的520960406请求，没有第二进程该时间段RefreshWithPresentation记录；view-event未记录UPDATEDIR。只能说明本次额外枚举没有对应的已观测托管刷新入口/目录通知，尚不能区分原生排序/分组/视图内部调用或其他来源。
+
+该轮两PID已落盘3018/2982条，无truncated标记；前台/输入/清理守卫通过不改变功能失败。代码仍使用显式路径、仅实验编译，无普通产品日志或持久化配置。后续应采集原生枚举调用栈，而非将context4当固定根因。
+
+NativeProbe、普通HostProbe/App最终构建零警告零错误；ledger/dispatch/后台队列无窗口合同通过，普通输出排除实验/结构追踪入口。普通DLL仍B61059F45CC281131820D22FB831BCF01D1530B70BC6539ACBC2A8C9313399FF。此批是诊断记录路径与错误详情，未修复剩余根枚举/吞吐，未发布。
+
 ## 2026-11-06 刷新请求与视图通知分开观测
 
 仅REFRESH_ORIGIN_TRACE构建增加进程级EXPLORERDIRS_REFRESH_REQUESTS_ONLY=1：保留RefreshWithPresentation调用栈及native enter/return，但TraceNativeListStructure直接返回；默认原追踪行为不变，普通产品不含此字段。最初将字段插入方法内导致编译失败，已移至类成员区并重建成功；失败prepare不是已运行产物。
