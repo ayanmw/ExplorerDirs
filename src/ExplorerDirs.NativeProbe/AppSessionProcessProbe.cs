@@ -234,6 +234,7 @@ internal static class AppSessionProcessProbe
         using var observer2 = Observe(1);
         using var observer3 = Observe(2);
         using var observer4 = Observe(3);
+        using var shellObserver = new AppSessionShellObserver(additions.Select(path => Path.GetDirectoryName(path)!));
         var grouped = VisibleFileViews(window).Where(list => Message(list, 0x10AF) == 1).ToArray();
         if (grouped.Length != 1) throw new InvalidOperationException("Expected exactly one grouped pane before external changes.");
         var transientEmptySamples = 0;
@@ -249,6 +250,7 @@ internal static class AppSessionProcessProbe
             {
                 Wait(() =>
                 {
+                    shellObserver.Pump();
                     EnsureRunning(child);
                     var lists = VisibleFileViews(window);
                     var sampleStartedAt = Environment.TickCount64;

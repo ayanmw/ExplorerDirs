@@ -20,6 +20,8 @@ internal static class Program
             return SyntheticShellSortProbe.RunProductItemComparison(comparisonAdapter);
         if (args is ["--product-parsing-identity", var identityAdapter])
             return SyntheticShellSortProbe.RunProductParsingIdentity(identityAdapter);
+        if (args is ["--shell-observer-contract-private-desktop"])
+            return PrivateDesktopShellProbe.RunShellObserverContract();
         if (args is ["--product-navigation-selection-private-desktop", var navigationSelectionAdapter])
             return PrivateDesktopShellProbe.RunNavigationSelection(navigationSelectionAdapter);
         if (args is ["--product-drop-registration-private-desktop", var registrationHost, var registrationAdapter])

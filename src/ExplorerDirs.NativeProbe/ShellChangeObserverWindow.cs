@@ -7,22 +7,24 @@ internal sealed class ShellChangeObserverWindow : NativeWindow, IDisposable
 {
     private const int ChangeMessage = 0x8000 + 0x32A;
     private const uint ShellAndInterruptSources = 0x00000003 | 0x00008000;
+    // The independent App-session comparison exposed missing directory deletions.
     private const uint WatchedEvents = 0x00000001 | 0x00000002 | 0x00000004 | 0x00000008 |
-                                      0x00001000 | 0x00002000 | 0x00020000;
+                                      0x00000010 | 0x00001000 | 0x00002000 | 0x00020000;
     private const uint SigDnDesktopAbsoluteParsing = 0x80028000;
     private readonly List<uint> _registrations = [];
     private readonly List<ShellChangeObservation> _observations = [];
 
     internal IReadOnlyList<ShellChangeObservation> Observations => _observations;
+    internal event Action<ShellChangeObservation>? Observed;
 
     internal ShellChangeObserverWindow()
     {
         CreateHandle(new CreateParams { Caption = "ExplorerDirs Shell change observer", Parent = new nint(-3) });
     }
 
-    internal void Register(nint folderPidl)
+    internal void Register(nint folderPidl, bool recursive = true)
     {
-        var entry = new ShellChangeEntry { Pidl = folderPidl, Recursive = true };
+        var entry = new ShellChangeEntry { Pidl = folderPidl, Recursive = recursive };
         var registration = SHChangeNotifyRegister(Handle, ShellAndInterruptSources, WatchedEvents,
             ChangeMessage, 1, ref entry);
         if (registration == 0)
@@ -53,8 +55,10 @@ internal sealed class ShellChangeObserverWindow : NativeWindow, IDisposable
                 {
                     var first = pidls == 0 ? 0 : Marshal.ReadIntPtr(pidls);
                     var second = pidls == 0 ? 0 : Marshal.ReadIntPtr(pidls, IntPtr.Size);
-                    _observations.Add(new ShellChangeObservation(unchecked((uint)eventId),
-                        GetParsingName(first), GetParsingName(second)));
+                    var observation = new ShellChangeObservation(unchecked((uint)eventId),
+                        GetParsingName(first), GetParsingName(second));
+                    _observations.Add(observation);
+                    Observed?.Invoke(observation);
                 }
                 finally { _ = SHChangeNotificationUnlock(locked); }
             }
@@ -92,7 +96,8 @@ internal sealed class ShellChangeObserverWindow : NativeWindow, IDisposable
     [DllImport("shell32.dll", EntryPoint = "SHChangeNotification_Lock")]
     private static extern nint SHChangeNotificationLock(nint change, uint processId, out nint pidls, out int eventId);
 
-    [DllImport("shell32.dll")]
+    // Match the native export; releasing a real delivered event exercises this path.
+    [DllImport("shell32.dll", EntryPoint = "SHChangeNotification_Unlock")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SHChangeNotificationUnlock(nint changeLock);
 

@@ -50,6 +50,8 @@ internal static class PrivateDesktopShellProbe
     internal static int RunProductDrop(string adapterPath) => Run("product-drop",
         () => SyntheticShellSortProbe.RunProductDropAttributes(adapterPath, transfer: true),
         TimeSpan.FromSeconds(30), initializeOle: true);
+    internal static int RunShellObserverContract() => Run("shell-observer-contract",
+        AppSessionShellObserver.RunContract, TimeSpan.FromSeconds(20));
     internal static int RunNavigationSelection(string adapterPath) => Run("navigation-selection",
         () => SyntheticShellSortProbe.RunProductSizeDisplay(adapterPath, explorerBrowser: true, navigationSelection: true),
         TimeSpan.FromSeconds(30), initializeOle: true);
