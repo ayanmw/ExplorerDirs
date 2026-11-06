@@ -1,4 +1,4 @@
-param([ValidateSet('Debug', 'Release')][string]$Configuration = 'Release', [switch]$NotificationTrace)
+param([ValidateSet('Debug', 'Release')][string]$Configuration = 'Release', [switch]$NotificationTrace, [switch]$ProjectedNotificationBridgeExperiment)
 
 $ErrorActionPreference = 'Stop'
 
@@ -9,6 +9,10 @@ $compilerFlags = if ($Configuration -eq 'Debug') { '/Od /D_DEBUG /MDd' } else { 
 if ($NotificationTrace) {
     $outputDirectory += '-notification-trace'
     $compilerFlags += ' /DEXPLORERDIRS_SIZE_TRACE_EXPERIMENT /DEXPLORERDIRS_NOTIFICATION_TRACE_EXPERIMENT'
+}
+if ($ProjectedNotificationBridgeExperiment) {
+    $outputDirectory += '-projected-notify-experiment'
+    $compilerFlags += ' /DEXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT'
 }
 $source = Join-Path $PSScriptRoot 'StaticShellFolderAdapter.cpp'
 $definition = Join-Path $PSScriptRoot 'ProductShellFolderAdapter.def'

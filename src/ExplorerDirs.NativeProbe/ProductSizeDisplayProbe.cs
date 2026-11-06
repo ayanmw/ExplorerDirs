@@ -8,7 +8,7 @@ public static partial class SyntheticShellSortProbe
 {
     private static readonly List<StreamViewHost> ProductDisplayProcessLifetimeHosts = [];
     internal static int RunProductSizeDisplay(string adapterPath, bool explorerBrowser = false, bool rootControl = false,
-        FolderSizeSource source = FolderSizeSource.BuiltIn, bool sortPolicyExperiment = false, bool? encodedSortPolicy = null, bool columnStateSortPolicy = false, int encodedSortDirection = 1, bool dynamicSortPolicy = false, bool nativeSortEntrypoints = false, uint nativeSortMode = 4, bool shellFolderPartition = false, bool reconcileSortCommands = false, bool navigationSelection = false)
+        FolderSizeSource source = FolderSizeSource.BuiltIn, bool sortPolicyExperiment = false, bool? encodedSortPolicy = null, bool columnStateSortPolicy = false, int encodedSortDirection = 1, bool dynamicSortPolicy = false, bool nativeSortEntrypoints = false, uint nativeSortMode = 4, bool shellFolderPartition = false, bool reconcileSortCommands = false, bool navigationSelection = false, bool projectedNotifyBridge = false, int projectedNotifyFillerCount = 0)
     {
         var fixture = Path.Combine(Path.GetTempPath(), "ExplorerDirs-ProductSizeDisplay-" + Guid.NewGuid().ToString("N"));
         nint root = 0, folder = 0, view = 0, parent = 0, browserPointer = 0, folderView = 0;
@@ -44,6 +44,8 @@ public static partial class SyntheticShellSortProbe
             if (source == FolderSizeSource.Everything)
                 WaitForIndex(fixture, new Dictionary<string, ulong>
                     { ["folder-12288"] = 12 * 1024, ["folder-25600"] = 25 * 1024, ["folder-empty"] = 0 });
+            for (var filler = 0; filler < projectedNotifyFillerCount; filler++)
+                File.WriteAllBytes(Path.Combine(fixture, $"bridge-filler-{filler:D5}.bin"), new byte[1024]);
             var classId = Guid.NewGuid();
             owner = ProfileShellNamespaceOwner.Start(classId, fixture, Path.GetFullPath(adapterPath));
             diagnosticModule = NativeLibrary.Load(Path.GetFullPath(adapterPath));
@@ -94,6 +96,11 @@ public static partial class SyntheticShellSortProbe
             ShowWindow(parent, 4); // Never switches the private Desktop onto the user's display.
             var listView = FindListView(view);
             WaitForSizes("initial");
+            if (projectedNotifyBridge)
+            {
+                VerifyProjectedNotificationBridge(view, listView, fixture, projectedNotifyFillerCount);
+                return 0;
+            }
             if (dynamicSortPolicy) VerifySortExternalIdentity(root, folder, mainIdentity, fixture);
             for (var index = 1; index <= 3; index++)
             {
@@ -592,18 +599,23 @@ public static partial class SyntheticShellSortProbe
                 {
                     Pump(40);
                     var count = SendMessageW(listView, LvmGetItemCount, 0, 0).ToInt32();
-                    if (count != 4) continue;
+                    if (count != 4 + projectedNotifyFillerCount) continue;
                     names = ReadColumnTextsForRows(listView, 0, count);
                     sizes = ReadColumnTextsForRows(listView, sizeSubItem, count);
                     var expected = new Dictionary<string, string>
                     { ["folder-12288"] = smallPrefix, ["folder-25600"] = "25", ["file-2048.bin"] = "2", ["folder-empty"] = "0" };
+                    for (var filler = 0; filler < projectedNotifyFillerCount; filler++)
+                        expected[$"bridge-filler-{filler:D5}.bin"] = "1";
                     if (names.Select((name, index) => !sizeEnabled && name.StartsWith("folder-", StringComparison.Ordinal)
                         ? string.IsNullOrWhiteSpace(sizes[index])
                         : expected.TryGetValue(name, out var prefix) &&
                         sizes[index].StartsWith(prefix, StringComparison.Ordinal) &&
                         sizes[index].Contains(name == "folder-empty" ? "B" : "KB", StringComparison.OrdinalIgnoreCase)).All(value => value))
                     {
-                        Console.WriteLine($"product-size-display-{stage}: {string.Join('|', names.Zip(sizes, (name, size) => name + '=' + size))}");
+                        if (projectedNotifyFillerCount > 0)
+                            Console.WriteLine($"product-size-display-{stage}: rows={count}; {string.Join('|', names.Zip(sizes, (name, size) => name + '=' + size).Take(8))}");
+                        else
+                            Console.WriteLine($"product-size-display-{stage}: {string.Join('|', names.Zip(sizes, (name, size) => name + '=' + size))}");
                         return;
                     }
                 }

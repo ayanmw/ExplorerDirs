@@ -52,6 +52,9 @@ internal static class PrivateDesktopShellProbe
         TimeSpan.FromSeconds(30), initializeOle: true);
     internal static int RunShellObserverContract() => Run("shell-observer-contract",
         AppSessionShellObserver.RunContract, TimeSpan.FromSeconds(20));
+    internal static int RunProjectedNotificationBridge(string adapterPath, int fillerCount = 0) => Run("projected-notification-bridge",
+        () => SyntheticShellSortProbe.RunProductSizeDisplay(adapterPath, explorerBrowser: true, projectedNotifyBridge: true, projectedNotifyFillerCount: fillerCount),
+        TimeSpan.FromSeconds(30), initializeOle: true);
     internal static int RunNavigationSelection(string adapterPath) => Run("navigation-selection",
         () => SyntheticShellSortProbe.RunProductSizeDisplay(adapterPath, explorerBrowser: true, navigationSelection: true),
         TimeSpan.FromSeconds(30), initializeOle: true);

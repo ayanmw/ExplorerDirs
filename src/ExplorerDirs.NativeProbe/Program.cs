@@ -22,6 +22,11 @@ internal static class Program
             return SyntheticShellSortProbe.RunProductParsingIdentity(identityAdapter);
         if (args is ["--shell-observer-contract-private-desktop"])
             return PrivateDesktopShellProbe.RunShellObserverContract();
+        if (args is ["--product-projected-notification-bridge-private-desktop", var largeProjectedBridgeAdapter, "--filler-count", var projectedBridgeCount] &&
+            int.TryParse(projectedBridgeCount, out var projectedBridgeRows) && projectedBridgeRows is > 0 and <= 8192)
+            return PrivateDesktopShellProbe.RunProjectedNotificationBridge(largeProjectedBridgeAdapter, projectedBridgeRows);
+        if (args is ["--product-projected-notification-bridge-private-desktop", var projectedBridgeAdapter])
+            return PrivateDesktopShellProbe.RunProjectedNotificationBridge(projectedBridgeAdapter);
         if (args is ["--product-navigation-selection-private-desktop", var navigationSelectionAdapter])
             return PrivateDesktopShellProbe.RunNavigationSelection(navigationSelectionAdapter);
         if (args is ["--product-drop-registration-private-desktop", var registrationHost, var registrationAdapter])

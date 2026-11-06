@@ -31,6 +31,8 @@
 
 ## Product boundary
 
+- The projected child-notification bridge remains an opt-in isolated prototype until authoritative item type/identity, concurrent same-name recreation, navigation retirement, and full-App multi-pane/group/burst checks pass. Pausing physical subscriptions is test-only. Prove absence of re-enumeration with native counters, and do not equate a single native-view pass with product repair.
+
 - Projected filesystem folders must preserve backing Shell drag/drop capability attributes for both GetAttributesOf(0) and encoded-root IShellItem queries; native IDataObject must expose physical source paths. A successful direct IDropTarget transfer does not establish physical OLE routing. Shell file-operation workers can open progress windows on the shared desktop even when invoked from a private desktop: transfer/DoDragDrop probes require explicit interactive opt-in and must not enter unattended background suites.
 - Keep canonical item identity distinct from SHCIDS_ALLFIELDS metadata equality. Parsed/enumerated PIDLs for an unchanged physical item must agree on stored attributes/snapshot eligibility; enumeration ordinals and parent aggregate context are not item metadata. Preserve multi-level tail comparison. A passing no-view comparison contract does not prove notification delivery or automatic-delete reconciliation.
 - Synthetic child identities retain the backing folder's SHGDN_INFOLDER | SHGDN_FORPARSING leaf, never a friendly display label. Shortcut labels can hide .lnk and collide with a real sibling directory; verify IDataObject CF_HDROP still names the shortcut itself and canonical identities remain distinct, without executing the shortcut target or altering Shell display-name settings.

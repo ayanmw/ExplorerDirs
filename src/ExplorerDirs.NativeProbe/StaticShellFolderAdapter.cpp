@@ -240,6 +240,9 @@ namespace
     }
 
     volatile LONG g_syntheticLiveObjects = 0;
+#if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+    volatile LONG g_projectedBridgeEnumerations = 0;
+#endif
     volatile LONG g_syntheticServerLocks = 0;
     volatile LONG g_syntheticDeferredRefreshCount = 0;
     volatile LONG g_syntheticChildNotificationTranslationQueued = 0;
@@ -3238,7 +3241,19 @@ namespace
     };
 
 #endif
+#if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+    // Isolated prototype ABI: not part of the shipped adapter contract.
+    struct __declspec(uuid("A6FB5E8E-8BE5-48E7-98B2-1C8D282D2033")) IExplorerDirsProjectedNotificationProbe : public IUnknown
+    {
+        virtual HRESULT STDMETHODCALLTYPE PausePhysicalNotificationsForProbe() = 0;
+        virtual HRESULT STDMETHODCALLTYPE NotifyProjectedRemovalForProbe(PCWSTR leaf, BOOL directory) = 0;
+        virtual HRESULT STDMETHODCALLTYPE GetEnumerationCountForProbe(ULONG* count) = 0;
+    };
+#endif
     class SyntheticSortFolder final : public IShellFolder2, public IPersistFolder2, public IShellFolderViewCB
+#if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+        , public IExplorerDirsProjectedNotificationProbe
+#endif
 #if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
         , public IExplorerDirsSizeSortPolicy
 #endif
@@ -3263,6 +3278,10 @@ namespace
                 *value = static_cast<IPersistFolder2*>(this);
             else if (iid == IID_IShellFolderViewCB)
                 *value = static_cast<IShellFolderViewCB*>(this);
+#if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+            else if (iid == __uuidof(IExplorerDirsProjectedNotificationProbe))
+                *value = static_cast<IExplorerDirsProjectedNotificationProbe*>(this);
+#endif
 #if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
             else if (iid == __uuidof(IExplorerDirsSizeSortPolicy))
                 *value = static_cast<IExplorerDirsSizeSortPolicy*>(this);
@@ -3840,6 +3859,9 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE EnumObjects(HWND, SHCONTF flags, IEnumIDList** value) override
         {
+#if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+            InterlockedIncrement(&g_projectedBridgeEnumerations);
+#endif
             ED_SIZE_TRACE("view-enumeration", this, nullptr, flags, 0, 0);
             if (!value) return E_POINTER;
             *value = nullptr;
@@ -5005,6 +5027,53 @@ namespace
 #endif
             return S_OK;
         }
+#if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+        HRESULT STDMETHODCALLTYPE GetEnumerationCountForProbe(ULONG* count) override
+        {
+            if (!count) return E_POINTER;
+            *count = static_cast<ULONG>(InterlockedCompareExchange(&g_projectedBridgeEnumerations, 0, 0));
+            return S_OK;
+        }
+        HRESULT STDMETHODCALLTYPE PausePhysicalNotificationsForProbe() override
+        {
+            if (!_notificationWindow) return CO_E_OBJNOTCONNECTED;
+            const auto registration = _backingNotificationRegistration;
+            if (!registration) return S_FALSE;
+            if (!SHChangeNotifyDeregister(registration)) return E_FAIL;
+            _backingNotificationRegistration = 0;
+#if defined(EXPLORERDIRS_NOTIFICATION_TRACE_EXPERIMENT)
+            DetachNotificationDispatchHook();
+#endif
+            return S_OK;
+        }
+        HRESULT STDMETHODCALLTYPE NotifyProjectedRemovalForProbe(PCWSTR leaf, BOOL directory) override
+        {
+            if (!leaf || !*leaf || wcschr(leaf, L'\\') || wcschr(leaf, L'/') || wcschr(leaf, L':') ||
+                wcscmp(leaf, L".") == 0 || wcscmp(leaf, L"..") == 0) return E_INVALIDARG;
+            if (!_notificationWindow || !_root) return CO_E_OBJNOTCONNECTED;
+            try
+            {
+                const auto physical = _backingPath + L"\\" + leaf;
+                if (GetFileAttributesW(physical.c_str()) != INVALID_FILE_ATTRIBUTES) return S_FALSE;
+                const auto error = GetLastError();
+                if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) return HRESULT_FROM_WIN32(error);
+                SyntheticChild child{};
+                child.cb = sizeof(child);
+                child.id = 1;
+                child.attributes = directory ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
+                if (FAILED(StringCchCopyW(child.name, ARRAYSIZE(child.name), leaf))) return E_INVALIDARG;
+                auto* relative = CloneSyntheticChild(child);
+                if (!relative) return E_OUTOFMEMORY;
+                auto* absolute = ILCombine(_root, relative);
+                CoTaskMemFree(relative);
+                if (!absolute) return E_OUTOFMEMORY;
+                SHChangeNotify(directory ? SHCNE_RMDIR : SHCNE_DELETE, SHCNF_IDLIST | SHCNF_FLUSHNOWAIT, absolute, nullptr);
+                CoTaskMemFree(absolute);
+                return S_OK;
+            }
+            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+        }
+#endif
         PIDLIST_ABSOLUTE ProviderNotificationIdentity(PCIDLIST_ABSOLUTE physical, LONG event, bool* staleUpdate = nullptr) const
         {
             if (staleUpdate) *staleUpdate = false;
