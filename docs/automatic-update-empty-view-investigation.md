@@ -1,3 +1,15 @@
+## 2026-11-06 Public-symbol interpretation of enumeration worker
+
+REA opened the system DLL but no native analysis provider was available; session was closed without configuration changes. Downloaded Microsoft's public PDBs by each image's RSDS key into src/.state/native-symbols. DbgHelp SymFromAddr returned error 126 even with the installed VS x64 helper; this attempt is not a successful symbol-handler validation. A read-only MSF/DBI/S_PUB32 parser then mapped section-relative public symbol addresses to the DLL's PE section RVAs.
+
+Observed nearest public names (not decompiled bodies): windows.storage.dll+0x27B35C -> _GetEnumerator+0xF0; +0x22DA37 -> CEnumThread::InternalResumeRT+0xC7; +0x22D90D -> CEnumThread::s_EnumThreadProc+0x4D. SHCORE+0x43A8C is nearest SHCreateThreadRef+0x1FC, which is too far to establish an exact function boundary. Evidence: src/.state/enumeration-public-symbols.log, read-enumeration-public-symbols.py and check-symbol-export-rvas.py.
+
+Identity checks: DLL RSDS GUID matches PDB stream-1 GUID for both; RSDS ages are 1 while public PDB stream ages are 2 and 3 respectively, so do not claim strict GUID+age identity validation. The symbol-server lookup keys were FC2C41F4093E147F64921116B8DD38731/Windows.Storage.pdb and D27BFB8722C42B7497C9EAE6B78BEDB21/shcore.pdb. Independent PE-export comparison agrees for 558 storage and 96 SHCORE named addresses; storage AssocKeyFromElement has a different export/public-symbol RVA and remains an explicit exception, not silently accepted.
+
+DLL SHA256: storage 8D6AC2B451AF71E913665C8459935AC862E219458F0962C99F3A3D48AB9C251B; SHCORE C49F6CA8DCC99077703B654578C5F2000ACD126354484678AF86282A5BAF5163. PDB hashes: E13C96C71D93512EBA7157DB3869B1CD841A7F7785645618887A9430EA8D621C / 8B1C4E5FED549CF230F0E995FE6054350BA2C3726EA3D562631C1DBE7299EBCD.
+
+These names support the existing observed non-UI enumeration-thread classification, but do not identify its scheduling origin. The worker stack is cut off at the thread entry: it cannot distinguish a newly scheduled notification reaction from delayed startup work. Preserve all delivery/readiness guards; next compare settled baseline/no-event enumeration timing against the same-root burst before changing product behavior. No product change or publication in this step.
+
 ## 2026-11-06 Native enumeration stacks and bounded flush control
 
 Experiment only: trace now includes PID/TID and up to 12 enumeration stacks (20 module/RVA frames each). App session output records its UI thread. The opt-in EXPLORERDIRS_PROJECTED_CHUNKED_FLUSH_CONTROL=1 uses flush boundaries every four queued deliveries and always flushes the tail; default remains one. Pure queue stage 7 first failed with unconditional flush, then passed after boundary implementation; all existing queue lifetime/capacity/retirement checks remain.
