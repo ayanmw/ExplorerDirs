@@ -14,13 +14,13 @@ internal static class ProjectedDispatchSmoke
             var current = retireAt != "before";
             var sent = 0;
             var acknowledged = 0;
-            ulong Dispatch(ProjectedChangeLedger.Work work)
+            ProjectedDispatchResult Dispatch(ProjectedChangeLedger.Work work)
             {
                 sent++;
                 if (retireAt == "dispatch") current = false;
                 // Simulate synchronous Shell COM reentry. Nested work must not send twice.
                 pump.Advance(() => current, Dispatch, Ready, Ack);
-                return 7;
+                return new(7);
             }
             bool Ready(ProjectedChangeLedger.Work work)
             {
@@ -43,12 +43,24 @@ internal static class ProjectedDispatchSmoke
         for (var i = 0; i < 17; i++) normal.Record(ProjectedChangeKind.Created, $"item-{i}");
         var dispatcher = new ProjectedChangeDispatch(normal, 8);
         var dispatched = 0;
-        dispatcher.Advance(() => true, _ => { dispatched++; return 0; }, _ => false, (_, _) => throw new InvalidOperationException());
+        dispatcher.Advance(() => true, _ => { dispatched++; return new ProjectedDispatchResult(0); }, _ => false, (_, _) => throw new InvalidOperationException());
         Require(dispatched == 8 && dispatcher.PendingCount == 8 && normal.Snapshot.Queued == 9);
-        dispatcher.Advance(() => true, _ => { dispatched++; return 0; }, _ => false, (_, _) => throw new InvalidOperationException());
+        dispatcher.Advance(() => true, _ => { dispatched++; return new ProjectedDispatchResult(0); }, _ => false, (_, _) => throw new InvalidOperationException());
         Require(dispatched == 8);
-        for (var i = 0; i < 4; i++) dispatcher.Advance(() => true, _ => { dispatched++; return 0; }, _ => true, (_, _) => throw new InvalidOperationException());
+        for (var i = 0; i < 4; i++) dispatcher.Advance(() => true, _ => { dispatched++; return new ProjectedDispatchResult(0); }, _ => true, (_, _) => throw new InvalidOperationException());
         Require(dispatched == 17 && dispatcher.PendingCount == 0 && normal.Snapshot == (0, 0, false));
+        var replaced = new ProjectedChangeLedger();
+        for (var i = 0; i < 17; i++) replaced.Record(ProjectedChangeKind.Deleted, $"recreated-{i}");
+        var replacementPump = new ProjectedChangeDispatch(replaced, 8);
+        var reconciledCount = 0;
+        for (var turn = 0; turn < 3; turn++)
+        {
+            replacementPump.Advance(() => true, _ => { reconciledCount++; return new(0, Reconciled: true); },
+                _ => throw new InvalidOperationException("Reconciled deletion must not wait for absence."),
+                (_, _) => throw new InvalidOperationException("Reconciled deletion must not acknowledge an old ticket."));
+            Require(reconciledCount == Math.Min((turn + 1) * 8, 17) && replacementPump.PendingCount == 0);
+        }
+        Require(replaced.Snapshot == (0, 0, false));
         var failed = new ProjectedChangeLedger();
         failed.Record(ProjectedChangeKind.Created, "failed");
         var broken = new ProjectedChangeDispatch(failed, 8);

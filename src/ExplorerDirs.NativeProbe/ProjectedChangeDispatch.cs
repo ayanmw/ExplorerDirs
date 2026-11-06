@@ -1,5 +1,7 @@
 namespace ExplorerDirs.NativeProbe;
 
+internal readonly record struct ProjectedDispatchResult(ulong Ticket, bool Reconciled = false);
+
 // No scheduler or native ownership here: one Advance performs a bounded turn.
 // Every external callback may pump Shell messages and retire this navigation.
 internal sealed class ProjectedChangeDispatch(ProjectedChangeLedger queue, int maximumInFlight)
@@ -8,7 +10,7 @@ internal sealed class ProjectedChangeDispatch(ProjectedChangeLedger queue, int m
     private bool _advancing;
     internal int PendingCount => _pending.Count;
 
-    internal void Advance(Func<bool> current, Func<ProjectedChangeLedger.Work, ulong> dispatch,
+    internal void Advance(Func<bool> current, Func<ProjectedChangeLedger.Work, ProjectedDispatchResult> dispatch,
         Func<ProjectedChangeLedger.Work, bool> ready, Action<ProjectedChangeLedger.Work, ulong> acknowledge)
     {
         if (_advancing) return;
@@ -40,12 +42,14 @@ internal sealed class ProjectedChangeDispatch(ProjectedChangeLedger queue, int m
                 queue.Release(work);
             }
             _pending.Clear();
-            while (_pending.Count < maximumInFlight && queue.TryTake(out var work))
+            var sent = 0;
+            while (sent++ < maximumInFlight && queue.TryTake(out var work))
             {
                 if (!Active()) return;
-                var ticket = dispatch(work);
+                var result = dispatch(work);
                 if (!Active()) return;
-                _pending.Add((work, ticket));
+                if (result.Reconciled) queue.Release(work);
+                else _pending.Add((work, result.Ticket));
             }
         }
         catch

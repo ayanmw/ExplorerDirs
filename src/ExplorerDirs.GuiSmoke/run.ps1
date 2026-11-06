@@ -6,10 +6,14 @@
 param(
     [switch]$AllowInteractiveDesktopControl,
     [switch]$PrepareOnly,
-    [switch]$CaptureFocusTrace
+    [switch]$CaptureFocusTrace,
+    [switch]$ProjectedNotificationExperiment
 )
 
 $ErrorActionPreference = 'Stop'
+if ($ProjectedNotificationExperiment -and -not $PrepareOnly) {
+    throw 'Projected notification payloads are preparation-only; use the private Desktop probe for execution.'
+}
 if ($PrepareOnly -and $AllowInteractiveDesktopControl) {
     throw 'Choose preparation only or interactive execution, not both.'
 }
@@ -136,7 +140,8 @@ foreach ($tabIndex in 1..98) {
 
 dotnet publish (Join-Path $projectRoot 'src\ExplorerDirs.App\ExplorerDirs.App.csproj') `
     --configuration Release --self-contained false --output $appDirectory `
-    "-p:Version=$buildVersion" -p:IncludeSourceRevisionInInformationalVersion=false
+    "-p:Version=$buildVersion" -p:IncludeSourceRevisionInInformationalVersion=false `
+    "-p:ProjectedNotificationExperiment=$($ProjectedNotificationExperiment.IsPresent)"
 if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed.' }
 $exe = Join-Path $appDirectory 'ExplorerDirs.App.exe'
 if (-not (Test-Path -LiteralPath $exe)) { throw "Missing test executable: $exe" }
@@ -203,6 +208,7 @@ $($otherPaneSettings.ToString())
 $manifest = [ordered]@{
     SchemaVersion = 1
     Status = 'prepared-not-run'
+    ProjectedNotificationExperiment = [bool]$ProjectedNotificationExperiment
     PreparedAtUtc = [DateTime]::UtcNow.ToString('o')
     SourceCommit = $sourceCommit.Trim()
     SourceWorkingTreeDirty = [bool]$sourceChanges

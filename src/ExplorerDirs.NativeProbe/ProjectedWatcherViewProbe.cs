@@ -49,7 +49,7 @@ public static partial class SyntheticShellSortProbe
                         };
                         if (result != 0) throw new InvalidOperationException($"Watcher dispatch {work.Kind} {work.Name}: 0x{result:X8}.");
                         processed++;
-                        return ticket;
+                        return new ProjectedDispatchResult(ticket);
                     },
                     work => work.Kind switch
                     {

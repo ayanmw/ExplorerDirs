@@ -16,6 +16,7 @@ internal static class AppSessionProcessProbe
         using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(preparedRun, "preparation.json")));
         if (manifest.RootElement.GetProperty("Status").GetString() != "prepared-not-run")
             throw new InvalidOperationException("Expected an explicitly prepared acceptance payload.");
+        var projectedExperiment = manifest.RootElement.TryGetProperty("ProjectedNotificationExperiment", out var projectedFlag) && projectedFlag.GetBoolean();
         var desktop = GetThreadDesktop(GetCurrentThreadId());
         var desktopName = ObjectName(desktop);
         if (!desktopName.StartsWith("ExplorerDirs-Probe-", StringComparison.Ordinal))
@@ -87,6 +88,22 @@ internal static class AppSessionProcessProbe
         var pids = new List<uint>();
         for (var pass = 0; pass < 2; pass++)
         {
+            var projectedLog = Path.Combine(app, "projected-monitor-experiment.log");
+            var projectedLogStart = File.Exists(projectedLog) ? File.ReadAllLines(projectedLog).Length : 0;
+            void VerifyProjectedMonitors()
+            {
+                if (!projectedExperiment) return;
+                var lines = File.Exists(projectedLog) ? File.ReadAllLines(projectedLog).Skip(projectedLogStart).ToArray() : [];
+                if (lines.Any(line => line.Contains(" error path=", StringComparison.Ordinal)))
+                    throw new InvalidOperationException("Projected App monitor stopped with an error: " + string.Join(" | ", lines));
+                for (var pane = 0; pane < 4; pane++)
+                {
+                    var activePath = expected.Panes[pane][expected.ActiveTabIndices![pane]].Path;
+                    if (!lines.Any(line => line.Contains($" started path={activePath};", StringComparison.Ordinal)))
+                        throw new InvalidOperationException($"Projected App monitor was not started for pane {pane + 1}.");
+                }
+                Console.WriteLine($"app-projected-monitors: pass={pass + 1}; four-active-paths=True; no-errors=True");
+            }
             var startup = new StartupInfo { Size = Marshal.SizeOf<StartupInfo>(), Desktop = station + "\\" + desktopName, Flags = 0x80 };
             if (!CreateProcessW(executable, new StringBuilder('"' + executable + '"'), 0, 0, false, 0, 0, app, ref startup, out var child))
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not start isolated app process.");
@@ -120,7 +137,9 @@ internal static class AppSessionProcessProbe
                     return readings.Length == 4 && readings.All(item => item.Rows == 2 + fillerCount) &&
                         readings.Any(item => item.Grouped == 1);
                 }, TimeSpan.FromSeconds(60), "Full app views/grouping did not become ready.");
+                VerifyProjectedMonitors();
                 VerifyExternalDirectoryChanges(window, child, expected, pass, settleExternalChanges, fillerCount, adapterOverride is null ? null : Path.Combine(app, "ExplorerDirs.ShellNamespace.dll.size-trace.log"));
+                VerifyProjectedMonitors();
                 if (pass == 0)
                 {
                     if (!GetWindowRect(window, out var bounds)) throw new Win32Exception(Marshal.GetLastWin32Error());

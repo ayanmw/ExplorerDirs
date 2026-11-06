@@ -84,8 +84,16 @@ internal sealed partial class ExplorerBrowserHost
                             ProjectedChangeKind.Deleted => GetMethod<ProjectedRemoval>(bridge, 4)(bridge, work.Name, out ticket),
                             _ => GetMethod<ProjectedRename>(bridge, 9)(bridge, work.Name, work.NewName!, out ticket)
                         };
+                        if (result == 1 && work.Kind == ProjectedChangeKind.Deleted && Current())
+                        {
+                            // Native refusal confirms the path exists again. Publish its
+                            // current facts; never acknowledge the obsolete removal.
+                            var reconciled = GetMethod<ProjectedArrival>(bridge, 8)(bridge, work.Name);
+                            if (reconciled != 0) throw new InvalidOperationException($"Projected recreate: 0x{reconciled:X8}");
+                            return new ProjectedDispatchResult(0, Reconciled: true);
+                        }
                         if (result != 0) throw new InvalidOperationException($"Projected {work.Kind}: 0x{result:X8}");
-                        return ticket;
+                        return new ProjectedDispatchResult(ticket);
                     },
                     work => work.Kind switch
                     {
@@ -107,6 +115,7 @@ internal sealed partial class ExplorerBrowserHost
                 if (Current())
                 {
                     LastShellRefreshStatus = $"projected-experiment-stopped={error.GetType().Name},hr=0x{error.HResult:X8}";
+                    LogProjectedExperiment($"error path={path};status={LastShellRefreshStatus};message={error.Message}");
                     StopProjectedMonitorExperiment();
                 }
             }
@@ -126,6 +135,7 @@ internal sealed partial class ExplorerBrowserHost
             watcher.EnableRaisingEvents = true;
             timer.Start();
             LastShellRefreshStatus = "projected-experiment-monitor-started";
+            LogProjectedExperiment($"started path={path};navigation={navigationVersion}");
             return true;
         }
         catch
@@ -148,6 +158,12 @@ internal sealed partial class ExplorerBrowserHost
         var bridge = _projectedBridge;
         _projectedBridge = 0;
         if (bridge != 0) Marshal.Release(bridge);
+    }
+
+    private static void LogProjectedExperiment(string message)
+    {
+        try { File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "projected-monitor-experiment.log"), $"{Environment.TickCount64} {message}\n"); }
+        catch (IOException) { }
     }
 
     private static bool ProjectedRowExists(nint viewWindow, string name, Func<bool> current)
