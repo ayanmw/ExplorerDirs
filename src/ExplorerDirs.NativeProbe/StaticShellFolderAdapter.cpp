@@ -4252,7 +4252,16 @@ namespace
                 return S_OK;
             }
 #endif
-            if (count == 0) { *attributes = SFGAO_FOLDER | SFGAO_HASSUBFOLDER; return S_OK; }
+            if (count == 0)
+            {
+                // DefView queries the folder itself before accepting background drops.
+                // Preserve the backing folder's capabilities rather than reporting only its type.
+                const auto requested = *attributes;
+                const auto result = _inner ? _inner->GetAttributesOf(0, nullptr, attributes) : S_OK;
+                if (!_inner) *attributes = SFGAO_FOLDER | SFGAO_HASSUBFOLDER;
+                *attributes &= requested;
+                return result;
+            }
             if (!_inner) return E_UNEXPECTED;
             // IShellItem asks the namespace parent to classify path-marker PIDLs during session restore.
             if (count == 1)
@@ -4265,7 +4274,7 @@ namespace
                     PIDLIST_ABSOLUTE pathPidl = nullptr;
                     SFGAOF pathAttributes = 0;
                     const auto parseResult = SHParseDisplayName(path.c_str(), nullptr, &pathPidl,
-                        *attributes & (SFGAO_FOLDER | SFGAO_FILESYSTEM), &pathAttributes);
+                        *attributes, &pathAttributes);
                     if (pathPidl) CoTaskMemFree(pathPidl);
                     if (FAILED(parseResult)) return parseResult;
                     *attributes &= pathAttributes;

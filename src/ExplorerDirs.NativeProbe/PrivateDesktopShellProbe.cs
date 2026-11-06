@@ -47,6 +47,9 @@ internal static class PrivateDesktopShellProbe
     }
 
     internal static int RunHostFilter() => Run("host-filter", ShellViewHostFilterProbe.RunForPrivateDesktop);
+    internal static int RunProductDrop(string adapterPath) => Run("product-drop",
+        () => SyntheticShellSortProbe.RunProductDropAttributes(adapterPath, transfer: true),
+        TimeSpan.FromSeconds(30), initializeOle: true);
 
     internal static int RunProductSizeDisplay(string adapterPath, bool explorerBrowser = false, bool rootControl = false,
         ExplorerDirs.App.FolderSizeSource source = ExplorerDirs.App.FolderSizeSource.BuiltIn, bool sortPolicyExperiment = false, bool? encodedSortPolicy = null, bool columnStateSortPolicy = false, int encodedSortDirection = 1, bool dynamicSortPolicy = false, bool nativeSortEntrypoints = false, uint nativeSortMode = 4, bool shellFolderPartition = false, bool reconcileSortCommands = false) => Run("product-size-display",

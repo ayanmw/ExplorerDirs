@@ -14,6 +14,12 @@ internal static class Program
     [STAThread]
     static int Main(string[] args)
     {
+        if (args is ["--product-drop-attributes", var dropAdapter])
+            return SyntheticShellSortProbe.RunProductDropAttributes(dropAdapter);
+        // Shell file-operation workers may open progress UI on the shared desktop even when
+        // their caller uses a private desktop. Keep this outside unattended background suites.
+        if (args is ["--product-drop-private-desktop", var transferAdapter, "--AllowInteractiveDesktopControl"])
+            return PrivateDesktopShellProbe.RunProductDrop(transferAdapter);
         if (args is ["--full-app-session-cleanup-owned-profile", var failedAppProfile])
         {
             AppSessionProcessProbe.CleanupOwnedProfile(failedAppProfile);

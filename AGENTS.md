@@ -31,6 +31,8 @@
 
 ## Product boundary
 
+- Projected filesystem folders must preserve backing Shell drag/drop capability attributes for both GetAttributesOf(0) and encoded-root IShellItem queries; native IDataObject must expose physical source paths. A successful direct IDropTarget transfer does not establish physical OLE routing. Shell file-operation workers can open progress windows on the shared desktop even when invoked from a private desktop: transfer/DoDragDrop probes require explicit interactive opt-in and must not enter unattended background suites.
+
 - Build a Windows file browsing window replacement with Q-Dir style multi-pane workflows. Do not replace the desktop, taskbar, login shell, or the `explorer.exe` system file.
 - Use Q-Dir and other products as interaction references. Do not copy their binaries, configuration, artwork, or proprietary source into this repository.
 - On 2026-11-04 the user explicitly authorized analysis of the local Q-Dir executable to investigate folder-size rendering, superseding the earlier project instruction against binary analysis. Keep artifact identity, API/behavior findings and uncertainty in the investigation report. Implement independent code; do not copy proprietary code or binary content into product sources. Desktop execution/instrumentation still follows the user's current desktop handoff.

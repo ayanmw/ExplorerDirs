@@ -62,6 +62,8 @@ try {
     Invoke-BackgroundCheck 'folder-navigation-provider-callbacks' 'dotnet' @('run', '--project', $hostProject, '-c', 'Release', '--no-build', '--',
         '--folder-navigation-provider-callbacks', 'src/ExplorerDirs.NativeProbe/bin/native-product-x64/ExplorerDirs.ShellNamespace.dll')
     $nativeProject = 'src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj'
+    Invoke-BackgroundCheck 'product-drop-attributes' 'dotnet' @('run', '--project', $nativeProject, '-c', 'Release', '--no-build', '--',
+        '--product-drop-attributes', 'src/ExplorerDirs.NativeProbe/bin/native-product-x64/ExplorerDirs.ShellNamespace.dll')
     Invoke-BackgroundCheck 'product-notification-capture-smoke' 'dotnet' @('run', '--project', $nativeProject, '-c', 'Release', '--no-build', '--',
         '--product-notification-capture-smoke', 'src/ExplorerDirs.NativeProbe/bin/native-product-diagnostics-x64/ExplorerDirs.ShellNamespace.Diagnostics.dll')
     foreach ($flag in @('synthetic-shell-folder-tree-smoke', 'synthetic-async-on-demand-recursive-size-column-smoke')) {
