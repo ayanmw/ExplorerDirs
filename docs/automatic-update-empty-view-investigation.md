@@ -1,5 +1,13 @@
 # 自动变化期间短暂零行：刷新来源调查
 
+## 2026-11-06 同一二进制调度优先级对照
+
+实验构建读取进程级 EXPLORERDIRS_PROJECTED_NORMAL_PRIORITY_CONTROL=1 时使用Normal，否则仍Background；启动日志记录实际priority。仅用于对照，不是普通产品选项。两个变量均由探针调用finally还原，普通构建不包含此入口。采用同一prepared payload `20261106-121746-056-24ab90`、名称排序控制、相同1025填充/32文件场景，先Normal再Background，顺序非随机，样本有限。
+
+`src/.state/projected-priority-normal-name32.log` 新增3391/6410ms、删除1589/1575ms；实际启动日志确认Normal，第二进程部分owner最大待办回调间隔912–916ms。`src/.state/projected-priority-background-name32.log` 新增3879/4065ms、删除4042/1940ms。两组各两个进程功能/逐名/分组/不增加枚举及全部隔离守卫通过，整体退出0，自动阶段无零行采样。未测真实键鼠响应，不证明提高优先级的交互代价可接受。
+
+优先级提高未稳定消除秒级等待，不能据此把普通产品改为Normal，也不能完全排除Dispatcher调度影响。下一步改为采集长间隔期间UI线程操作/消息或堆栈，并对照外部逐行/计数采样负载，避免持续增加不能归因的累计计数。普通HostProbe/App构建通过，恢复后核查无实验入口；预览未发布。
+
 ## 2026-11-06 完整回调与日志耗时对照
 
 新增实验 callback-ms/callback-max-ms/logging-ms，完整回调finally计时包含同步重入和日志；日志字段反映此前已完成回调，当前写日志尚未结束，不能视为当前回调的闭合计时。首轮补充计时漏接finally，仅日志计时有效，保留 `projected-callback-name32.log`，不将其中为零的callback字段作为证据；修正后重新准备并运行完整场景。

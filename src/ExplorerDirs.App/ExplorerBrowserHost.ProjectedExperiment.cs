@@ -65,7 +65,11 @@ internal sealed partial class ExplorerBrowserHost
         watcher.Deleted += (_, e) => Record(ProjectedChangeKind.Deleted, e.Name!);
         watcher.Renamed += (_, e) => Record(ProjectedChangeKind.Renamed, e.OldName!, e.Name);
         watcher.Error += (_, e) => Interlocked.Exchange(ref watcherError, e.GetException());
-        var timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(20) };
+        // Diagnostic control only: distinguish Background queue delay without
+        // changing the normal monitor or claiming input responsiveness is proven.
+        var priority = Environment.GetEnvironmentVariable("EXPLORERDIRS_PROJECTED_NORMAL_PRIORITY_CONTROL") == "1"
+            ? DispatcherPriority.Normal : DispatcherPriority.Background;
+        var timer = new DispatcherTimer(priority) { Interval = TimeSpan.FromMilliseconds(20) };
         var progress = System.Diagnostics.Stopwatch.StartNew();
         uint? enumerationBaseline = null;
         uint lastEnumerations = 0;
@@ -228,7 +232,7 @@ internal sealed partial class ExplorerBrowserHost
             timer.Start();
             LastShellRefreshStatus = "projected-experiment-monitor-started";
             _projectedNeedsRecovery = false;
-            LogProjectedExperiment($"started path={path};owner={viewWindow:X};navigation={navigationVersion}");
+            LogProjectedExperiment($"started path={path};owner={viewWindow:X};navigation={navigationVersion};priority={priority}");
             return true;
         }
         catch
