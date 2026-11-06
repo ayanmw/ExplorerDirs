@@ -51,7 +51,20 @@ internal static class ProjectedChangeLedgerSmoke
         var pending = burst.Record(ProjectedChangeKind.Deleted, "pending")!;
         burst.Invalidate();
         Require(!burst.TryTake(out _) && !burst.IsCurrent(pending) && burst.Snapshot == (0, 0, true), "Close retained queued work.");
-        Console.WriteLine("Projected change ledger: PASS recreation, rename chain, case spelling, retired visits, 4096 concurrent records, release/close cleanup; no window or file mutation.");
+        var bounded = new ProjectedChangeLedger(2);
+        var inFlight = bounded.Record(ProjectedChangeKind.Renamed, "before", "after")!;
+        bounded.TryTake(out _);
+        bounded.Record(ProjectedChangeKind.Created, "second");
+        Require(bounded.Record(ProjectedChangeKind.Created, "overflow") is null, "In-flight work did not count toward capacity.");
+        Require(bounded.Overflowed && bounded.Snapshot == (0, 0, true) && !bounded.IsCurrent(inFlight), "Overflow silently lost work without invalidating the visit.");
+        bounded.Release(inFlight);
+        bounded.Invalidate();
+        Require(bounded.Overflowed && bounded.Record(ProjectedChangeKind.Changed, "late") is null, "Late completion cleared the overflow state.");
+        var reusable = new ProjectedChangeLedger(1);
+        var completed = reusable.Record(ProjectedChangeKind.Created, "one")!;
+        reusable.TryTake(out _); reusable.Release(completed); reusable.Release(completed);
+        Require(reusable.Record(ProjectedChangeKind.Created, "two") is not null && !reusable.Overflowed, "Release did not restore bounded capacity.");
+        Console.WriteLine("Projected change ledger: PASS recreation, rename chain, retired visits, 4096 concurrent records; bounded queued/in-flight capacity; overflow retirement; idempotent release; no window or file mutation.");
         return 0;
     }
 }

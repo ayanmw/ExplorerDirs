@@ -70,6 +70,15 @@ internal static class ProjectedDispatchSmoke
         chainedPump.Advance(() => true, _ => new(12), _ => true, (_, ticket) => { Require(ticket == 11); confirmations++; });
         chainedPump.Advance(() => true, _ => throw new InvalidOperationException(), _ => true, (_, ticket) => { Require(ticket == 12); confirmations++; });
         Require(confirmations == 2 && chained.Snapshot == (0, 0, false));
+        var overflowing = new ProjectedChangeLedger(1);
+        overflowing.Record(ProjectedChangeKind.Created, "initial");
+        var overflowingPump = new ProjectedChangeDispatch(overflowing, 8);
+        overflowingPump.Advance(() => true, _ =>
+        {
+            overflowing.Record(ProjectedChangeKind.Created, "overflow");
+            return new(0);
+        }, _ => throw new InvalidOperationException(), (_, _) => throw new InvalidOperationException());
+        Require(overflowing.Overflowed && overflowingPump.PendingCount == 0 && overflowing.Snapshot == (0, 0, true));
         var failed = new ProjectedChangeLedger();
         failed.Record(ProjectedChangeKind.Created, "failed");
         var broken = new ProjectedChangeDispatch(failed, 8);

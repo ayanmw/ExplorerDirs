@@ -6,7 +6,7 @@ internal enum ProjectedChangeKind { Created, Changed, Deleted, Renamed }
 
 // Prototype coordination only: retain every event in order. Superseded work still
 // needs reconciliation; freshness alone does not authorize dropping a Shell event.
-internal sealed class ProjectedChangeLedger
+internal sealed class ProjectedChangeLedger(int capacity = 8192)
 {
     internal sealed record Work(ProjectedChangeLedger Owner, long Sequence,
         ProjectedChangeKind Kind, string Name, string? NewName);
@@ -14,8 +14,11 @@ internal sealed class ProjectedChangeLedger
     private readonly object _gate = new();
     private readonly Queue<Work> _pending = new();
     private readonly Dictionary<string, Work> _latest = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<Work> _outstanding = new(ReferenceEqualityComparer.Instance);
     private long _sequence;
     private bool _invalidated;
+    private bool _overflowed;
+    internal bool Overflowed { get { lock (_gate) return _overflowed; } }
 
     internal Work? Record(ProjectedChangeKind kind, string name, string? newName = null)
     {
@@ -24,7 +27,16 @@ internal sealed class ProjectedChangeLedger
         lock (_gate)
         {
             if (_invalidated) return null;
+            if (_outstanding.Count >= capacity)
+            {
+                // Never evict an arbitrary create/rename/delete and continue with
+                // an incomplete history. Retire this visit and report overflow.
+                _overflowed = true;
+                Invalidate();
+                return null;
+            }
             var work = new Work(this, ++_sequence, kind, name, newName);
+            _outstanding.Add(work);
             _pending.Enqueue(work);
             _latest[name] = work;
             if (kind == ProjectedChangeKind.Renamed) _latest[newName!] = work;
@@ -48,7 +60,7 @@ internal sealed class ProjectedChangeLedger
     {
         lock (_gate)
         {
-            if (!ReferenceEquals(work.Owner, this)) return;
+            if (!ReferenceEquals(work.Owner, this) || !_outstanding.Remove(work)) return;
             // A chained rename can supersede only one endpoint. Retire the other
             // endpoint too, without erasing the successor's entry.
             if (Matches(work.Name, work)) _latest.Remove(work.Name);
@@ -64,6 +76,7 @@ internal sealed class ProjectedChangeLedger
             _invalidated = true;
             _pending.Clear();
             _latest.Clear();
+            _outstanding.Clear();
         }
     }
 

@@ -1,5 +1,15 @@
 # 通知事件队列协调实验
 
+## 有界事件积压与明确停止
+
+2026-11-06：实验队列默认最多8192条未完成工作，排队和已取出但尚未Release的工作共同计数，用引用集合确保重复Release不重复归还容量。超过上限永久标记Overflowed、清空FIFO/路径索引/未完成集合、失效访问；不从中间淘汰事件后继续运行。上限针对事件数及路径索引，不是整个进程内存上限，也不包含Shell自行保留的缓存。
+
+无窗口用例先缺能力红灯（`src/.state/projected-overflow-red.log`），补实现后验证在途计入容量、重复Release、旧工作迟到、Overflowed不因关闭丢失，派发中溢出立即停止后续处理。既有4096并发队列合同继续通过。App实验tick发现Overflowed时记录InternalBufferOverflowException并停止该监控，不自动触发完整刷新。
+
+真实宿主 `src/.state/projected-overflow-host.log` 使用默认容量向真实队列注入8193条工作，断言App停止监控/释放owner接口、记录原因、队列归零；随后真实导航B→A建立新访问，真实FileSystemWatcher新建条目恢复显示，再带实际事件关闭，旧接口退休、roots/facts归零。功能断言通过，前台不变但共享输入守卫失败，整体退出1。故障来源为受控队列注入，不是8193个实际文件事件或OS watcher内核溢出的证明。
+
+目前恢复方式只验证重新进入目录。F5恢复、OS watcher错误恢复、自动重协调及高负载下的可见反馈尚未实现，普通构建未启用。不因已有失败清理而宣称错误恢复门槛全部完成。
+
 ## 真实宿主导航与关闭生命周期
 
 2026-11-06：新增HostProbe的 `ProjectedMonitorLifecycleHostProbe`，经NativeProbe `--product-projected-lifecycle-private-desktop <HostProbe.dll> <prototypeDLL>` 在从未切换的独立Desktop调用实际产品HwndHost。HostProbe必须先以 `-p:ProjectedNotificationExperiment=true` 构建；普通构建缺少字段时明确拒绝该测试。通过反射调用实际Navigate和Dispose，不注入键鼠或运行文件传输。

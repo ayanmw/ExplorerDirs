@@ -75,6 +75,7 @@ internal sealed partial class ExplorerBrowserHost
             Marshal.AddRef(bridge);
             try
             {
+                if (queue.Overflowed) throw new InternalBufferOverflowException("Projected event capacity exceeded; navigate again to reconcile.");
                 if (Volatile.Read(ref watcherError) is { } error) throw error;
                 if (dispatch.PendingCount > 0 && progress.Elapsed > TimeSpan.FromSeconds(10))
                     throw new TimeoutException("Projected experiment confirmation timed out.");

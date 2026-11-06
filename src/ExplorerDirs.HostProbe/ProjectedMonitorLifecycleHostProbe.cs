@@ -79,6 +79,22 @@ internal static class ProjectedMonitorLifecycleHostProbe
             Require(At<Arrival>(middleCapability, 8)(middleCapability, "second.bin") == unchecked((int)0x800401FD), "Leaving second visit retained its native capability.");
             File.WriteAllBytes(Path.Combine(first, "live-return.bin"), [9]);
             Wait(() => Names().Contains("live-return.bin"), "returned visit receives actual change");
+            var overflowQueue = Queue()!;
+            var record = overflowQueue.GetType().GetMethod("Record", Instance)!;
+            var kind = Enum.Parse(assembly.GetType("ExplorerDirs.NativeProbe.ProjectedChangeKind", true)!, "Changed");
+            // Fault injection uses the actual default capacity and queue. No file
+            // operations, message pumping or production configuration override.
+            for (var i = 0; i < 8193; i++) record.Invoke(overflowQueue, [kind, "first.bin", null]);
+            Require((bool)overflowQueue.GetType().GetProperty("Overflowed", Instance)!.GetValue(overflowQueue)!, "Expected default-capacity overflow.");
+            Wait(() => Queue() is null && (nint)hostType.GetField("_projectedBridge", Instance)!.GetValue(host)! == 0, "overflow retires monitor");
+            Require(((string)hostType.GetProperty("LastShellRefreshStatus", Instance)!.GetValue(host)!).Contains("InternalBufferOverflowException", StringComparison.Ordinal), "Overflow was not reported.");
+            Require(Snapshot(overflowQueue) == (0, 0, true), "Overflow retained queued facts.");
+            hostType.GetMethod("Navigate", Instance)!.Invoke(host, [Identity(second)]);
+            Wait(() => Names().Contains("second.bin") && Queue() is not null, "navigate after overflow");
+            hostType.GetMethod("Navigate", Instance)!.Invoke(host, [Identity(first)]);
+            Wait(() => Names().Contains("first.bin") && Queue() is { } recovered && !ReferenceEquals(recovered, overflowQueue), "recover after overflow");
+            File.WriteAllBytes(Path.Combine(first, "live-after-overflow.bin"), [10]);
+            Wait(() => Names().Contains("live-after-overflow.bin"), "recovered visit accepts real watcher changes");
             var closingQueue = Queue()!;
             finalCapability = (nint)hostType.GetField("_projectedBridge", Instance)!.GetValue(host)!;
             Marshal.AddRef(finalCapability);
@@ -92,7 +108,7 @@ internal static class ProjectedMonitorLifecycleHostProbe
             Marshal.ThrowExceptionForHR(count(finalCapability, out var roots, out var facts));
             Require(roots == 0 && facts == 0, $"Closed native metadata retained roots/facts {roots}/{facts}.");
             File.WriteAllBytes(Path.Combine(first, "after-close.bin"), [7]);
-            Console.WriteLine("projected-monitor-lifecycle: PASS real queued watcher events retired on A-B-A navigation and close; returned visit updates; old rows absent; retired capabilities never revived; roots/facts=0; no input.");
+            Console.WriteLine("projected-monitor-lifecycle: PASS real queued watcher events retired on A-B-A navigation and close; overflow injection pauses and clears; re-navigation restores real watcher updates; retired capabilities never revived; roots/facts=0; no input.");
             return 0;
         }
         finally
