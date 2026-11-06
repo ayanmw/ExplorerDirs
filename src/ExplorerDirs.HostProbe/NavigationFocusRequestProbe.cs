@@ -15,6 +15,8 @@ internal static class NavigationFocusRequestProbe
 
     internal static int Run()
     {
+        // Profile-wide preferences now live in Application.Properties; no window is shown.
+        _ = Application.Current ?? new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         var foreground = GetForegroundWindow();
         var app = Assembly.Load("ExplorerDirs.App");
         var hostType = app.GetType("ExplorerDirs.App.ExplorerBrowserHost", true)!;
@@ -104,7 +106,9 @@ internal static class NavigationFocusRequestProbe
         try
         {
             window = (MainWindow)Activator.CreateInstance(typeof(MainWindow), Members, null,
-                [null, null, null, Path.Combine(root, "ExplorerDirs.ini"), root, null, null], null)!;
+                // Running this focus regression exposed a stale constructor invocation:
+                // startupSelectPath was added after the original seven-argument probe.
+                [null, null, null, Path.Combine(root, "ExplorerDirs.ini"), root, null, null, null], null)!;
             Ensure((bool)Field(window, "_fileViewFocusDesired")!, "startup initially requests file-view focus");
             var pane = ((PaneControl[])Field(window, "_panes")!)[0];
             var search = (TextBox)Field(pane, "SearchBox")!;
@@ -130,6 +134,9 @@ internal static class NavigationFocusRequestProbe
         finally
         {
             window?.Close();
+            var preferenceKey = "ExplorerDirs.GlobalMixedSort:" + Path.GetFullPath(root).ToUpperInvariant();
+            if (Application.Current.Properties[preferenceKey] is IDisposable preference) preference.Dispose();
+            Application.Current.Properties.Remove(preferenceKey);
             if (!root.StartsWith(parent + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Fixture cleanup escaped its test directory.");
             Directory.Delete(root, recursive: true);

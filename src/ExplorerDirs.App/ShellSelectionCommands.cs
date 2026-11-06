@@ -106,6 +106,35 @@ internal static class ShellSelectionCommands
             if (shell != 0) Marshal.Release(shell);
         }
     }
+
+    // Navigation alone may initialize an empty selection. Ordinary focus repair must
+    // retain Select None/background-click results, so keep this separate from it.
+    internal static bool EnsureNavigationSelection(nint view, Func<bool> stillCurrent)
+    {
+        if (!stillCurrent()) return false;
+        var count = At<Count>(view, 7);
+        if (count(view, 1, out var selected) != 0 || !stillCurrent()) return false;
+        if (selected > 0) return true; // Shell history/parent navigation already restored its selection.
+        if (count(view, 2, out var total) != 0 || total <= 0 || !stillCurrent()) return false;
+        var focusedResult = At<Focused>(view, 10)(view, out var focused);
+        var index = focusedResult >= 0 && (uint)focused < (uint)total ? focused : 0;
+        nint pidl = 0, shell = 0;
+        try
+        {
+            if (At<Item>(view, 6)(view, index, out pidl) != 0 || pidl == 0 || !stillCurrent()) return false;
+            // Shell can complete its own history selection while an earlier COM call pumps messages.
+            if (count(view, 1, out selected) != 0 || !stillCurrent()) return false;
+            if (selected > 0) return true;
+            var id = new Guid("000214E3-0000-0000-C000-000000000046");
+            if (Marshal.QueryInterface(view, in id, out shell) != 0 || !stillCurrent()) return false;
+            return At<SelectOne>(shell, 14)(shell, pidl, 0x19) == 0; // SELECT | ENSUREVISIBLE | FOCUSED; no rename.
+        }
+        finally
+        {
+            if (pidl != 0) Marshal.FreeCoTaskMem(pidl);
+            if (shell != 0) Marshal.Release(shell);
+        }
+    }
     private static T At<T>(nint value, int slot) where T : Delegate =>
         Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(value), slot * nint.Size));
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int Count(nint self, uint flags, out int count);

@@ -8,7 +8,7 @@ public static partial class SyntheticShellSortProbe
 {
     private static readonly List<StreamViewHost> ProductDisplayProcessLifetimeHosts = [];
     internal static int RunProductSizeDisplay(string adapterPath, bool explorerBrowser = false, bool rootControl = false,
-        FolderSizeSource source = FolderSizeSource.BuiltIn, bool sortPolicyExperiment = false, bool? encodedSortPolicy = null, bool columnStateSortPolicy = false, int encodedSortDirection = 1, bool dynamicSortPolicy = false, bool nativeSortEntrypoints = false, uint nativeSortMode = 4, bool shellFolderPartition = false, bool reconcileSortCommands = false)
+        FolderSizeSource source = FolderSizeSource.BuiltIn, bool sortPolicyExperiment = false, bool? encodedSortPolicy = null, bool columnStateSortPolicy = false, int encodedSortDirection = 1, bool dynamicSortPolicy = false, bool nativeSortEntrypoints = false, uint nativeSortMode = 4, bool shellFolderPartition = false, bool reconcileSortCommands = false, bool navigationSelection = false)
     {
         var fixture = Path.Combine(Path.GetTempPath(), "ExplorerDirs-ProductSizeDisplay-" + Guid.NewGuid().ToString("N"));
         nint root = 0, folder = 0, view = 0, parent = 0, browserPointer = 0, folderView = 0;
@@ -122,6 +122,11 @@ public static partial class SyntheticShellSortProbe
                 siblingLists.Add((FindListView(siblingView), (30 + index).ToString()));
             }
             CheckSiblingSizes();
+            if (navigationSelection)
+            {
+                VerifyNavigationSelection(view, listView);
+                return 0;
+            }
             var fileIndex = Array.IndexOf(ReadColumnTextsForRows(listView, 0, 4), "file-2048.bin");
             SetListViewState(listView, fileIndex, LvisSelected | LvisFocused, LvisSelected | LvisFocused);
             File.WriteAllBytes(Path.Combine(fixture, "folder-12288", "data.bin"), new byte[40 * 1024]);

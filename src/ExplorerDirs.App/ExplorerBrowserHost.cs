@@ -5922,13 +5922,56 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     {
         if (!_viewReadiness.IsCurrent(navigationVersion)) return;
         var requested = _focusWhenReady || _restoreFocusAfterNavigation;
+        var inputVersion = Interlocked.Read(ref _nativeUserInputVersion);
         // Retire this visit's intent before native activation can reenter. A
         // hidden tab or a user who moved to another input must not leave stale
         // intent for a later visit. Explicit tab/window activation requests focus anew.
         _focusWhenReady = false;
         _restoreFocusAfterNavigation = false;
         if (requested && !IsRenameEditorFocused() && !IsColumnHeaderFocused())
+        {
             RestoreContentFocusIfNeeded();
+            _ = EnsureNavigationSelectionAsync(navigationVersion, inputVersion);
+        }
+    }
+
+    private async Task EnsureNavigationSelectionAsync(long navigationVersion, long inputVersion)
+    {
+        var browser = _browser;
+        var generation = _viewReadiness.Generation;
+        var started = Stopwatch.GetTimestamp();
+        bool Current()
+        {
+            if (browser is null || !ReferenceEquals(browser, _browser) ||
+                !_viewReadiness.IsCurrent(navigationVersion) || generation != _viewReadiness.Generation ||
+                inputVersion != Interlocked.Read(ref _nativeUserInputVersion) ||
+                !IsVisible || MayRestoreFocus?.Invoke() != true || Window.GetWindow(this) is not { IsActive: true } window)
+                return false;
+            var foreground = GetForegroundWindow();
+            if (foreground == 0 || GetAncestor(foreground, AncestorRootOwner) != new WindowInteropHelper(window).Handle)
+                return false;
+            var content = FindContentFocusWindow();
+            var focused = GetFocus();
+            return content != 0 && (focused == content || IsChild(content, focused)) &&
+                !IsRenameEditorFocused() && !IsColumnHeaderFocused();
+        }
+        try
+        {
+            // NavigationComplete can precede enumeration. Retry only this visit while
+            // it still owns keyboard focus; user input cancels even an empty selection.
+            while (Current() && Stopwatch.GetElapsedTime(started).TotalSeconds < 3)
+            {
+                var view = GetFolderView2Pointer();
+                if (view != 0)
+                {
+                    try { if (ShellSelectionCommands.EnsureNavigationSelection(view, Current)) return; }
+                    finally { Marshal.Release(view); }
+                }
+                await Task.Delay(50);
+            }
+        }
+        catch (COMException) { } // A retired/unavailable view must not affect a newer visit.
+        catch (InvalidComObjectException) { }
     }
 
     private void AttachCurrentViewWindow()
