@@ -1,3 +1,13 @@
+## 2026-11-07 Peer notification classification and pre-close control
+
+Actual trace-enabled peer-close reproduction src/.state/projected-peer-classification.log and projected-peer-classification-timeline.log rejects the suspected CREATE/UPDATE classification explanation for this case: peer context2 publishes CREATE(0x2) then UPDATEITEM(0x2000) for queued-before-close.bin; both delivery calls return, but no peer SFVM_FSNOTIFY callback for this item is recorded. Original context1 and peer context2 are distinct. Thus do not change the known-child classifier based on this failure.
+
+Strengthened the regression with a real creation peer-before-close.bin BEFORE retiring either host, requiring both native views to show it. src/.state/projected-peer-preclose.log / projected-peer-preclose-timeline.log confirms both views received CREATE and UPDATEITEM callbacks and the control passed. After closing original host, peer still times out on queued-before-close.bin. This rules out a peer that never received notifications at startup and narrows the failing boundary to post-peer-close notification reception/subscription lifetime. It does not yet prove exactly which Windows registration/identity is lost.
+
+These repeated actual runs detected user input on the shared input desktop, while foreground was unchanged. Therefore full isolation is NOT passed; the functional failure and delivered-event observations remain diagnostic evidence, not acceptance. Do not weaken guards or repeatedly call this a passing test. No product behavior changes this step; original repeated-retire repair remains partial, and peer-close release gate remains RED. Next inspect DefView notification subscription/root identity across context1 retirement, with before-close success retained as required baseline.
+
+Probe build passed; ordinary HostProbe/App restored (0 warnings/errors), no publication.
+
 ## 2026-11-07 Shared peer close regression and repeated-retirement repair
 
 Extended actual projected lifecycle host probe (only when shared-queue control is enabled): open a second same-root host, wait its full baseline names and monitor readiness, queue a real create, close the first host, require peer observes that create and later create/delete/settlement, then require metadata cleanup. This revealed failure absent from full-App all-window-close checks.

@@ -196,6 +196,10 @@ internal static class ProjectedMonitorLifecycleHostProbe
                     (bool)hostType.GetMethod("IsProjectedUpdateSettled", Instance)!.Invoke(peer, null)!,
                     "same-root peer monitor ready");
                 Console.WriteLine($"projected-shared-peer-identities: first-bridge=0x{(nint)hostType.GetField("_projectedBridge", Instance)!.GetValue(host)!:X};peer-bridge=0x{(nint)hostType.GetField("_projectedBridge", Instance)!.GetValue(peer)!:X}");
+                File.WriteAllBytes(Path.Combine(first, "peer-before-close.bin"), [9]);
+                Wait(() => Names().Contains("peer-before-close.bin") && PeerNames().Contains("peer-before-close.bin"),
+                    "both hosts receive real updates before close");
+                Console.WriteLine("projected-shared-peer-before-close: PASS both live views received the same physical creation");
             }
             var closingQueue = Queue()!;
             finalCapability = (nint)hostType.GetField("_projectedBridge", Instance)!.GetValue(host)!;
