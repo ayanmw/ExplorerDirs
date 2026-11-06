@@ -206,6 +206,34 @@ internal static class AppSessionProcessProbe
         }
         var additions = session.Panes.Select((tabs, pane) => Path.Combine(
             tabs[session.ActiveTabIndices![pane]].Path, "external-notification-fixture")).ToArray();
+        // Observe OS directory events independently of Shell delivery. This is evidence
+        // only: never emit replacement notifications or change reconciliation deadlines.
+        var observedChanges = 0;
+        FileSystemWatcher Observe(int pane)
+        {
+            var watcher = new FileSystemWatcher(Path.GetDirectoryName(additions[pane])!)
+            {
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite,
+                IncludeSubdirectories = false
+            };
+            void Record(string kind, string? name)
+            {
+                if (name?.StartsWith("external-", StringComparison.OrdinalIgnoreCase) != true) return;
+                if (Interlocked.Increment(ref observedChanges) <= 512)
+                    Console.WriteLine($"app-filesystem-observed: pane={pane + 1}; kind={kind}; item={name}; tick={Environment.TickCount64}");
+            }
+            watcher.Created += (_, change) => Record("create", change.Name);
+            watcher.Deleted += (_, change) => Record("delete", change.Name);
+            watcher.Changed += (_, change) => Record("change", change.Name);
+            watcher.Renamed += (_, change) => Record("rename", change.Name);
+            watcher.Error += (_, error) => Console.WriteLine($"app-filesystem-observer-error: pane={pane + 1}; error={error.GetException().GetType().Name}");
+            watcher.EnableRaisingEvents = true;
+            return watcher;
+        }
+        using var observer1 = Observe(0);
+        using var observer2 = Observe(1);
+        using var observer3 = Observe(2);
+        using var observer4 = Observe(3);
         var grouped = VisibleFileViews(window).Where(list => Message(list, 0x10AF) == 1).ToArray();
         if (grouped.Length != 1) throw new InvalidOperationException("Expected exactly one grouped pane before external changes.");
         var transientEmptySamples = 0;
