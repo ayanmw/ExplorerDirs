@@ -18,7 +18,7 @@ internal sealed partial class ExplorerBrowserHost
     private IDisposable? _projectedDispatcherTiming;
     private bool _projectedNeedsRecovery;
     private uint _projectedDeliveryPending;
-    private static readonly Guid ProjectedBridgeExperimentId = new("57561654-2DB4-42F9-BC73-7A67F5FD8B38");
+    private static readonly Guid ProjectedBridgeExperimentId = new("F7936234-A72D-40FB-A169-21761B3D7126");
 
     private bool IsProjectedUpdateSettled() => !_projectedNeedsRecovery && _projectedDeliveryPending == 0 && (_projectedQueue?.IsSettled ?? true);
 
@@ -121,70 +121,89 @@ internal sealed partial class ExplorerBrowserHost
                 if (Volatile.Read(ref watcherError) is { } error) throw error;
                 if (dispatch.PendingCount > 0 && progress.Elapsed > TimeSpan.FromSeconds(10))
                     throw new TimeoutException($"Projected experiment confirmation timed out; pending={dispatch.PendingCount}; delivery-pending={_projectedDeliveryPending}; last-unconfirmed={dispatch.LastUnconfirmed}; {queue.DescribePathForDiagnostic(dispatch.LastUnconfirmed)}.");
-                dispatch.Advance(Current,
-                    work => Measure(ref nativeTicks, () =>
-                    {
-                        progress.Restart();
-                        if (enumerationBaseline is null)
+                ulong submission = 0;
+                if (Environment.GetEnvironmentVariable("EXPLORERDIRS_PROJECTED_ATOMIC_BATCH_CONTROL") == "1")
+                    Marshal.ThrowExceptionForHR(GetMethod<ProjectedBeginBatch>(bridge, 13)(bridge, out submission));
+                var submissionCompleted = false;
+                try
+                {
+                    dispatch.Advance(Current,
+                        work => Measure(ref nativeTicks, () =>
                         {
-                            Marshal.ThrowExceptionForHR(GetMethod<ProjectedEnumerationCount>(bridge, 5)(bridge, out var initial));
-                            if (!Current()) return new ProjectedDispatchResult(0, Reconciled: true);
-                            enumerationBaseline = initial;
-                        }
-                        dispatched++;
-                        ulong ticket = 0;
-                        var result = work.Kind switch
-                        {
-                            ProjectedChangeKind.Created or ProjectedChangeKind.Changed => GetMethod<ProjectedArrival>(bridge, 8)(bridge, work.Name),
-                            ProjectedChangeKind.Deleted => GetMethod<ProjectedRemoval>(bridge, 4)(bridge, work.Name, out ticket),
-                            _ => GetMethod<ProjectedRename>(bridge, 9)(bridge, work.Name, work.NewName!, out ticket)
-                        };
-                        if (Current() && (work.Kind is ProjectedChangeKind.Created or ProjectedChangeKind.Changed) &&
-                            (result is unchecked((int)0x80070002) or unchecked((int)0x80070003)))
-                        {
-                            // The path may have disappeared after the watcher queued a
-                            // property event. Reconcile the observed row instead of stopping.
-                            result = GetMethod<ProjectedRemoval>(bridge, 4)(bridge, work.Name, out ticket);
-                            if (result == 0) return new ProjectedDispatchResult(ticket, ConfirmationKind: ProjectedChangeKind.Deleted);
-                            if (result == unchecked((int)0x80070490) && Current() && !ProjectedRowExists(viewWindow, work.Name, Current))
+                            progress.Restart();
+                            if (enumerationBaseline is null)
+                            {
+                                Marshal.ThrowExceptionForHR(GetMethod<ProjectedEnumerationCount>(bridge, 5)(bridge, out var initial));
+                                if (!Current()) return new ProjectedDispatchResult(0, Reconciled: true);
+                                enumerationBaseline = initial;
+                            }
+                            dispatched++;
+                            ulong ticket = 0;
+                            var result = work.Kind switch
+                            {
+                                ProjectedChangeKind.Created or ProjectedChangeKind.Changed => GetMethod<ProjectedArrival>(bridge, 8)(bridge, work.Name),
+                                ProjectedChangeKind.Deleted => GetMethod<ProjectedRemoval>(bridge, 4)(bridge, work.Name, out ticket),
+                                _ => GetMethod<ProjectedRename>(bridge, 9)(bridge, work.Name, work.NewName!, out ticket)
+                            };
+                            if (Current() && (work.Kind is ProjectedChangeKind.Created or ProjectedChangeKind.Changed) &&
+                                (result is unchecked((int)0x80070002) or unchecked((int)0x80070003)))
+                            {
+                                // The path may have disappeared after the watcher queued a
+                                // property event. Reconcile the observed row instead of stopping.
+                                result = GetMethod<ProjectedRemoval>(bridge, 4)(bridge, work.Name, out ticket);
+                                if (result == 0) return new ProjectedDispatchResult(ticket, ConfirmationKind: ProjectedChangeKind.Deleted);
+                                if (result == unchecked((int)0x80070490) && Current() && !ProjectedRowExists(viewWindow, work.Name, Current))
+                                    return new ProjectedDispatchResult(0, Reconciled: true);
+                                throw new InvalidOperationException($"Projected missing-item reconciliation: 0x{result:X8}");
+                            }
+                            if (result == unchecked((int)0x80070490) && work.Kind == ProjectedChangeKind.Deleted &&
+                                Current() && !ProjectedRowExists(viewWindow, work.Name, Current))
                                 return new ProjectedDispatchResult(0, Reconciled: true);
-                            throw new InvalidOperationException($"Projected missing-item reconciliation: 0x{result:X8}");
-                        }
-                        if (result == unchecked((int)0x80070490) && work.Kind == ProjectedChangeKind.Deleted &&
-                            Current() && !ProjectedRowExists(viewWindow, work.Name, Current))
-                            return new ProjectedDispatchResult(0, Reconciled: true);
-                        if (result == 1 && work.Kind == ProjectedChangeKind.Deleted && Current())
+                            if (result == 1 && work.Kind == ProjectedChangeKind.Deleted && Current())
+                            {
+                                // Native refusal confirms the path exists again. Publish its
+                                // current facts; never acknowledge the obsolete removal.
+                                var reconciled = GetMethod<ProjectedArrival>(bridge, 8)(bridge, work.Name);
+                                if (reconciled != 0) throw new InvalidOperationException($"Projected recreate: 0x{reconciled:X8}");
+                                return new ProjectedDispatchResult(0, Reconciled: true);
+                            }
+                            if (result != 0) throw new InvalidOperationException($"Projected {work.Kind}: 0x{result:X8}");
+                            return new ProjectedDispatchResult(ticket);
+                        }),
+                        work => Measure(ref readTicks, () =>
                         {
-                            // Native refusal confirms the path exists again. Publish its
-                            // current facts; never acknowledge the obsolete removal.
-                            var reconciled = GetMethod<ProjectedArrival>(bridge, 8)(bridge, work.Name);
-                            if (reconciled != 0) throw new InvalidOperationException($"Projected recreate: 0x{reconciled:X8}");
-                            return new ProjectedDispatchResult(0, Reconciled: true);
-                        }
-                        if (result != 0) throw new InvalidOperationException($"Projected {work.Kind}: 0x{result:X8}");
-                        return new ProjectedDispatchResult(ticket);
-                    }),
-                    work => Measure(ref readTicks, () =>
-                    {
-                        var ready = work.Kind switch
+                            var ready = work.Kind switch
+                            {
+                                ProjectedChangeKind.Created => ProjectedRowExists(viewWindow, work.Name, Current) || ConfirmProjectedSupersededCreation(queue, work, viewWindow, path, Current),
+                                ProjectedChangeKind.Deleted => !ProjectedRowExists(viewWindow, work.Name, Current),
+                                ProjectedChangeKind.Renamed => !ProjectedRowExists(viewWindow, work.Name, Current) && ProjectedRowExists(viewWindow, work.NewName!, Current),
+                                _ => true
+                            };
+                            if (!ready) notReadyChecks++;
+                            return ready;
+                        }),
+                        (work, ticket) => Measure(ref ackTicks, () =>
                         {
-                            ProjectedChangeKind.Created => ProjectedRowExists(viewWindow, work.Name, Current) || ConfirmProjectedSupersededCreation(queue, work, viewWindow, path, Current),
-                            ProjectedChangeKind.Deleted => !ProjectedRowExists(viewWindow, work.Name, Current),
-                            ProjectedChangeKind.Renamed => !ProjectedRowExists(viewWindow, work.Name, Current) && ProjectedRowExists(viewWindow, work.NewName!, Current),
-                            _ => true
-                        };
-                        if (!ready) notReadyChecks++;
-                        return ready;
-                    }),
-                    (work, ticket) => Measure(ref ackTicks, () =>
+                            var result = GetMethod<ProjectedAcknowledge>(bridge, 7)(bridge, work.Name, ticket);
+                            // Native S_FALSE preserves a newer generation or an already
+                            // retired fact. It emits no notification and is safe to retain.
+                            if (result == 1) return 0;
+                            if (result != 0) throw new InvalidOperationException($"Projected confirmation: 0x{result:X8}");
+                            return 0;
+                        }));
+                    submissionCompleted = true;
+                    }
+                finally
+                {
+                    if (submission != 0)
                     {
-                        var result = GetMethod<ProjectedAcknowledge>(bridge, 7)(bridge, work.Name, ticket);
-                        // Native S_FALSE preserves a newer generation or an already
-                        // retired fact. It emits no notification and is safe to retain.
-                        if (result == 1) return 0;
-                        if (result != 0) throw new InvalidOperationException($"Projected confirmation: 0x{result:X8}");
-                        return 0;
-                    }));
+                        var commit = submissionCompleted && Current();
+                        var result = GetMethod<ProjectedEndBatch>(bridge, 14)(bridge, submission, commit);
+                        // Retired scopes cannot publish; cancellation must not mask the
+                        // original dispatch exception or an already newer navigation.
+                        if (commit && Current()) Marshal.ThrowExceptionForHR(result);
+                    }
+                }
                 if (Current() && enumerationBaseline is { } baseline)
                 {
                     Marshal.ThrowExceptionForHR(GetMethod<ProjectedDeliveryStatus>(bridge, 12)(bridge, out _projectedDeliveryPending));
@@ -356,6 +375,8 @@ internal sealed partial class ExplorerBrowserHost
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProjectedPause(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProjectedEnumerationCount(nint self, out uint count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProjectedDeliveryStatus(nint self, out uint pending);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProjectedBeginBatch(nint self, out ulong token);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProjectedEndBatch(nint self, ulong token, [MarshalAs(UnmanagedType.Bool)] bool commit);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProjectedArrival(nint self, [MarshalAs(UnmanagedType.LPWStr)] string name);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProjectedRemoval(nint self, [MarshalAs(UnmanagedType.LPWStr)] string name, out ulong ticket);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProjectedRename(nint self, [MarshalAs(UnmanagedType.LPWStr)] string oldName, [MarshalAs(UnmanagedType.LPWStr)] string newName, out ulong ticket);

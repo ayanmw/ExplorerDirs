@@ -4,7 +4,7 @@ using ExplorerDirs.NativeProbe;
 
 public static partial class SyntheticShellSortProbe
 {
-    private static readonly Guid ProjectedNotificationBridgeId = new("57561654-2DB4-42F9-BC73-7A67F5FD8B38");
+    private static readonly Guid ProjectedNotificationBridgeId = new("F7936234-A72D-40FB-A169-21761B3D7126");
 
     private static Action VerifyProjectedNotificationBridge(nint shell, nint list, string fixture, int fillerCount)
     {
@@ -15,6 +15,7 @@ public static partial class SyntheticShellSortProbe
             Check(At<GetProjectedBridge>(folderView, 5)(folderView, in ProjectedNotificationBridgeId, out bridge));
             Check(ShellFolderViewOptions.SetNoEnumRefresh(folderView, true));
             Check(At<PauseProjectedPhysicalNotifications>(bridge, 3)(bridge));
+            VerifyProjectedBatchScope(bridge);
             string[] Names() => ReadColumnTextsForRows(list, 0, unchecked((int)SendMessageW(list, 0x1004, 0, 0)));
             void PumpUntil(Func<bool> condition)
             {
@@ -198,6 +199,46 @@ public static partial class SyntheticShellSortProbe
             Marshal.Release(folderView);
         }
     }
+    private static void VerifyProjectedBatchScope(nint bridge)
+    {
+        const string control = "EXPLORERDIRS_PROJECTED_BACKGROUND_DELIVERY_CONTROL";
+        var saved = Environment.GetEnvironmentVariable(control);
+        var beginDelivery = At<PauseProjectedPhysicalNotifications>(bridge, 10);
+        var begin = At<BeginProjectedBatch>(bridge, 13);
+        var end = At<EndProjectedBatch>(bridge, 14);
+        var status = At<ProjectedBatchStatus>(bridge, 12);
+        try
+        {
+            Environment.SetEnvironmentVariable(control, "1");
+            Check(beginDelivery(bridge));
+            Check(begin(bridge, out var first));
+            if (first == 0 || begin(bridge, out var nested) != unchecked((int)0x800700AA) || nested != 0)
+                throw new InvalidOperationException("Native batch accepted a nested scope.");
+            Check(At<RemoveProjectedChild>(bridge, 8)(bridge, "folder-25600"));
+            Check(status(bridge, out var staged));
+            if (staged != 1) throw new InvalidOperationException("Unsubmitted payload is absent from pending status.");
+            Check(end(bridge, first, false));
+            Check(status(bridge, out staged));
+            if (staged != 0) throw new InvalidOperationException("Cancelled payload was retained for delivery.");
+            Check(begin(bridge, out var second));
+            if (second == first || end(bridge, first, true) != unchecked((int)0x800401FD))
+                throw new InvalidOperationException("A stale batch token consumed its successor.");
+            Check(end(bridge, second, false));
+            Check(begin(bridge, out var retired));
+            Check(At<PauseProjectedPhysicalNotifications>(bridge, 11)(bridge));
+            if (end(bridge, retired, true) != unchecked((int)0x800401FD))
+                throw new InvalidOperationException("Retired batch was committed.");
+            Console.WriteLine("projected-batch-scope: PASS staged pending; cancellation; nested/stale/retired scopes rejected; no notification submitted");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(control, saved);
+            Check(beginDelivery(bridge));
+        }
+    }
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int BeginProjectedBatch(nint self, out ulong token);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EndProjectedBatch(nint self, ulong token, [MarshalAs(UnmanagedType.Bool)] bool commit);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProjectedBatchStatus(nint self, out uint pending);
     [DllImport("kernel32.dll", EntryPoint = "MoveFileExW", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)] private static extern bool MoveProjectedCaseOnly(string source, string destination, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int RenameProjectedChild(nint self, [MarshalAs(UnmanagedType.LPWStr)] string oldLeaf, [MarshalAs(UnmanagedType.LPWStr)] string newLeaf, out ulong oldTicket);

@@ -3463,7 +3463,7 @@ namespace
 #endif
 #if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
     // Isolated prototype ABI: not part of the shipped adapter contract.
-    struct __declspec(uuid("57561654-2DB4-42F9-BC73-7A67F5FD8B38")) IExplorerDirsProjectedNotificationProbe : public IUnknown
+    struct __declspec(uuid("F7936234-A72D-40FB-A169-21761B3D7126")) IExplorerDirsProjectedNotificationProbe : public IUnknown
     {
         virtual HRESULT STDMETHODCALLTYPE PausePhysicalNotificationsForProbe() = 0;
         virtual HRESULT STDMETHODCALLTYPE NotifyProjectedRemovalForProbe(PCWSTR leaf, ULONGLONG* ticket) = 0;
@@ -3475,6 +3475,8 @@ namespace
         virtual HRESULT STDMETHODCALLTYPE BeginProjectedDeliveryForProbe() = 0;
         virtual HRESULT STDMETHODCALLTYPE RetireProjectedDeliveryForProbe() = 0;
         virtual HRESULT STDMETHODCALLTYPE GetProjectedDeliveryStatusForProbe(ULONG* pending) = 0;
+        virtual HRESULT STDMETHODCALLTYPE BeginProjectedBatchForProbe(ULONGLONG* token) = 0;
+        virtual HRESULT STDMETHODCALLTYPE EndProjectedBatchForProbe(ULONGLONG token, BOOL commit) = 0;
     };
 #endif
     class SyntheticSortFolder final : public IShellFolder2, public IPersistFolder2, public IShellFolderViewCB
@@ -5382,6 +5384,8 @@ namespace
         HRESULT STDMETHODCALLTYPE RetireProjectedDeliveryForProbe() override
         {
             _projectedDeliveryRetired = true;
+            _projectedBatchToken = 0;
+            _projectedBatch.clear();
             if (_projectedDelivery) _projectedDelivery->Retire();
             FlushProjectedDeliveryTraceForProbe();
             return S_OK;
@@ -5424,9 +5428,33 @@ namespace
             if (_projectedDeliveryRetired) return CO_E_OBJNOTCONNECTED;
             if (!_projectedDelivery) return S_OK;
             const auto state = _projectedDelivery->Read();
-            *pending = static_cast<ULONG>(state.queued + (state.inFlight ? 1 : 0));
+            *pending = static_cast<ULONG>(state.queued + (state.inFlight ? 1 : 0) + _projectedBatch.size());
             if (*pending == 0 || FAILED(state.failure)) FlushProjectedDeliveryTraceForProbe();
             return state.failure;
+        }
+        HRESULT STDMETHODCALLTYPE BeginProjectedBatchForProbe(ULONGLONG* token) override
+        {
+            if (!token) return E_POINTER;
+            *token = 0;
+            if (_projectedDeliveryRetired) return CO_E_OBJNOTCONNECTED;
+            if (!_projectedDelivery) return E_NOTIMPL;
+            if (_projectedBatchToken) return HRESULT_FROM_WIN32(ERROR_BUSY);
+            static std::atomic<ULONGLONG> next{ 0 };
+            *token = _projectedBatchToken = ++next;
+            return S_OK;
+        }
+        HRESULT STDMETHODCALLTYPE EndProjectedBatchForProbe(ULONGLONG token, BOOL commit) override
+        {
+            if (!token || token != _projectedBatchToken) return CO_E_OBJNOTCONNECTED;
+            _projectedBatchToken = 0;
+            auto batch = std::move(_projectedBatch);
+            _projectedBatch.clear();
+            if (!commit) return S_OK;
+            if (_projectedDeliveryRetired || !_projectedDelivery) return CO_E_OBJNOTCONNECTED;
+            const auto result = _projectedDelivery->EnqueueBatch(batch);
+            if (SUCCEEDED(result))
+                for (const auto& payload : batch) TraceProjectedDeliveryForProbe("accepted", payload);
+            return result;
         }
         HRESULT DeliverProjectedNotificationForProbe(LONG event, PCIDLIST_ABSOLUTE first, PCIDLIST_ABSOLUTE second = nullptr)
         {
@@ -5450,6 +5478,12 @@ namespace
             {
                 bytes = reinterpret_cast<const BYTE*>(second);
                 payload.second.assign(bytes, bytes + ILGetSize(second));
+            }
+            if (_projectedBatchToken)
+            {
+                if (_projectedBatch.size() >= 8192) return HRESULT_FROM_WIN32(ERROR_BUFFER_OVERFLOW);
+                _projectedBatch.push_back(std::move(payload));
+                return S_OK;
             }
             const auto result = _projectedDelivery->Enqueue(payload);
             if (SUCCEEDED(result)) TraceProjectedDeliveryForProbe("accepted", payload);
@@ -7122,6 +7156,8 @@ namespace
         HWND _notificationWindow = nullptr;
 #if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
         std::shared_ptr<ProjectedDeliveryExperiment::Queue> _projectedDelivery;
+        ULONGLONG _projectedBatchToken = 0;
+        std::vector<ProjectedDeliveryExperiment::Payload> _projectedBatch;
         bool _projectedDeliveryRetired = false;
 #endif
         ULONG _backingNotificationRegistration = 0;
