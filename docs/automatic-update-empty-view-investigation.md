@@ -118,3 +118,12 @@ Microsoft SHChangeNotifyRegister文档说明通知可合并为UPDATEDIR：https:
 该轮仍目录删除失败，独立Shell收到RMDIR，产品无对应记录；共享输入变化，隔离守卫不通过。日志未达上限。需继续检查恢复链，不能宣称已修复。
 
 另核查旧IShellFolderView.RemoveObject方案：微软说明IShellFolderView从Windows 7起不再供使用，应使用IFolderView/IFolderView2（https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nn-shlobj_core-ishellfolderview），不采用旧接口作为本项目支持基线。没有因这一探索加入直接操纵原生列表或全视图刷新。
+
+
+## 恢复父目录元数据通知的隔离反例
+
+完整恢复成功日志中，首次RMDIR在495988328出现，早于App首次Refresh入口495988390，不能把所有成功通知简单说成由完整Refresh调用产生。源码差异还包括Changed批处理在非soft时按排序/分组需要发送父目录UPDATEDIR。
+
+隔离控制仅移除该通知分支的!_softRefresh条件，保留soft=True、原生NoEnumRefresh及禁止自动完整恢复。准备载荷`src/.state/gui-smoke/20261106-075508-645-28bb93`，日志`src/.state/changed-directory-notify-control.log`。分组窗格新增目录后仍1027行，其他三窗格1028，15秒create超时；尚未进入delete，不能称为本候选删除反例或删除成功。App刷新请求日志为空，native确实收到至少一次UPDATEDIR。共享输入变化，隔离守卫失败。候选源码已撤回，补丁`src/.state/changed-directory-notify-control.patch`，正常App重新构建；不恢复这一产品分支。
+
+后续评审：物理FS事件已经可靠到达managed观察器，而投影命名空间不能仅依赖物理Shell订阅保证逐项到达。需要研究由当前投影目录直接发布对应项目的Shell命名空间变化；保持SHChangeNotify等受支持接口，准确保存项目类型/身份并验证同名重建、导航退休、批量增删及分组/选区。不能用旧IShellFolderView.RemoveObject、直接ListView删除、扩大同步扫描上限或自动整页刷新替代目标。评审/原型不是产品修复完成。
