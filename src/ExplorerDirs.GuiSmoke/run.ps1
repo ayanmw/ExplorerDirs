@@ -7,12 +7,16 @@ param(
     [switch]$AllowInteractiveDesktopControl,
     [switch]$PrepareOnly,
     [switch]$CaptureFocusTrace,
-    [switch]$ProjectedNotificationExperiment
+    [switch]$ProjectedNotificationExperiment,
+    [switch]$RefreshOriginTrace
 )
 
 $ErrorActionPreference = 'Stop'
 if ($ProjectedNotificationExperiment -and -not $PrepareOnly) {
     throw 'Projected notification payloads are preparation-only; use the private Desktop probe for execution.'
+}
+if ($RefreshOriginTrace -and -not $PrepareOnly) {
+    throw 'Refresh origin tracing is preparation-only; execute through a private Desktop probe.'
 }
 if ($PrepareOnly -and $AllowInteractiveDesktopControl) {
     throw 'Choose preparation only or interactive execution, not both.'
@@ -141,7 +145,8 @@ foreach ($tabIndex in 1..98) {
 dotnet publish (Join-Path $projectRoot 'src\ExplorerDirs.App\ExplorerDirs.App.csproj') `
     --configuration Release --self-contained false --output $appDirectory `
     "-p:Version=$buildVersion" -p:IncludeSourceRevisionInInformationalVersion=false `
-    "-p:ProjectedNotificationExperiment=$($ProjectedNotificationExperiment.IsPresent)"
+    "-p:ProjectedNotificationExperiment=$($ProjectedNotificationExperiment.IsPresent)" `
+    "-p:RefreshOriginTrace=$($RefreshOriginTrace.IsPresent)"
 if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed.' }
 $exe = Join-Path $appDirectory 'ExplorerDirs.App.exe'
 if (-not (Test-Path -LiteralPath $exe)) { throw "Missing test executable: $exe" }
@@ -209,6 +214,7 @@ $manifest = [ordered]@{
     SchemaVersion = 1
     Status = 'prepared-not-run'
     ProjectedNotificationExperiment = [bool]$ProjectedNotificationExperiment
+    RefreshOriginTrace = [bool]$RefreshOriginTrace
     PreparedAtUtc = [DateTime]::UtcNow.ToString('o')
     SourceCommit = $sourceCommit.Trim()
     SourceWorkingTreeDirty = [bool]$sourceChanges

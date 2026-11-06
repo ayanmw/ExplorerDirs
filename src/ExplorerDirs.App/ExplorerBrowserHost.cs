@@ -3189,21 +3189,22 @@ internal sealed partial class ExplorerBrowserHost : HwndHost, ExplorerBrowserHos
                     if (view == 0) continue;
                     try
                     {
+                        var lastChange = Interlocked.Read(ref _directoryChangeLastEventAt);
+                        bool Stable() => Current() && lastChange == Interlocked.Read(ref _directoryChangeLastEventAt);
                         var count = ReadDirectoryMonitorItemCount();
-                        if (count is null or <= 0) continue;
-                        var ready = await ShellSizeSortOrder.AreValuesReadyAsync(view, count.Value, Current, allowUnavailable: true);
+                        if (count is null or <= 0 || !Stable()) continue;
+                        var ready = await ShellSizeSortOrder.AreValuesReadyAsync(view, count.Value, Stable, allowUnavailable: true);
                         if (!Current()) return;
-                        if (ready != true) continue;
+                        if (ready != true || !Stable()) continue;
                         // Observe before changing the sort: the setter can temporarily
                         // tear down otherwise valid row groups and make a late refresh look necessary.
                         if (grouped && TryReadGroup(out var activeGroup, out var ascending) && activeGroup is not null &&
                             activeGroup == _viewState.GroupKey && ascending == _viewState.GroupAscending)
                         {
-                            var lastChange = Interlocked.Read(ref _directoryChangeLastEventAt);
-                            bool Stable() => Current() && lastChange == Interlocked.Read(ref _directoryChangeLastEventAt);
                             var groups = await ShellGroupedViewReadiness.ReadMaterializedGroupsAsync(_viewWindow, count.Value, Stable,
                                 step => RecordInitialSortRecovery($"{serial}:group-probe:{step}"));
                             if (!Current()) return;
+                            if (!Stable()) continue;
                             var ordered = groups is not null
                                 ? await ShellSizeSortOrder.IsOrderedWithinGroupsAsync(view, count.Value, sort.Direction,
                                     _viewState.MixedSizeSort, groups, Stable) : null;
@@ -3217,7 +3218,28 @@ internal sealed partial class ExplorerBrowserHost : HwndHost, ExplorerBrowserHos
                                 return;
                             }
                         }
+                        if (!grouped && sort.Key == FolderSizeLocationPolicy.SizeColumn && _viewState.SortColumns.Count == 1)
+                        {
+                            // Native notifications may already have sorted the now-ready
+                            // values. Avoid tearing down rows just to reapply that order.
+                            var ordered = await ShellSizeSortOrder.IsOrderedAsync(view, count.Value, sort.Direction,
+                                _viewState.MixedSizeSort, Stable);
+                            if (!Current()) return;
+                            if (!Stable()) continue;
+                            RecordInitialSortRecovery($"{serial}:row-observation;ordered={ordered};direction={sort.Direction};mixed={_viewState.MixedSizeSort};rows={count}");
+                            if (ordered == true && _initialSortIncorrectResultsForProbe == 0)
+                            {
+                                if (selection is not null) RestoreInitialVirtualSortSelection(selection, Current);
+                                RecordInitialSortRecovery($"{serial}:rows-already-ordered");
+                                RecordInitialSortRecovery($"{serial}:direct-finish");
+                                return;
+                            }
+                        }
+                        // The asynchronous value/group reads must describe this row
+                        // set, not an earlier set from before a watcher update.
+                        if (ReadDirectoryMonitorItemCount() != count || !Stable()) continue;
                         selection ??= ShellViewSelectionSnapshot.Capture(view);
+                        if (!Stable()) continue;
                         var sorts = _viewState.SortColumns.Count > 0 ? _viewState.SortColumns : new[] { sort };
                         var nameKey = new PropertyKeyState(new Guid("b725f130-47ef-101a-a5f1-02608c9eebac"), 10);
                         var target = new NativeViewStateTarget(view, Current, UpdateFolderSizeSortPolicy);
@@ -3234,6 +3256,7 @@ internal sealed partial class ExplorerBrowserHost : HwndHost, ExplorerBrowserHos
                         }
                         finally { EndInitialSortTransient(serial); }
                         if (!Current()) return;
+                        if (!Stable()) continue;
                         if (grouped)
                         {
                             // Cold/unordered grouping still requires its existing recovery.
@@ -3243,12 +3266,14 @@ internal sealed partial class ExplorerBrowserHost : HwndHost, ExplorerBrowserHos
                         {
                             await Task.Delay(350);
                             if (!Current()) return;
-                            var ordered = await ShellSizeSortOrder.IsOrderedAsync(view, count.Value, sort.Direction, _viewState.MixedSizeSort, Current);
+                            var ordered = await ShellSizeSortOrder.IsOrderedAsync(view, count.Value, sort.Direction, _viewState.MixedSizeSort, Stable);
                             if (!Current()) return;
+                            if (!Stable()) continue;
                             if (_initialSortIncorrectResultsForProbe > 0 && ordered is not null)
                             { _initialSortIncorrectResultsForProbe--; ordered = false; }
-                            var knownValues = await ShellSizeSortOrder.AreValuesReadyAsync(view, count.Value, Current);
+                            var knownValues = await ShellSizeSortOrder.AreValuesReadyAsync(view, count.Value, Stable);
                             if (!Current()) return;
+                            if (!Stable()) continue;
                             if (ordered == false || ordered is null && knownValues == true)
                             {
                                 if (++attempts < 3) continue;
@@ -6107,7 +6132,7 @@ internal sealed partial class ExplorerBrowserHost : HwndHost, ExplorerBrowserHos
         // Diagnostic-only: correlate zero-row samples with native clear/count/sort
         // commands without asking Shell for state inside its message dispatch.
         // These are received commands, not proof of forwarding or visible painting.
-        if (message is not (0x000B or 0x1009 or 0x102F or 0x1030 or 0x1051) ||
+        if (message is not (0x000B or 0x1008 or 0x1009 or 0x102F or 0x1030 or 0x1051) ||
             _listStructureTraceEntries >= 512 || WindowClass(hwnd) != "SysListView32") return;
         if (message == 0x102F) // LVM_SETITEMCOUNT: skip incremental positive startup counts.
         {
@@ -6120,6 +6145,9 @@ internal sealed partial class ExplorerBrowserHost : HwndHost, ExplorerBrowserHos
         {
             File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "view-structure-origin.log"),
                 $"{Environment.TickCount64} host={GetHashCode():X};generation={_viewReadiness.Generation};hwnd={hwnd:X};received={message:X};wParam={wParam.ToInt64()};lParam={lParam:X};sort-hold={_sortPaintLease is not null}\n");
+            if (message == 0x1009 || message == 0x102F && wParam == IntPtr.Zero)
+                File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "view-structure-origin.log"),
+                    $"{Environment.TickCount64} clear-stack host={GetHashCode():X};hwnd={hwnd:X}\n{new StackTrace(1, false)}\n");
         }
         catch (IOException) { _listStructureTraceEntries = 512; }
         catch (UnauthorizedAccessException) { _listStructureTraceEntries = 512; }

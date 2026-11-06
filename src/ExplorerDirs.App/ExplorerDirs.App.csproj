@@ -16,6 +16,9 @@
   <PropertyGroup Condition="'$(ProjectedNotificationExperiment)' == 'true'">
     <DefineConstants>$(DefineConstants);EXPLORERDIRS_PROJECTED_NOTIFY_EXPERIMENT</DefineConstants>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(RefreshOriginTrace)' == 'true'">
+    <DefineConstants>$(DefineConstants);EXPLORERDIRS_REFRESH_ORIGIN_TRACE</DefineConstants>
+  </PropertyGroup>
   <ItemGroup Condition="'$(ProjectedNotificationExperiment)' == 'true'">
     <Compile Include="..\ExplorerDirs.NativeProbe\ProjectedChangeLedger.cs" Link="Experiments\ProjectedChangeLedger.cs" />
     <Compile Include="..\ExplorerDirs.NativeProbe\ProjectedChangeDispatch.cs" Link="Experiments\ProjectedChangeDispatch.cs" />

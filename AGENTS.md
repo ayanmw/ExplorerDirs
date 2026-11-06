@@ -31,6 +31,8 @@
 
 ## Product boundary
 
+- Initial asynchronous size-sort recovery must discard observations when directory events or row counts change during the read. For a single ungrouped Size key, verify raw native order before resetting sort columns; an already correct order needs no mutation. Do not use primary-size order alone to skip secondary-key or other-column restoration. Experimental watcher ingress must update the same change stamp used by recovery.
+
 - In the projected monitor experiment, manual-refresh recovery belongs to the captured browser/navigation/monitor version; only matching successful completion can restart it. Successful complete folders+files enumeration may replace notification facts after the pre-I/O generation check; partial enumeration merges positives only. Test file-to-folder replacement after paused deletion/F5 so stale type facts cannot silently block later updates.
 
 - Projected event capacity includes queued and in-flight work. Capacity overflow must explicitly retire the visit and clear its records, never evict arbitrary events and continue with an incomplete history. Preserve the overflow reason through late completion/close; test recovery on a new real visit separately from synthetic queue injection. No automatic full-view refresh fallback is authorized by overflow.

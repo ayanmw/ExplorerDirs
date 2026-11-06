@@ -1,5 +1,17 @@
 # 自动变化期间短暂零行：刷新来源调查
 
+## 2026-11-06 进一步定位与修正
+
+新增PrepareOnly的RefreshOriginTrace构建开关，保留刷新请求/原生进入返回及列表删除/清空/计数/排序消息；清空消息附受限托管栈，普通构建排除。`src/.state/projected-zero-trace.log` 的32文件场景在批量删除失败；原生枚举仍8→8，事件曾确认，但实际行仍残留。refresh-origin.log在tick509369000记录ScheduleInitialVirtualSort.RecoverAsync发起manual=False/full=True/soft=True的请求，原生Refresh返回S_FALSE。该轮未复现零行，不据此宣称此栈是此前所有零行的唯一原因。
+
+源码核实两处扰动来源：未分组恢复不先验证当前行序便重设排序；实验Watcher没有更新既有_directoryChangeLastEventAt，异步值/分组读取后也未全面拒绝内容变化。因此普通恢复路径增加一致性检查；单键Size且已正确排序时不操作，保留未知/错误排序和多键/其他列的既有恢复；实验回调更新同一时间戳。
+
+实际HostProbe已排序测试最初使用了文件夹大小尚未就绪的错误夹具（空大小、folder-large在前），该失败不算正确的已排序红灯。修正夹具为原生5|17|29、混排升序后，移除no-op分支的负对照 `ordered-recovery-negative-ready.log` 确定失败，恢复分支后 `ordered-recovery-normal-final.log` 通过行序/选区/列标题点击/全局混排/关闭验证。`ordered-recovery-grouped-final.log` 的已有分组no-op回归通过，两轮功能断言通过、共享输入守卫失败。
+
+`projected-zero-fixed-trace.log` 两独立完整App进程的1025填充文件/32项增删及名称、枚举/确认/分组/会话通过，自动阶段未采样零行，未记录那条延后启动刷新请求；共享前台/输入守卫失败，整体退出1。批量新增仍慢，第二进程约11690ms，不宣称性能目标已达成，记录诊断开销边界。可见闪烁及所有零行原因仍未关闭。
+
+39项后台检查整轮通过：`src/.state/background-checks/20261106-193706-489ccecf514c475385d287a12f8c124b/summary.json`。最后只收窄no-op到单键Size并重新构建，未重跑整轮。普通输出不含诊断/通知实验入口，原生普通DLL哈希未变，未发布。
+
 2026-11-06，基于00da1e3f。本批定位并补诊断，不声明解决空白或删除问题。
 
 ## 当前实测

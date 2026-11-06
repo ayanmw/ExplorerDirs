@@ -151,6 +151,20 @@ internal static class SortPresentationHostProbe
             Wait(() => Rows().Names.ElementAtOrDefault(1) == "file-middle.bin", "mixed size row order");
             Console.WriteLine("Sort presentation loaded global policy: PASS (file is between the two sized directories).");
             Wait(() => lease.GetValue(host) is null, "global presentation release");
+            Wait(() => ((string[])sizeRead.Invoke(null, [hostType, host, 3])!).All(value => ulong.TryParse(value, out _)), "known raw bytes for already-ordered recovery");
+            hostType.GetMethod("CaptureViewState", Instance)!.Invoke(host, null);
+            var captured = hostType.GetField("_viewState", Instance)!.GetValue(host)!;
+            var capturedSorts = ((System.Collections.IEnumerable)stateType.GetProperty("SortColumns")!.GetValue(captured)!).Cast<object>().ToArray();
+            Console.WriteLine("Already-ordered fixture: sorts=" + string.Join('|', capturedSorts.Select(value => value.ToString())) + ";names=" + string.Join('|', Rows().Names) + ";values=" + string.Join('|', (string[])sizeRead.Invoke(null, [hostType, host, 3])!));
+            hostType.GetMethod("EnableInitialSortRecoveryTrace", Instance)!.Invoke(host, null);
+            hostType.GetMethod("ScheduleInitialVirtualSort", Instance)!.Invoke(host, [capturedSorts[0], (Func<bool>)(() => true), null, false]);
+            Wait(() => ((string)hostType.GetProperty("InitialSortRecoveryStatus", Instance)!.GetValue(host)!).Contains(":direct-finish", StringComparison.Ordinal), "already ordered ungrouped recovery");
+            var recoveryStatus = (string)hostType.GetProperty("InitialSortRecoveryStatus", Instance)!.GetValue(host)!;
+            if (!recoveryStatus.Contains(":rows-already-ordered", StringComparison.Ordinal))
+                throw new Exception("Already ordered ungrouped rows were needlessly sorted again: " + recoveryStatus);
+            CheckSelection();
+            Console.WriteLine("Sort presentation: already-ordered ungrouped recovery skipped mutation; selection retained.");
+
             CheckSelection();
             click.Invoke(null, [header, 0]);
             source.RootVisual = null; host.Dispose(); host = null;

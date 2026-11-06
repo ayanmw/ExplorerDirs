@@ -52,10 +52,15 @@ internal sealed partial class ExplorerBrowserHost
             };
         }
         catch { Marshal.Release(bridge); throw; }
-        watcher.Created += (_, e) => queue.Record(ProjectedChangeKind.Created, e.Name!);
-        watcher.Changed += (_, e) => queue.Record(ProjectedChangeKind.Changed, e.Name!);
-        watcher.Deleted += (_, e) => queue.Record(ProjectedChangeKind.Deleted, e.Name!);
-        watcher.Renamed += (_, e) => queue.Record(ProjectedChangeKind.Renamed, e.OldName!, e.Name);
+        void Record(ProjectedChangeKind kind, string name, string? newName = null)
+        {
+            if (queue.Record(kind, name, newName) is not null)
+                Interlocked.Exchange(ref _directoryChangeLastEventAt, System.Diagnostics.Stopwatch.GetTimestamp());
+        }
+        watcher.Created += (_, e) => Record(ProjectedChangeKind.Created, e.Name!);
+        watcher.Changed += (_, e) => Record(ProjectedChangeKind.Changed, e.Name!);
+        watcher.Deleted += (_, e) => Record(ProjectedChangeKind.Deleted, e.Name!);
+        watcher.Renamed += (_, e) => Record(ProjectedChangeKind.Renamed, e.OldName!, e.Name);
         watcher.Error += (_, e) => Interlocked.Exchange(ref watcherError, e.GetException());
         var timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(20) };
         var progress = System.Diagnostics.Stopwatch.StartNew();
