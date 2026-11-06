@@ -3185,12 +3185,27 @@ internal sealed partial class ExplorerBrowserHost : HwndHost, ExplorerBrowserHos
                 {
                     await Task.Delay(100);
                     if (!Current()) return;
+#if EXPLORERDIRS_PROJECTED_NOTIFY_EXPERIMENT
+                    if (!IsProjectedUpdateSettled())
+                    {
+                        RecordInitialSortRecovery($"{serial}:notifications-pending");
+                        continue;
+                    }
+#endif
                     var view = GetFolderView2Pointer();
                     if (view == 0) continue;
                     try
                     {
                         var lastChange = Interlocked.Read(ref _directoryChangeLastEventAt);
-                        bool Stable() => Current() && lastChange == Interlocked.Read(ref _directoryChangeLastEventAt);
+                        bool Stable()
+                        {
+                            if (!Current() || lastChange != Interlocked.Read(ref _directoryChangeLastEventAt)) return false;
+#if EXPLORERDIRS_PROJECTED_NOTIFY_EXPERIMENT
+                            return IsProjectedUpdateSettled();
+#else
+                            return true;
+#endif
+                        }
                         var count = ReadDirectoryMonitorItemCount();
                         if (count is null or <= 0 || !Stable()) continue;
                         var ready = await ShellSizeSortOrder.AreValuesReadyAsync(view, count.Value, Stable, allowUnavailable: true);

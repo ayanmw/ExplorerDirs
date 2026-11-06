@@ -19,6 +19,7 @@ internal sealed class ProjectedChangeLedger(int capacity = 8192)
     private bool _invalidated;
     private bool _overflowed;
     internal bool Overflowed { get { lock (_gate) return _overflowed; } }
+    internal bool IsSettled { get { lock (_gate) return !_invalidated && _outstanding.Count == 0; } }
 
     internal Work? Record(ProjectedChangeKind kind, string name, string? newName = null)
     {

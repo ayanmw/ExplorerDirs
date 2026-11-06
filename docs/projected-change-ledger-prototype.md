@@ -1,5 +1,21 @@
 # 通知事件队列协调实验
 
+## 待确认事件与过期属性通知
+
+2026-11-06：队列增加原子IsSettled（未失效且未完成集合为空），不是FIFO取空就算完成。无窗口先缺能力红灯 `src/.state/projected-settled-red.log`，覆盖fresh/已取出未确认/Release完成/溢出退休。实验启动排序读取前及异步检查中要求该状态，待恢复错误状态也不启动排序；普通构建排除此协调分支。
+
+实际HostProbe从真实Watcher队列取出一项而暂不Release，构造受控在途窗口，断言恢复trace进入notifications-pending，再导航验证退休。该项是人为持有的队列工作，不是已发送到Shell的实际在途通知。`projected-pending-host.log` 功能断言通过，输入守卫失败。
+
+随后的完整App `projected-pending-full-app.log` 在目录删除阶段失败；日志明确一份旧Changed读取已消失路径返回0x80070002，应用误停监控并留下旧行。这是实际功能失败，不能归咎共享输入或忽略为采样异常。
+
+修正：Created/Changed发现FILE_NOT_FOUND/PATH_NOT_FOUND时调用原生已观察类型的删除通知。成功则返回独立ConfirmationKind=Deleted，按行消失及原生ticket确认；原始Work仍用于队列Release。若元数据已退休且实际行也不存在，允许工作标记已协调，不发送/确认过期删除。重复Deleted同样需原生未知加实际行不存在才能结束，不盲目忽略所有缺失事件。路径再次出现或类型变化的其他竞态仍会停止并等待恢复。
+
+`projected-obsolete-host.log` 定向覆盖真实属性事件已排队后删除文件，等待同一监控settled、旧行消失，再同名创建成功，原导航/溢出/F5/关闭合同继续通过。无窗口dispatch新增Changed→Deleted确认合同，确保退休原工作引用、按真实删除结果等待/ack。定向宿主功能通过，隔离守卫失败。
+
+`projected-obsolete-full-app.log` 1025填充文件、每目录32文件、四窗格×两个独立进程的行数/逐项名称/派发确认/枚举/分组/保存通过，监控无错误；整体共享前台/输入守卫失败。第二进程批量删除仍有3次有效窗口零行采样，不宣称呈现或速度已经改善。最后增加的测试输出文字与IsSettled完成态断言只重建并跑三个无窗口合同；普通App/HostProbe恢复，排除协调和诊断入口。
+
+现有恢复等待30秒预算未扩大，持续写入可能仍导致恢复超时；OS watcher错误自动恢复、变化空档、快速改名链和可见性能仍待做，未发布。
+
 ## 完整应用32文件批量与未关闭的零行采样
 
 2026-11-06：完整App增加 `--full-app-session-burst-private-desktop <prepared> --adapter <prototype> --burst-count 32`（四独立目录，各1025填充文件），加 `--same-root` 则四窗格同一物理目录。保留四owner派发/完成、进程枚举不增长、分组和会话/窗口恢复断言。批量数量参数仅用于探针，原有命令默认3不变。

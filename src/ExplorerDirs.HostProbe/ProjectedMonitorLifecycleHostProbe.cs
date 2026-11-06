@@ -58,6 +58,17 @@ internal static class ProjectedMonitorLifecycleHostProbe
             Marshal.AddRef(oldCapability);
             File.WriteAllBytes(Path.Combine(first, "queued-before-navigation.bin"), [3]);
             Require(SpinWait.SpinUntil(() => Snapshot(oldQueue).Queued > 0, TimeSpan.FromSeconds(3)), "No actual watcher work queued before navigation.");
+            var taken = new object?[] { null };
+            Require((bool)oldQueue.GetType().GetMethod("TryTake", Instance)!.Invoke(oldQueue, taken)!, "Could not hold actual queued work in flight.");
+            var keyType = assembly.GetType("ExplorerDirs.App.PropertyKeyState", true)!;
+            var sortType = assembly.GetType("ExplorerDirs.App.SortColumnState", true)!;
+            var sizeKey = Activator.CreateInstance(keyType, [new Guid("b725f130-47ef-101a-a5f1-02608c9eebac"), 12u])!;
+            var sizeSort = Activator.CreateInstance(sortType, [sizeKey, 1])!;
+            hostType.GetMethod("EnableInitialSortRecoveryTrace", Instance)!.Invoke(host, null);
+            hostType.GetMethod("ScheduleInitialVirtualSort", Instance)!.Invoke(host,
+                [sizeSort, (Func<bool>)(() => ReferenceEquals(Queue(), oldQueue)), null, false]);
+            Wait(() => ((string)hostType.GetProperty("InitialSortRecoveryStatus", Instance)!.GetValue(host)!).Contains(":notifications-pending", StringComparison.Ordinal), "sort recovery waits for in-flight event confirmation");
+            Console.WriteLine("projected-sort-coordination: PASS held in-flight work defers initial sort recovery.");
             hostType.GetMethod("Navigate", Instance)!.Invoke(host, [Identity(second)]);
             Wait(() => Names().Contains("second.bin") && Queue() is { } next && !ReferenceEquals(next, oldQueue), "second navigation/monitor");
             Require(Snapshot(oldQueue) == (0, 0, true), "Old navigation retained event facts.");
@@ -79,6 +90,16 @@ internal static class ProjectedMonitorLifecycleHostProbe
             Require(At<Arrival>(middleCapability, 8)(middleCapability, "second.bin") == unchecked((int)0x800401FD), "Leaving second visit retained its native capability.");
             File.WriteAllBytes(Path.Combine(first, "live-return.bin"), [9]);
             Wait(() => Names().Contains("live-return.bin"), "returned visit receives actual change");
+            Wait(() => (bool)hostType.GetMethod("IsProjectedUpdateSettled", Instance)!.Invoke(host, null)!, "return visit notifications settled");
+            var activeQueue = Queue()!;
+            File.WriteAllBytes(Path.Combine(first, "live-return.bin"), [13, 14]);
+            Require(SpinWait.SpinUntil(() => Snapshot(activeQueue).Queued > 0, TimeSpan.FromSeconds(3)), "No property change queued before removal.");
+            File.Delete(Path.Combine(first, "live-return.bin"));
+            Wait(() => !Names().Contains("live-return.bin") && ReferenceEquals(Queue(), activeQueue) &&
+                (bool)hostType.GetMethod("IsProjectedUpdateSettled", Instance)!.Invoke(host, null)!, "obsolete property change reconciles deletion without stopping monitor");
+            Console.WriteLine("projected-stale-property: PASS queued change reconciles disappeared item without stopping its visit.");
+            File.WriteAllBytes(Path.Combine(first, "live-return.bin"), [15]);
+            Wait(() => Names().Contains("live-return.bin"), "monitor continues after obsolete property change");
             var overflowQueue = Queue()!;
             var record = overflowQueue.GetType().GetMethod("Record", Instance)!;
             var kind = Enum.Parse(assembly.GetType("ExplorerDirs.NativeProbe.ProjectedChangeKind", true)!, "Changed");

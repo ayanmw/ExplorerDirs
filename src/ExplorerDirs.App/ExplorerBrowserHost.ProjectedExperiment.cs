@@ -17,6 +17,8 @@ internal sealed partial class ExplorerBrowserHost
     private bool _projectedNeedsRecovery;
     private static readonly Guid ProjectedBridgeExperimentId = new("412ED4D4-9750-4525-8C90-345CBDB5FE95");
 
+    private bool IsProjectedUpdateSettled() => !_projectedNeedsRecovery && (_projectedQueue?.IsSettled ?? true);
+
     private bool TryStartProjectedMonitorExperiment(string path, long navigationVersion)
     {
         if (nint.Size != 8) return false;
@@ -103,6 +105,20 @@ internal sealed partial class ExplorerBrowserHost
                             ProjectedChangeKind.Deleted => GetMethod<ProjectedRemoval>(bridge, 4)(bridge, work.Name, out ticket),
                             _ => GetMethod<ProjectedRename>(bridge, 9)(bridge, work.Name, work.NewName!, out ticket)
                         };
+                        if (Current() && (work.Kind is ProjectedChangeKind.Created or ProjectedChangeKind.Changed) &&
+                            (result is unchecked((int)0x80070002) or unchecked((int)0x80070003)))
+                        {
+                            // The path may have disappeared after the watcher queued a
+                            // property event. Reconcile the observed row instead of stopping.
+                            result = GetMethod<ProjectedRemoval>(bridge, 4)(bridge, work.Name, out ticket);
+                            if (result == 0) return new ProjectedDispatchResult(ticket, ConfirmationKind: ProjectedChangeKind.Deleted);
+                            if (result == unchecked((int)0x80070490) && Current() && !ProjectedRowExists(viewWindow, work.Name, Current))
+                                return new ProjectedDispatchResult(0, Reconciled: true);
+                            throw new InvalidOperationException($"Projected missing-item reconciliation: 0x{result:X8}");
+                        }
+                        if (result == unchecked((int)0x80070490) && work.Kind == ProjectedChangeKind.Deleted &&
+                            Current() && !ProjectedRowExists(viewWindow, work.Name, Current))
+                            return new ProjectedDispatchResult(0, Reconciled: true);
                         if (result == 1 && work.Kind == ProjectedChangeKind.Deleted && Current())
                         {
                             // Native refusal confirms the path exists again. Publish its

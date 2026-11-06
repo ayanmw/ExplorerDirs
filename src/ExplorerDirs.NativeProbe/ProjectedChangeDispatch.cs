@@ -1,12 +1,13 @@
 namespace ExplorerDirs.NativeProbe;
 
-internal readonly record struct ProjectedDispatchResult(ulong Ticket, bool Reconciled = false);
+internal readonly record struct ProjectedDispatchResult(ulong Ticket, bool Reconciled = false,
+    ProjectedChangeKind? ConfirmationKind = null);
 
 // No scheduler or native ownership here: one Advance performs a bounded turn.
 // Every external callback may pump Shell messages and retire this navigation.
 internal sealed class ProjectedChangeDispatch(ProjectedChangeLedger queue, int maximumInFlight)
 {
-    private readonly List<(ProjectedChangeLedger.Work Work, ulong Ticket)> _pending = new();
+    private readonly List<(ProjectedChangeLedger.Work Work, ProjectedChangeLedger.Work Observation, ulong Ticket)> _pending = new();
     private bool _advancing;
     internal int PendingCount => _pending.Count;
 
@@ -25,21 +26,21 @@ internal sealed class ProjectedChangeDispatch(ProjectedChangeLedger queue, int m
                 return false;
             }
             if (!Active()) return;
-            foreach (var (work, _) in _pending)
+            foreach (var (_, observation, _) in _pending)
             {
-                var confirmed = ready(work);
+                var confirmed = ready(observation);
                 if (!Active() || !confirmed) return;
             }
-            foreach (var (work, ticket) in _pending)
+            foreach (var (work, observation, ticket) in _pending)
             {
                 if (!Active()) return;
-                if (work.Kind is ProjectedChangeKind.Deleted or ProjectedChangeKind.Renamed)
+                if (observation.Kind is ProjectedChangeKind.Deleted or ProjectedChangeKind.Renamed)
                 {
                     // A rename's destination may already have a queued deletion.
                     // Path freshness is then false even though the old source ticket
                     // can retire safely. The callback must validate the native item
                     // generation, never erase facts by name alone.
-                    acknowledge(work, ticket);
+                    acknowledge(observation, ticket);
                     if (!Active()) return;
                 }
                 queue.Release(work);
@@ -52,7 +53,7 @@ internal sealed class ProjectedChangeDispatch(ProjectedChangeLedger queue, int m
                 var result = dispatch(work);
                 if (!Active()) return;
                 if (result.Reconciled) queue.Release(work);
-                else _pending.Add((work, result.Ticket));
+                else _pending.Add((work, result.ConfirmationKind is { } kind ? work with { Kind = kind } : work, result.Ticket));
             }
         }
         catch

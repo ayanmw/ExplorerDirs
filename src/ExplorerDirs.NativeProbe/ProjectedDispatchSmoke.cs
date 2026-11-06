@@ -70,6 +70,14 @@ internal static class ProjectedDispatchSmoke
         chainedPump.Advance(() => true, _ => new(12), _ => true, (_, ticket) => { Require(ticket == 11); confirmations++; });
         chainedPump.Advance(() => true, _ => throw new InvalidOperationException(), _ => true, (_, ticket) => { Require(ticket == 12); confirmations++; });
         Require(confirmations == 2 && chained.Snapshot == (0, 0, false));
+        var obsoleteChange = new ProjectedChangeLedger();
+        obsoleteChange.Record(ProjectedChangeKind.Changed, "gone");
+        var obsoletePump = new ProjectedChangeDispatch(obsoleteChange, 8);
+        obsoletePump.Advance(() => true, _ => new(19, ConfirmationKind: ProjectedChangeKind.Deleted), _ => false, (_, _) => { });
+        var removalAcknowledged = false;
+        obsoletePump.Advance(() => true, _ => throw new InvalidOperationException(), work => work.Kind == ProjectedChangeKind.Deleted,
+            (work, ticket) => { Require(work.Kind == ProjectedChangeKind.Deleted && ticket == 19); removalAcknowledged = true; });
+        Require(removalAcknowledged && obsoleteChange.IsSettled && obsoleteChange.Snapshot == (0, 0, false));
         var overflowing = new ProjectedChangeLedger(1);
         overflowing.Record(ProjectedChangeKind.Created, "initial");
         var overflowingPump = new ProjectedChangeDispatch(overflowing, 8);
