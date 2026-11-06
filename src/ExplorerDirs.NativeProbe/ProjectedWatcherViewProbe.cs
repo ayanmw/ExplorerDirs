@@ -7,6 +7,8 @@ public static partial class SyntheticShellSortProbe
         Func<string[]> names, Action assertSelection)
     {
         var queue = new ProjectedChangeLedger();
+        using var process = Process.GetCurrentProcess();
+        bool ContainsRow(string name) => OwnedAppListText.Find(process.Handle, (uint)process.Id, list, name) >= 0;
         Exception? failure = null;
         using var watcher = new FileSystemWatcher(fixture)
         {
@@ -25,76 +27,69 @@ public static partial class SyntheticShellSortProbe
         var stage = 0;
         var enumerationCount = At<ReadProjectedEnumerations>(bridge, 5);
 
-        void PumpUntil(Func<bool> condition)
-        {
-            var elapsed = Stopwatch.StartNew();
-            do
-            {
-                System.Windows.Forms.Application.DoEvents();
-                if (condition()) return;
-                Thread.Sleep(10);
-            } while (elapsed.Elapsed < TimeSpan.FromSeconds(5));
-            throw new TimeoutException("Watcher-driven native notification did not converge.");
-        }
-
         void Settle(Func<bool> condition, int timeoutSeconds = 5)
         {
+            const int maximumInFlight = 8;
             var elapsed = Stopwatch.StartNew();
             var quiet = Stopwatch.StartNew();
+            var pending = new List<(ProjectedChangeLedger.Work Work, ulong Ticket)>();
             while (elapsed.Elapsed < TimeSpan.FromSeconds(timeoutSeconds))
             {
                 if (Volatile.Read(ref failure) is { } error) throw new InvalidOperationException("Native view watcher failed.", error);
-                while (queue.TryTake(out var work))
+                // Confirmation is polled on a later message-loop turn. Never wait
+                // inside an individual dispatch, and bound outstanding notifications.
+                if (pending.Count > 0)
                 {
-                    quiet.Restart();
-                    int result;
-                    ulong ticket = 0;
-                    switch (work.Kind)
+                    var ready = pending.All(item => item.Work.Kind switch
                     {
-                        case ProjectedChangeKind.Created:
-                        case ProjectedChangeKind.Changed:
-                            result = arrive(bridge, work.Name);
-                            break;
-                        case ProjectedChangeKind.Deleted:
-                            result = remove(bridge, work.Name, out ticket);
-                            break;
-                        default:
-                            result = rename(bridge, work.Name, work.NewName!, out ticket);
-                            break;
-                    }
-                    if (result != 0) throw new InvalidOperationException($"Watcher dispatch {work.Kind} {work.Name}: 0x{result:X8}.");
-                    if (work.Kind == ProjectedChangeKind.Created)
+                        ProjectedChangeKind.Created => ContainsRow(item.Work.Name),
+                        ProjectedChangeKind.Deleted => !ContainsRow(item.Work.Name),
+                        ProjectedChangeKind.Renamed => !ContainsRow(item.Work.Name) && ContainsRow(item.Work.NewName!),
+                        _ => true
+                    });
+                    if (ready)
                     {
-                        // Without a delivery barrier, the 32-file burst provokes a
-                        // parent re-enumeration. A message pump alone did not prevent it.
-                        // This prototype confirms each arrival before sending the next;
-                        // production needs asynchronous, bounded confirmation batches.
-                        PumpUntil(() => names().Contains(work.Name));
+                        foreach (var (work, ticket) in pending)
+                        {
+                            if (work.Kind is ProjectedChangeKind.Deleted or ProjectedChangeKind.Renamed)
+                            {
+                                if (!queue.IsCurrent(work)) throw new InvalidOperationException("Watcher structural work superseded during confirmation.");
+                                if (acknowledge(bridge, work.Name, ticket) != 0)
+                                    throw new InvalidOperationException("Watcher structural confirmation rejected.");
+                            }
+                            queue.Release(work);
+                        }
+                        pending.Clear();
                     }
-                    if (work.Kind is ProjectedChangeKind.Deleted or ProjectedChangeKind.Renamed)
+                }
+                if (pending.Count == 0)
+                {
+                    while (pending.Count < maximumInFlight && queue.TryTake(out var work))
                     {
-                        PumpUntil(() => !names().Contains(work.Name) &&
-                            (work.NewName is null || names().Contains(work.NewName)));
-                        // This phase intentionally waits between mutations. A superseded
-                        // structural event needs reconciliation, not a guessed acknowledgement.
-                        if (!queue.IsCurrent(work)) throw new InvalidOperationException("Watcher structural work superseded during confirmation.");
-                        if (acknowledge(bridge, work.Name, ticket) != 0)
-                            throw new InvalidOperationException("Watcher structural confirmation rejected.");
+                        quiet.Restart();
+                        ulong ticket = 0;
+                        var result = work.Kind switch
+                        {
+                            ProjectedChangeKind.Created or ProjectedChangeKind.Changed => arrive(bridge, work.Name),
+                            ProjectedChangeKind.Deleted => remove(bridge, work.Name, out ticket),
+                            _ => rename(bridge, work.Name, work.NewName!, out ticket)
+                        };
+                        if (result != 0) throw new InvalidOperationException($"Watcher dispatch {work.Kind} {work.Name}: 0x{result:X8}.");
+                        pending.Add((work, ticket));
+                        processed++;
                     }
-                    queue.Release(work);
-                    processed++;
                 }
                 System.Windows.Forms.Application.DoEvents();
-                if (condition() && quiet.ElapsedMilliseconds >= 150)
+                if (pending.Count == 0 && condition() && quiet.ElapsedMilliseconds >= 150)
                 {
                     assertSelection();
                     Check(enumerationCount(bridge, out var enumerations));
-                    Console.WriteLine($"projected-watcher-stage: stage={++stage}; dispatched={processed}; enumerations={enumerations}; elapsed-ms={elapsed.ElapsedMilliseconds}");
+                    Console.WriteLine($"projected-watcher-stage: stage={++stage}; dispatched={processed}; enumerations={enumerations}; elapsed-ms={elapsed.ElapsedMilliseconds}; maximum-in-flight={maximumInFlight}");
                     return;
                 }
                 Thread.Sleep(10);
             }
-            throw new TimeoutException("Watcher-driven view did not settle.");
+            throw new TimeoutException($"Watcher-driven view did not settle: pending={pending.Count}; queued={queue.Snapshot.Queued}.");
         }
 
         try
@@ -127,7 +122,7 @@ public static partial class SyntheticShellSortProbe
             Settle(() => names().Length == initial && !names().Contains("watcher-renamed-folder"));
             var burstNames = Enumerable.Range(0, 32).Select(index => $"watcher-burst-{index:D3}.bin").ToArray();
             foreach (var name in burstNames) File.WriteAllBytes(Path.Combine(fixture, name), [1]);
-            // Per-item native confirmation is deliberately serialized in this prototype.
+            // Keep a bounded overall budget while observing native confirmation latency.
             Settle(() => names().Length == initial + burstNames.Length && burstNames.All(names().Contains), timeoutSeconds: 30);
             foreach (var name in burstNames) File.Delete(Path.Combine(fixture, name));
             Settle(() => names().Length == initial && !names().Any(name => name.StartsWith("watcher-burst-", StringComparison.Ordinal)), timeoutSeconds: 30);

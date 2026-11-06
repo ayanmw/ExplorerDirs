@@ -2,6 +2,10 @@
 
 ## 真实事件到原生视图
 
+批次确认补证（2026-11-06）：实验驱动改为有限在途队列，在后续消息循环轮次检查整批是否到达，再退休结构事件 ticket；单个 dispatch 内不再嵌套等待或泵消息。4 条、8 条上限对照均通过“不增加枚举”及前台/输入守卫。8 条候选的确认查询复用 OwnedAppListText.Find，只查询待办名称，不在每次确认读取 1029 行文字；最终 `src/.state/projected-watcher-view-batch8-targeted.log` 退出0，新增约3505ms、删除1876ms，108条事件全部处理且记录归零、销毁清理通过。相对上一轮串行新增5187ms/删除3674ms有所改善，但单轮耗时不是稳定基准或产品性能结论；4条与8条无单调速度关系，8不是已证明的最优/跨环境安全阈值。
+
+目前仍由隔离探针外层消息循环轮询，无 App Dispatcher 定时/取消接线；并发同名替换、连续改名重协调、背压和多视图门槛不变。保留32项完整行集、精确大小、选区和枚举计数验收，目标查询只优化确认步骤，未降低最终断言。Changed事件在此阶段以通知成功作为完成，最终8KB断言另行确认；不能据此声称每个属性更新已逐项确认。
+
 2026-11-06，`ProjectedWatcherViewProbe` 将实际 FileSystemWatcher 事件经队列派发到原生通知桥，在物理订阅暂停的 1029 行原生视图验证文件/目录增删改名、精确 8KB 更新、确认删除后的同名重建及 32 文件突发新增/删除，保留原选区和焦点，最终 metadata facts 回到 1027。
 
 保留失败对照：`src/.state/projected-watcher-view-burst-diagnostic.log` 中行内容和 facts 正确，但 EnumObjects 为 1→2。分阶段日志 `projected-watcher-view-stages.log` 将首次额外枚举定位到 32 文件创建阶段；插入 DoEvents 的对照 `projected-watcher-view-yield.log` 仍失败。不能据此确定 Shell 内部的具体合并规则。
