@@ -5436,6 +5436,10 @@ namespace
                 if (_projectedDeliveryOwner) _projectedDelivery->RetireOwner(_projectedDeliveryOwner);
                 else _projectedDelivery->Retire();
             }
+            // Stop-monitor and HWND destruction can both retire this folder.
+            // Drop this reference now: after clearing the owner token, a repeated
+            // call must not mistake the shared queue for an unscoped private one.
+            _projectedDelivery.reset();
             _projectedDeliveryOwner = 0;
             FlushProjectedDeliveryTraceForProbe();
             return S_OK;
@@ -5444,7 +5448,6 @@ namespace
         {
             if (!_notificationWindow) return CO_E_OBJNOTCONNECTED;
             RetireProjectedDeliveryForProbe();
-            _projectedDelivery.reset();
             wchar_t value[2]{};
             if (GetEnvironmentVariableW(L"EXPLORERDIRS_PROJECTED_BACKGROUND_DELIVERY_CONTROL", value, ARRAYSIZE(value)) == 1 && value[0] == L'1')
             {
@@ -7368,6 +7371,37 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID)
     }
     return TRUE;
 }
+
+#if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+extern "C" __declspec(dllexport) HRESULT WINAPI RunProjectedSharedQueueRegistrySmoke(ULONG* stage)
+{
+    if (!stage) return E_POINTER;
+    try
+    {
+        *stage = 1;
+        const auto deliver = [](const ProjectedDeliveryExperiment::Payload&, bool) { };
+        const std::wstring key = L"registry-probe-profile-a\nC:\\shared\nflush:4";
+        auto first = SyntheticSortFolder::AcquireSharedProjectedQueueForProbe(key, deliver, 4);
+        auto alias = SyntheticSortFolder::AcquireSharedProjectedQueueForProbe(L"REGISTRY-PROBE-PROFILE-A\nc:\\SHARED\nflush:4", deliver, 4);
+        if (first != alias) return E_FAIL;
+        *stage = 2;
+        auto otherProfile = SyntheticSortFolder::AcquireSharedProjectedQueueForProbe(L"registry-probe-profile-b\nC:\\shared\nflush:4", deliver, 4);
+        auto otherRoot = SyntheticSortFolder::AcquireSharedProjectedQueueForProbe(L"registry-probe-profile-a\nC:\\other\nflush:4", deliver, 4);
+        auto otherPolicy = SyntheticSortFolder::AcquireSharedProjectedQueueForProbe(L"registry-probe-profile-a\nC:\\shared\nflush:1", deliver, 1);
+        if (first == otherProfile || first == otherRoot || first == otherPolicy) return E_FAIL;
+        *stage = 3;
+        first->Retire();
+        auto replacement = SyntheticSortFolder::AcquireSharedProjectedQueueForProbe(key, deliver, 4);
+        if (first == replacement || replacement->Read().retired) return E_FAIL;
+        std::weak_ptr<ProjectedDeliveryExperiment::Queue> weak = replacement;
+        replacement.reset();
+        if (!weak.expired()) return E_FAIL; // Registry must not retain a visited root.
+        *stage = 4;
+        return S_OK;
+    }
+    catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+}
+#endif
 
 STDAPI DllGetClassObject(REFCLSID classId, REFIID iid, void** value)
 {

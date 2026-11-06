@@ -10,6 +10,10 @@ internal static class ProjectedDeliveryQueueProbe
             var smoke = Marshal.GetDelegateForFunctionPointer<QueueSmoke>(NativeLibrary.GetExport(module, "RunProjectedDeliveryQueueSmoke"));
             var result = smoke(out var stage);
             if (result != 0) throw new InvalidOperationException($"Projected delivery queue failed at stage {stage}: 0x{result:X8}.");
+            var registry = Marshal.GetDelegateForFunctionPointer<QueueSmoke>(NativeLibrary.GetExport(module, "RunProjectedSharedQueueRegistrySmoke"));
+            result = registry(out stage);
+            if (result != 0) throw new InvalidOperationException($"Projected shared registry failed at stage {stage}: 0x{result:X8}.");
+            Console.WriteLine("Projected shared registry: PASS same-key/case sharing; profile/root/flush-policy isolation; retired replacement; weak lifetime; no worker or Shell calls.");
             Console.WriteLine("Projected delivery queue: PASS copied payloads; ordered background delivery; atomic batch submission and overflow; owner-scoped retirement without stopping peers; bounded flush boundaries and final tail; retirement without waiting for in-flight delivery; bounded queued+in-flight capacity; callback failure; worker-owned lifetime; no Shell notifications/windows/files.");
             return 0;
         }

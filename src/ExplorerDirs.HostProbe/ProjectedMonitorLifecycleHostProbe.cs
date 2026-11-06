@@ -26,6 +26,8 @@ internal static class ProjectedMonitorLifecycleHostProbe
         var owner = ownerType.GetMethod("Start", BindingFlags.Static | BindingFlags.Public)!.Invoke(null, [id, profile, Path.GetFullPath(adapter)])!;
         HwndHost? host = null;
         HwndSource? source = null;
+        HwndHost? peer = null;
+        HwndSource? peerSource = null;
         nint oldCapability = 0, middleCapability = 0, finalCapability = 0;
         try
         {
@@ -170,6 +172,31 @@ internal static class ProjectedMonitorLifecycleHostProbe
             Wait(() => Names().Contains("first.bin") && Queue() is { } recovered && !ReferenceEquals(recovered, overflowQueue), "recover after overflow");
             File.WriteAllBytes(Path.Combine(first, "live-after-overflow.bin"), [10]);
             Wait(() => Names().Contains("live-after-overflow.bin"), "recovered visit accepts real watcher changes");
+            string[] PeerNames()
+            {
+                if (peer is null) return [];
+                var view = (nint)hostType.GetField("_viewWindow", Instance)!.GetValue(peer)!;
+                if (view == 0) return [];
+                var rows = ((int Count, string[] Names))read.Invoke(null, [view])!;
+                return rows.Names;
+            }
+            if (Environment.GetEnvironmentVariable("EXPLORERDIRS_PROJECTED_SHARED_QUEUE_CONTROL") == "1")
+            {
+                peer = (HwndHost)Activator.CreateInstance(hostType, Identity(first), state)!;
+                hostType.GetMethod("ConfigureFolderSizeLocations", Instance)!.Invoke(peer, [id, true]);
+                hostType.GetMethod("ConfigureFolderSizeSortContextFactory", Instance)!.Invoke(peer, [factory]);
+                peerSource = new HwndSource(new HwndSourceParameters("Private projected shared-queue peer")
+                    { WindowStyle = unchecked((int)0x80000000), Width = 720, Height = 480 });
+                peerSource.RootVisual = peer;
+                // A first row can appear before the peer's initial enumeration
+                // finishes. Do not inject the close/create race into that startup.
+                var baselineNames = Names().Order(StringComparer.Ordinal).ToArray();
+                Wait(() => PeerNames().Order(StringComparer.Ordinal).SequenceEqual(baselineNames) &&
+                    queueField.GetValue(peer) is not null &&
+                    (bool)hostType.GetMethod("IsProjectedUpdateSettled", Instance)!.Invoke(peer, null)!,
+                    "same-root peer monitor ready");
+                Console.WriteLine($"projected-shared-peer-identities: first-bridge=0x{(nint)hostType.GetField("_projectedBridge", Instance)!.GetValue(host)!:X};peer-bridge=0x{(nint)hostType.GetField("_projectedBridge", Instance)!.GetValue(peer)!:X}");
+            }
             var closingQueue = Queue()!;
             finalCapability = (nint)hostType.GetField("_projectedBridge", Instance)!.GetValue(host)!;
             Marshal.AddRef(finalCapability);
@@ -179,6 +206,20 @@ internal static class ProjectedMonitorLifecycleHostProbe
             source.RootVisual = null;
             Require(Snapshot(closingQueue) == (0, 0, true), "Close retained queued watcher work.");
             Require(At<Arrival>(finalCapability, 8)(finalCapability, "first.bin") == unchecked((int)0x800401FD), "Closed native capability accepted arrival.");
+            if (peer is not null)
+            {
+                Wait(() => PeerNames().Contains("queued-before-close.bin"), "peer applies update queued before other host closed");
+                File.WriteAllBytes(Path.Combine(first, "peer-after-close.bin"), [8]);
+                Wait(() => PeerNames().Contains("peer-after-close.bin") && queueField.GetValue(peer) is not null,
+                    "peer continues real watcher updates after other host retirement");
+                File.Delete(Path.Combine(first, "peer-after-close.bin"));
+                Wait(() => !PeerNames().Contains("peer-after-close.bin") &&
+                    (bool)hostType.GetMethod("IsProjectedUpdateSettled", Instance)!.Invoke(peer, null)!,
+                    "peer deletion confirms after other host retirement");
+                peer.Dispose();
+                peerSource!.RootVisual = null;
+                Console.WriteLine("projected-shared-peer: PASS real same-root host close preserves peer queued create, later create/delete and settlement");
+            }
             var count = At<Counts>(finalCapability, 6);
             Marshal.ThrowExceptionForHR(count(finalCapability, out var roots, out var facts));
             Require(roots == 0 && facts == 0, $"Closed native metadata retained roots/facts {roots}/{facts}.");
@@ -188,6 +229,8 @@ internal static class ProjectedMonitorLifecycleHostProbe
         }
         finally
         {
+            peer?.Dispose();
+            if (peerSource is not null) { peerSource.RootVisual = null; peerSource.Dispose(); }
             host?.Dispose();
             if (source is not null) { source.RootVisual = null; source.Dispose(); }
             if (oldCapability != 0) Marshal.Release(oldCapability);
