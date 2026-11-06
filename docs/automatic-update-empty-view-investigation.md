@@ -1,5 +1,15 @@
 # 自动变化期间短暂零行：刷新来源调查
 
+## 2026-11-06 名称排序对照与调用计时
+
+复用现有进程级EXPLORERDIRS_PROBE_NAME_SORT_CONTROL对照，只在探针调用范围设为1并finally恢复，使用当前通知实验副本，保留大小列和一份大小分组。`src/.state/projected-name-control32.log` 两进程1025填充文件、32文件增删/名称/分组/确认/枚举通过，自动阶段均无零行；输入守卫失败，整体退出1。批量新增约8623/10606ms，说明高延迟不能只归因启动Size排序恢复。该对照不是关闭文件夹大小功能，不能排除大小提供器其他开销。
+
+实验派发、行确认和ack回调分别累计Stopwatch时间，计入现有dispatch/settled日志，不进入普通构建。`projected-timing-name32.log` 两进程完整功能及隔离守卫均通过，整体退出0，自动阶段无零行；新增2945/6669ms、删除2635/1612ms，存在明显单轮波动。八份owner最终约102/103事件各自累计：派发6.5–10.2ms、行确认96.7–118.4ms、ack0.1–0.5ms。
+
+这是回调内墙钟时间，不是CPU独占时间，可能包含同步重入；不能将多owner相加解释为互斥CPU占比。尚未计时的是Shell应用通知的等待、Dispatcher排队、其他消息处理及探针采样开销。因此下一步应测定时器间隔和未确认等待，而不是先优化派发函数内部或提高超时预算。不能将这轮名称排序零样本外推为Size排序/视觉问题已解决。
+
+本批只增加实验诊断，普通App/HostProbe已恢复并核查无实验/追踪入口，未发布。
+
 ## 2026-11-06 进一步定位与修正
 
 新增PrepareOnly的RefreshOriginTrace构建开关，保留刷新请求/原生进入返回及列表删除/清空/计数/排序消息；清空消息附受限托管栈，普通构建排除。`src/.state/projected-zero-trace.log` 的32文件场景在批量删除失败；原生枚举仍8→8，事件曾确认，但实际行仍残留。refresh-origin.log在tick509369000记录ScheduleInitialVirtualSort.RecoverAsync发起manual=False/full=True/soft=True的请求，原生Refresh返回S_FALSE。该轮未复现零行，不据此宣称此栈是此前所有零行的唯一原因。

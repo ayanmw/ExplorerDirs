@@ -1,5 +1,6 @@
 #if EXPLORERDIRS_PROJECTED_NOTIFY_EXPERIMENT
 using System.IO;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows.Threading;
 using ExplorerDirs.NativeProbe;
@@ -71,6 +72,15 @@ internal sealed partial class ExplorerBrowserHost
         var dispatched = 0;
         var lastLoggedDispatch = 0;
         var lastLoggedSettled = 0;
+        long nativeTicks = 0, readTicks = 0, ackTicks = 0;
+        T Measure<T>(ref long total, Func<T> action)
+        {
+            var started = Stopwatch.GetTimestamp();
+            try { return action(); }
+            finally { total += Stopwatch.GetTimestamp() - started; }
+        }
+        string Timing() => $"native-ms={nativeTicks * 1000.0 / Stopwatch.Frequency:F1};read-ms={readTicks * 1000.0 / Stopwatch.Frequency:F1};ack-ms={ackTicks * 1000.0 / Stopwatch.Frequency:F1}";
+
         bool Current() => ReferenceEquals(_projectedQueue, queue) &&
             _directoryChangeVersion == monitorVersion && _viewReadiness.NavigationVersion == navigationVersion &&
             _viewReadiness.IsCurrent(navigationVersion) && _viewWindow == viewWindow &&
@@ -88,7 +98,7 @@ internal sealed partial class ExplorerBrowserHost
                 if (dispatch.PendingCount > 0 && progress.Elapsed > TimeSpan.FromSeconds(10))
                     throw new TimeoutException("Projected experiment confirmation timed out.");
                 dispatch.Advance(Current,
-                    work =>
+                    work => Measure(ref nativeTicks, () =>
                     {
                         progress.Restart();
                         if (enumerationBaseline is null)
@@ -129,35 +139,36 @@ internal sealed partial class ExplorerBrowserHost
                         }
                         if (result != 0) throw new InvalidOperationException($"Projected {work.Kind}: 0x{result:X8}");
                         return new ProjectedDispatchResult(ticket);
-                    },
-                    work => work.Kind switch
+                    }),
+                    work => Measure(ref readTicks, () => work.Kind switch
                     {
                         ProjectedChangeKind.Created => ProjectedRowExists(viewWindow, work.Name, Current),
                         ProjectedChangeKind.Deleted => !ProjectedRowExists(viewWindow, work.Name, Current),
                         ProjectedChangeKind.Renamed => !ProjectedRowExists(viewWindow, work.Name, Current) && ProjectedRowExists(viewWindow, work.NewName!, Current),
                         _ => true
-                    },
-                    (work, ticket) =>
+                    }),
+                    (work, ticket) => Measure(ref ackTicks, () =>
                     {
                         var result = GetMethod<ProjectedAcknowledge>(bridge, 7)(bridge, work.Name, ticket);
                         // Native S_FALSE preserves a newer generation or an already
                         // retired fact. It emits no notification and is safe to retain.
-                        if (result == 1) return;
+                        if (result == 1) return 0;
                         if (result != 0) throw new InvalidOperationException($"Projected confirmation: 0x{result:X8}");
-                    });
+                        return 0;
+                    }));
                 if (Current() && enumerationBaseline is { } baseline)
                 {
                     Marshal.ThrowExceptionForHR(GetMethod<ProjectedEnumerationCount>(bridge, 5)(bridge, out var enumerations));
                     if (!Current()) return;
                     if (lastLoggedDispatch != dispatched)
                     {
-                        LogProjectedExperiment($"dispatch path={path};owner={viewWindow:X};events={dispatched}");
+                        LogProjectedExperiment($"dispatch path={path};owner={viewWindow:X};{Timing()};events={dispatched}");
                         lastLoggedDispatch = dispatched;
                     }
                     if (dispatch.PendingCount == 0 && queue.Snapshot.Queued == 0 &&
                         (lastLoggedSettled != dispatched || lastEnumerations != enumerations))
                     {
-                        LogProjectedExperiment($"settled path={path};owner={viewWindow:X};events={dispatched};enumerations={baseline}->{enumerations}");
+                        LogProjectedExperiment($"settled path={path};owner={viewWindow:X};{Timing()};events={dispatched};enumerations={baseline}->{enumerations}");
                         lastLoggedSettled = dispatched;
                         lastEnumerations = enumerations;
                     }
