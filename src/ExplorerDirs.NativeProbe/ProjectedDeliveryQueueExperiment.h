@@ -27,15 +27,27 @@ namespace ProjectedDeliveryExperiment
         { return std::shared_ptr<Queue>(new Queue(capacity, std::move(deliver), flushBatchSize)); }
 
         HRESULT Enqueue(const Payload& payload)
+        { return EnqueueItems(&payload, 1); }
+
+        HRESULT EnqueueBatch(const std::vector<Payload>& payloads)
+        { return EnqueueItems(payloads.data(), payloads.size()); }
+
+    private:
+        HRESULT EnqueueItems(const Payload* payloads, size_t count)
         {
             std::lock_guard<std::mutex> lock(_mutex);
             if (_retired) return CO_E_OBJNOTCONNECTED;
-            if (_pending.size() + (_inFlight ? 1 : 0) >= _capacity)
+            if (count == 0) return S_OK;
+            const auto occupied = _pending.size() + (_inFlight ? 1 : 0);
+            if (occupied > _capacity || count > _capacity - occupied)
             {
                 RetireLocked(HRESULT_FROM_WIN32(ERROR_BUFFER_OVERFLOW));
                 return _failure;
             }
-            try { _pending.push_back(payload); }
+            // Hold the submission lock through copying the entire batch and
+            // scheduling: the worker must never observe a partial submission.
+            // Allocation failure retires/clears it before any new item escapes.
+            try { for (size_t index = 0; index < count; ++index) _pending.push_back(payloads[index]); }
             catch (const std::bad_alloc&) { RetireLocked(E_OUTOFMEMORY); return _failure; }
             if (_running) return S_OK;
             HMODULE module = nullptr;
@@ -61,6 +73,7 @@ namespace ProjectedDeliveryExperiment
             return S_OK;
         }
 
+    public:
         void Retire()
         {
             std::lock_guard<std::mutex> lock(_mutex);

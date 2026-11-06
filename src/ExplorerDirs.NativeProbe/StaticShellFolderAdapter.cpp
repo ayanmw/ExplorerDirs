@@ -131,6 +131,30 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunProjectedDeliveryQueueSmoke(D
         if (!finish(queue, gate) || gate->delivered.size() != 10 ||
             gate->flushes != std::vector<bool>{ true, false, false, false, true, false, false, false, true, true }) return E_FAIL;
         *stage = 8;
+        gate = std::make_shared<Gate>(); queue = makeQueue(16, gate, 4);
+        std::vector<Payload> batch;
+        for (LONG event = 1; event <= 10; ++event) batch.push_back(Payload{ event, { 7 }, {} });
+        if (queue->EnqueueBatch(batch) != S_OK) return E_FAIL;
+        if (!waitStarted(gate)) { queue->Retire(); finish(queue, gate); return E_FAIL; }
+        batch[0].first[0] = 99;
+        if (!finish(queue, gate) || gate->delivered.size() != 10 ||
+            gate->delivered[0].first[0] != 7 ||
+            gate->flushes != std::vector<bool>{ false, false, false, true, false, false, false, true, false, true }) return E_FAIL;
+        for (size_t index = 0; index < gate->delivered.size(); ++index)
+            if (gate->delivered[index].event != static_cast<LONG>(index + 1)) return E_FAIL;
+        *stage = 9;
+        gate = std::make_shared<Gate>(); queue = makeQueue(4, gate, 4);
+        if (queue->Enqueue(first) != S_OK || !waitStarted(gate)) return E_FAIL;
+        const auto batchOverflow = queue->EnqueueBatch(std::vector<Payload>(4, first));
+        state = queue->Read();
+        if (!finish(queue, gate) || batchOverflow != HRESULT_FROM_WIN32(ERROR_BUFFER_OVERFLOW) ||
+            !state.retired || state.queued != 0 || gate->delivered.size() != 1) return E_FAIL;
+        *stage = 10;
+        gate = std::make_shared<Gate>(); queue = makeQueue(4, gate, 4);
+        if (queue->EnqueueBatch({}) != S_OK || queue->Read().running || queue->Read().queued != 0) return E_FAIL;
+        queue->Retire();
+        if (queue->EnqueueBatch(batch) != CO_E_OBJNOTCONNECTED) return E_FAIL;
+        *stage = 11;
         return S_OK;
     }
     catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }

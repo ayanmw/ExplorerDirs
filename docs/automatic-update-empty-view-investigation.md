@@ -1,3 +1,11 @@
+## 2026-11-06 Atomic queue submission primitive
+
+Experimental Queue now has EnqueueBatch: capacity validates queued+in-flight+whole-batch with subtraction bounds, all copied payloads are inserted under one lock before scheduling/allowing the worker to pop. Copy failure retires and clears queued work before any new batch item can escape; accepted preexisting in-flight delivery remains non-retractable. Single-item Enqueue shares the same implementation. Empty live submission is a no-op; retired queues reject submissions.
+
+RED: after native compile succeeded, the E_NOTIMPL batch stub failed native queue smoke stage8 (exit1). GREEN: actual batch implementation passed stages8-10 plus all prior cases. Ten submitted records are independently copied and FIFO, flags are false/false/false/true/false/false/false/true/false/true, avoiding the early first-item flush. An oversized batch while one item is accepted retires with buffer overflow and delivers no partial new batch. Empty and post-retirement cases passed. Native experiment compile and NativeProbe Release build passed (zero managed warnings/errors); final smoke passed. Ordinary native SHA remains B61059F45CC281131820D22FB831BCF01D1530B70BC6539ACBC2A8C9313399FF.
+
+This API is not yet called by the actual bridge: it still prepares and submits one event at a time. No new full-App speed claim is supported, and no product default changed. Next connect explicit batch preparation/submission across the experimental bridge with per-owner metadata/ticket checks; only then rerun actual four-pane mutation tests. No publication.
+
 ## 2026-11-06 Worker delivery timing and owner fanout
 
 Source review confirms each owner must record metadata before arrival publication (RecordObservedChild), and removal tickets are keyed by physical path plus sort-context identity. AcknowledgeRemoval only retires the matching owner's version. Therefore suppressing three owners' entire Notify calls is not a valid deduplication: it would also suppress their local preparation/tickets. Metadata preparation must remain independent even if transport is eventually shared.
