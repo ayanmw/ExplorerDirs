@@ -5431,7 +5431,12 @@ namespace
             _projectedDeliveryRetired = true;
             _projectedBatchToken = 0;
             _projectedBatch.clear();
-            if (_projectedDelivery) _projectedDelivery->Retire();
+            if (_projectedDelivery)
+            {
+                if (_projectedDeliveryOwner) _projectedDelivery->RetireOwner(_projectedDeliveryOwner);
+                else _projectedDelivery->Retire();
+            }
+            _projectedDeliveryOwner = 0;
             FlushProjectedDeliveryTraceForProbe();
             return S_OK;
         }
@@ -5447,7 +5452,7 @@ namespace
                 {
                     wchar_t chunk[2]{};
                     const size_t flushBatch = GetEnvironmentVariableW(L"EXPLORERDIRS_PROJECTED_CHUNKED_FLUSH_CONTROL", chunk, ARRAYSIZE(chunk)) == 1 && chunk[0] == L'1' ? 4 : 1;
-                    _projectedDelivery = ProjectedDeliveryExperiment::Queue::Create(8192,
+                    const ProjectedDeliveryExperiment::Queue::Deliver deliver =
                         [](const ProjectedDeliveryExperiment::Payload& payload, bool flush)
                         {
                             // Only immutable absolute PIDL bytes cross threads, never this,
@@ -5459,12 +5464,45 @@ namespace
                                 payload.first.data(), payload.second.empty() ? nullptr : payload.second.data());
                             TraceProjectedDeliveryForProbe(flush ? "flush-returned" : "returned", payload);
                             CoUninitialize();
-                        }, flushBatch);
+                        };
+                    wchar_t shared[2]{};
+                    if (GetEnvironmentVariableW(L"EXPLORERDIRS_PROJECTED_SHARED_QUEUE_CONTROL", shared, ARRAYSIZE(shared)) == 1 && shared[0] == L'1')
+                    {
+                        WCHAR profile[40]{};
+                        if (!StringFromGUID2(_classId, profile, ARRAYSIZE(profile))) return E_FAIL;
+                        const auto key = std::wstring(profile) + L"\n" + _backingPath + L"\nflush:" + std::to_wstring(flushBatch);
+                        auto queue = AcquireSharedProjectedQueueForProbe(key, deliver, flushBatch);
+                        ULONGLONG owner = 0;
+                        const auto registered = queue->RegisterOwner(&owner);
+                        if (FAILED(registered)) return registered;
+                        _projectedDelivery = std::move(queue);
+                        _projectedDeliveryOwner = owner;
+                    }
+                    else _projectedDelivery = ProjectedDeliveryExperiment::Queue::Create(8192, deliver, flushBatch);
                 }
                 catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
             }
             _projectedDeliveryRetired = false;
             return S_OK;
+        }
+        static std::shared_ptr<ProjectedDeliveryExperiment::Queue> AcquireSharedProjectedQueueForProbe(
+            const std::wstring& key, const ProjectedDeliveryExperiment::Queue::Deliver& deliver, size_t flushBatch)
+        {
+            static std::mutex mutex;
+            static std::map<std::wstring, std::weak_ptr<ProjectedDeliveryExperiment::Queue>, ShellParsingNameLess> queues;
+            std::lock_guard<std::mutex> lock(mutex);
+            // Weak references never keep abandoned roots alive. Prune on acquire
+            // rather than growing an unbounded history of visited directories.
+            for (auto entry = queues.begin(); entry != queues.end();)
+                if (entry->second.expired()) entry = queues.erase(entry); else ++entry;
+            auto& weak = queues[key];
+            auto queue = weak.lock();
+            if (!queue || queue->Read().retired)
+            {
+                queue = ProjectedDeliveryExperiment::Queue::Create(8192, deliver, flushBatch);
+                weak = queue;
+            }
+            return queue;
         }
         HRESULT STDMETHODCALLTYPE GetProjectedDeliveryStatusForProbe(ULONG* pending) override
         {
@@ -5511,6 +5549,7 @@ namespace
             }
             ProjectedDeliveryExperiment::Payload payload;
             payload.event = event;
+            payload.owner = _projectedDeliveryOwner;
             static std::atomic<ULONGLONG> sequence{ 0 };
             payload.sequence = ++sequence;
 #if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
@@ -7201,6 +7240,7 @@ namespace
         HWND _notificationWindow = nullptr;
 #if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
         std::shared_ptr<ProjectedDeliveryExperiment::Queue> _projectedDelivery;
+        ULONGLONG _projectedDeliveryOwner = 0;
         ULONGLONG _projectedBatchToken = 0;
         std::vector<ProjectedDeliveryExperiment::Payload> _projectedBatch;
         bool _projectedDeliveryRetired = false;
