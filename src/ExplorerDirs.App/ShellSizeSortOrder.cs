@@ -13,8 +13,13 @@ internal static class ShellSizeSortOrder
     internal static Task<bool?> AreValuesReadyAsync(nint view, int expectedCount, Func<bool> isCurrent, bool allowUnavailable = false)
         => ReadRowsAsync(view, expectedCount, 1, false, isCurrent, false, allowUnavailable);
 
+    internal static Task<bool?> IsOrderedWithinGroupsAsync(nint view, int expectedCount, int direction,
+        bool mixed, IReadOnlyList<int> groups, Func<bool> isCurrent)
+        => groups.Count == expectedCount ? ReadRowsAsync(view, expectedCount, direction, mixed, isCurrent, true, groups: groups)
+            : Task.FromResult<bool?>(null);
+
     private static async Task<bool?> ReadRowsAsync(nint view, int expectedCount, int direction, bool mixed,
-        Func<bool> isCurrent, bool checkOrder, bool allowUnavailable = false)
+        Func<bool> isCurrent, bool checkOrder, bool allowUnavailable = false, IReadOnlyList<int>? groups = null)
     {
         if (!isCurrent()) return null;
         var folderId = new Guid("93f2f68c-1d1b-11d3-a30e-00c04f79abd1");
@@ -27,6 +32,7 @@ internal static class ShellSizeSortOrder
             var pending = false;
             ulong previous = 0;
             var previousFolder = true;
+            var previousByGroup = groups is null ? null : new Dictionary<int, (ulong Bytes, bool Folder)>();
             for (var index = 0; index < count; index++)
             {
                 if (!isCurrent()) return null;
@@ -64,7 +70,15 @@ internal static class ShellSizeSortOrder
                         if (!isCurrent() || At<GetAttributes>(folder, 9)(folder, 1, ref item, ref attributes) < 0 ||
                             !isCurrent()) return null;
                         var isFolder = (attributes & 0x20000000) != 0;
-                        if (index > 0)
+                        var hasPrevious = index > 0;
+                        if (groups is not null)
+                        {
+                            if (groups[index] < 0) return null;
+                            hasPrevious = previousByGroup!.TryGetValue(groups[index], out var prior);
+                            previous = prior.Bytes;
+                            previousFolder = prior.Folder;
+                        }
+                        if (hasPrevious)
                         {
                             if (!mixed && previousFolder != isFolder &&
                                 (direction > 0 ? !previousFolder : previousFolder)) return false;
@@ -73,6 +87,7 @@ internal static class ShellSizeSortOrder
                         }
                         previous = bytes;
                         previousFolder = isFolder;
+                        if (groups is not null) previousByGroup![groups[index]] = (bytes, isFolder);
                     }
                 }
                 finally { Marshal.FreeCoTaskMem(item); }

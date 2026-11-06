@@ -3194,6 +3194,29 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                         var ready = await ShellSizeSortOrder.AreValuesReadyAsync(view, count.Value, Current, allowUnavailable: true);
                         if (!Current()) return;
                         if (ready != true) continue;
+                        // Observe before changing the sort: the setter can temporarily
+                        // tear down otherwise valid row groups and make a late refresh look necessary.
+                        if (grouped && TryReadGroup(out var activeGroup, out var ascending) && activeGroup is not null &&
+                            activeGroup == _viewState.GroupKey && ascending == _viewState.GroupAscending)
+                        {
+                            var lastChange = Interlocked.Read(ref _directoryChangeLastEventAt);
+                            bool Stable() => Current() && lastChange == Interlocked.Read(ref _directoryChangeLastEventAt);
+                            var groups = await ShellGroupedViewReadiness.ReadMaterializedGroupsAsync(_viewWindow, count.Value, Stable,
+                                step => RecordInitialSortRecovery($"{serial}:group-probe:{step}"));
+                            if (!Current()) return;
+                            var ordered = groups is not null
+                                ? await ShellSizeSortOrder.IsOrderedWithinGroupsAsync(view, count.Value, sort.Direction,
+                                    _viewState.MixedSizeSort, groups, Stable) : null;
+                            if (!Current()) return;
+                            RecordInitialSortRecovery($"{serial}:group-observation;rows={count};groups={groups?.Length};ordered={ordered};stable={Stable()}");
+                            if (ordered == true && Stable())
+                            {
+                                if (selection is not null) RestoreInitialVirtualSortSelection(selection, Current);
+                                RecordInitialSortRecovery($"{serial}:groups-already-ordered");
+                                RecordInitialSortRecovery($"{serial}:direct-finish");
+                                return;
+                            }
+                        }
                         selection ??= ShellViewSelectionSnapshot.Capture(view);
                         var sorts = _viewState.SortColumns.Count > 0 ? _viewState.SortColumns : new[] { sort };
                         var nameKey = new PropertyKeyState(new Guid("b725f130-47ef-101a-a5f1-02608c9eebac"), 10);
@@ -3213,7 +3236,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                         if (!Current()) return;
                         if (grouped)
                         {
-                            // Saved grouping requires one initial enumeration after asynchronous values arrive.
+                            // Cold/unordered grouping still requires its existing recovery.
                             RefreshWithPresentation(traceAsUserRefresh: false, forceFullEnumeration: true);
                         }
                         if (!grouped)
