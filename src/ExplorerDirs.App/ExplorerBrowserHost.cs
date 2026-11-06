@@ -3830,9 +3830,22 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "refresh-origin.log"),
                         $"{Environment.TickCount64} host={GetHashCode():X};manual={traceAsUserRefresh};full={forceFullEnumeration};soft={_softRefresh}\n{new StackTrace(1, false)}\n");
 #endif
+                    Func<int> invokeNativeRefresh = shellView.Refresh;
+#if EXPLORERDIRS_REFRESH_ORIGIN_TRACE
+                    // The origin entry above is only a request: policy preparation can
+                    // decline it. Distinguish that from actually entering IShellView.Refresh.
+                    invokeNativeRefresh = () =>
+                    {
+                        var origin = Path.Combine(AppContext.BaseDirectory, "refresh-origin.log");
+                        File.AppendAllText(origin, $"{Environment.TickCount64} native-enter host={GetHashCode():X}\n");
+                        var result = shellView.Refresh();
+                        File.AppendAllText(origin, $"{Environment.TickCount64} native-return host={GetHashCode():X};hr={result:X8}\n");
+                        return result;
+                    };
+#endif
                     refreshResult = ShellRefreshPolicy.Invoke(traceAsUserRefresh || forceFullEnumeration, _softRefresh,
                         enabled => ShellFolderViewOptions.SetNoEnumRefresh(viewPointer, enabled),
-                        shellView.Refresh, IsCurrentRefreshRequest, () => _softRefresh);
+                        invokeNativeRefresh, IsCurrentRefreshRequest, () => _softRefresh);
                     LastShellRefreshStatus = traceAsUserRefresh ? "manual-full-refresh" :
                         forceFullEnumeration ? "restore-full-refresh" :
                         _softRefresh ? "soft-refresh" : "IShellView.Refresh";
@@ -6050,8 +6063,38 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         _columnFilterArrowMouseDown = false;
     }
 
+#if EXPLORERDIRS_REFRESH_ORIGIN_TRACE
+    private int _listStructureTraceEntries;
+    private long _lastTracedListCount = -1;
+    private void TraceNativeListStructure(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam)
+    {
+        // Diagnostic-only: correlate zero-row samples with native clear/count/sort
+        // commands without asking Shell for state inside its message dispatch.
+        // These are received commands, not proof of forwarding or visible painting.
+        if (message is not (0x000B or 0x1009 or 0x102F or 0x1030 or 0x1051) ||
+            _listStructureTraceEntries >= 512 || WindowClass(hwnd) != "SysListView32") return;
+        if (message == 0x102F) // LVM_SETITEMCOUNT: skip incremental positive startup counts.
+        {
+            var previous = _lastTracedListCount;
+            _lastTracedListCount = wParam.ToInt64();
+            if (previous > 0 && _lastTracedListCount > 0) return;
+        }
+        _listStructureTraceEntries++;
+        try
+        {
+            File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "view-structure-origin.log"),
+                $"{Environment.TickCount64} host={GetHashCode():X};generation={_viewReadiness.Generation};hwnd={hwnd:X};received={message:X};wParam={wParam.ToInt64()};lParam={lParam:X};sort-hold={_sortPaintLease is not null}\n");
+        }
+        catch (IOException) { _listStructureTraceEntries = 512; }
+        catch (UnauthorizedAccessException) { _listStructureTraceEntries = 512; }
+    }
+#endif
+
     private IntPtr ViewWindowProc(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam, nuint id, IntPtr data)
     {
+#if EXPLORERDIRS_REFRESH_ORIGIN_TRACE
+        TraceNativeListStructure(hwnd, message, wParam, lParam);
+#endif
         // Diagnostic stress runs time every message so a rare slow Shell dispatch cannot hide between samples.
         var timingSample = _traceNativeUserMessages;
         var timingClass = timingSample ? GetDiagnosticWindowClass(hwnd) : string.Empty;
