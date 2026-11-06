@@ -37,8 +37,96 @@
 #include <cstdio>
 #include <iomanip>
 #include <sstream>
+#include "ProjectedDeliveryQueueExperiment.h"
 
 extern "C" ED_PROBE_EXPORT void WINAPI ResetSyntheticSortCounters();
+
+#if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+extern "C" __declspec(dllexport) HRESULT WINAPI RunProjectedDeliveryQueueSmoke(DWORD* stage)
+{
+    if (!stage) return E_POINTER;
+    *stage = 1;
+    using namespace ProjectedDeliveryExperiment;
+    struct Gate
+    {
+        HANDLE entered = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        HANDLE release = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        std::mutex mutex;
+        std::vector<Payload> delivered;
+        ~Gate() { if (entered) CloseHandle(entered); if (release) CloseHandle(release); }
+    };
+    auto makeQueue = [](size_t capacity, const std::shared_ptr<Gate>& gate)
+    {
+        return Queue::Create(capacity, [gate](const Payload& payload)
+        {
+            SetEvent(gate->entered);
+            if (WaitForSingleObject(gate->release, 2000) != WAIT_OBJECT_0) throw E_FAIL;
+            std::lock_guard<std::mutex> lock(gate->mutex);
+            gate->delivered.push_back(payload);
+        });
+    };
+    auto waitStarted = [](const std::shared_ptr<Gate>& gate)
+    { return gate->entered && gate->release && WaitForSingleObject(gate->entered, 2000) == WAIT_OBJECT_0; };
+    auto finish = [](const std::shared_ptr<Queue>& queue, const std::shared_ptr<Gate>& gate)
+    { SetEvent(gate->release); return queue->WaitIdleForProbe(3000); };
+    try
+    {
+        auto gate = std::make_shared<Gate>();
+        auto queue = makeQueue(4, gate);
+        Payload first{ 1, { 1, 2, 3 }, { 4, 5 } };
+        if (queue->Enqueue(first) != S_OK || !waitStarted(gate)) return E_FAIL;
+        first.first[0] = 99; first.second[0] = 98;
+        *stage = 2;
+        if (queue->Enqueue(Payload{ 2, { 2 }, {} }) != S_OK || queue->Enqueue(Payload{ 3, { 3 }, {} }) != S_OK)
+        { queue->Retire(); finish(queue, gate); return E_FAIL; }
+        if (!finish(queue, gate)) return E_FAIL;
+        if (gate->delivered.size() != 3 || gate->delivered[0].event != 1 || gate->delivered[1].event != 2 ||
+            gate->delivered[2].event != 3 || gate->delivered[0].first[0] != 1 || gate->delivered[0].second[0] != 4)
+            return E_FAIL;
+
+        *stage = 3;
+        gate = std::make_shared<Gate>(); queue = makeQueue(3, gate);
+        if (queue->Enqueue(first) != S_OK || !waitStarted(gate)) return E_FAIL;
+        if (queue->Enqueue(Payload{ 2, {}, {} }) != S_OK) { queue->Retire(); finish(queue, gate); return E_FAIL; }
+        queue->Retire(); queue->Retire();
+        auto state = queue->Read();
+        const bool retired = state.retired && state.queued == 0 && state.inFlight &&
+            queue->Enqueue(first) == CO_E_OBJNOTCONNECTED;
+        if (!finish(queue, gate) || !retired || gate->delivered.size() != 1) return E_FAIL;
+
+        *stage = 4;
+        gate = std::make_shared<Gate>(); queue = makeQueue(2, gate);
+        if (queue->Enqueue(first) != S_OK || !waitStarted(gate)) return E_FAIL;
+        if (queue->Enqueue(Payload{ 2, {}, {} }) != S_OK) { queue->Retire(); finish(queue, gate); return E_FAIL; }
+        const auto overflow = queue->Enqueue(Payload{ 3, {}, {} });
+        state = queue->Read();
+        const bool bounded = overflow == HRESULT_FROM_WIN32(ERROR_BUFFER_OVERFLOW) && state.retired &&
+            state.inFlight && state.queued == 0 && state.failure == overflow;
+        if (!finish(queue, gate) || !bounded || gate->delivered.size() != 1) return E_FAIL;
+
+        *stage = 5;
+        queue = Queue::Create(2, [](const Payload&) { throw E_FAIL; });
+        if (queue->Enqueue(first) != S_OK || !queue->WaitIdleForProbe(3000)) return E_FAIL;
+        state = queue->Read();
+        if (!state.retired || state.running || state.inFlight || state.queued || state.failure != E_FAIL ||
+            queue->Enqueue(first) != CO_E_OBJNOTCONNECTED) return E_FAIL;
+        *stage = 6;
+        gate = std::make_shared<Gate>(); queue = makeQueue(2, gate);
+        if (queue->Enqueue(first) != S_OK || !waitStarted(gate)) return E_FAIL;
+        std::weak_ptr<Queue> lifetime = queue;
+        queue.reset();
+        if (lifetime.expired()) return E_FAIL;
+        SetEvent(gate->release);
+        const auto deadline = GetTickCount64() + 3000;
+        while (!lifetime.expired() && GetTickCount64() < deadline) Sleep(1);
+        if (!lifetime.expired()) return E_FAIL;
+        { std::lock_guard<std::mutex> lock(gate->mutex); if (gate->delivered.size() != 1) return E_FAIL; }
+        *stage = 7;
+        return S_OK;
+    }
+    catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+}
+#endif
 
 // Product contexts share the validated implementation; probe-only exports remain diagnostic.
 #if defined(EXPLORERDIRS_SIZE_SORT_CONTEXTS) && !defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)

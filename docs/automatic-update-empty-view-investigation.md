@@ -1,5 +1,17 @@
 # 自动变化期间短暂零行：刷新来源调查
 
+## 2026-11-06 后台交付队列独立原型
+
+新增仅PROJECTED_NOTIFY_BRIDGE_EXPERIMENT编译的ProjectedDeliveryQueueExperiment.h及无窗口导出RunProjectedDeliveryQueueSmoke。尚未接入NotifyProjectedArrival/Removal/Rename，也没有向Shell发送通知。队列复制事件号/两份字节载荷，单worker按序消费，不捕获Shell接口/HWND/宿主回调。容量包含排队与已接受在途项；溢出明确退休并清空未接受项，保留失败码，不静默淘汰后续继续。交付回调异常同样退休。
+
+退休不等待worker：立即拒绝新入队/清空未接受项，已经取出的单项允许完成。不能撤回已经被worker接受或Shell接收的通知；实际接入仍需视图/导航代际、在途通知与重开同路径的验证。WaitIdleForProbe仅给无窗口测试使用，产品UI禁止调用。worker持有共享队列及独立DLL引用，FreeLibraryWhenCallbackReturns把模块引用释放推迟到回调返回，CloseThreadpoolWork由系统等待回调结束后实际释放工作对象。API语义依据 https://learn.microsoft.com/en-us/windows/win32/api/threadpoolapiset/nf-threadpoolapiset-freelibrarywhencallbackreturns 和 https://learn.microsoft.com/en-us/windows/win32/api/threadpoolapiset/nf-threadpoolapiset-closethreadpoolwork 。尚未做真实DLL卸载竞态测试，不将API接线当成该验收完成。
+
+RED：先新增探针命令，旧原型缺少导出，projected-delivery-queue-red.log失败。GREEN：projected-delivery-queue-final.log退出0，覆盖调用方修改原始两份载荷后副本不变、顺序、阻塞首项时退休立即清空后续、重复退休/拒绝入队、排队+在途容量、异常退休和调用方释放队列后worker仍完成并最终释放。所有载荷为测试字节，未验证真实PIDL格式或跨线程SHChangeNotify。
+
+有效负向控制：临时删除容量计算中的在途项，构建后projected-delivery-queue-negative-capacity.log在stage4失败；finally恢复源文件，重建及最终全合同通过。原生metadata generation合同继续通过，NativeProbe构建零警告零错误。普通DLL重建哈希仍CADC37A135D8F0551767976EA0258F0A3075499BDFF6518C4101E90B903904EF。没有产品行为、UI或发布变化。
+
+下一步：评审实际绝对PIDL拷贝/格式边界、worker COM初始化、单访问退休和交付失败反馈，再接隔离通知实验；真实Shell更新、吞吐/交互延迟、F5/导航/关闭/同路径重开仍未验证。
+
 ## 2026-11-06 批次确认往返与同步flush对照
 
 原始逐owner日志显示每8事件后等待整批行确认，部分派发递增相隔约0.5秒或更多。实验进程级EXPLORERDIRS_PROJECTED_BATCH64_CONTROL=1将上限改为64，默认仍8；原生实验EXPLORERDIRS_PROJECTED_FLUSH_CONTROL=1改为SHCNF_FLUSH，默认仍FLUSHNOWAIT，普通DLL均排除此控制。不改FIFO/逐项确认/队列容量/10秒确认期限，不自动完整枚举兜底。

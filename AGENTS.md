@@ -31,6 +31,8 @@
 
 - Native ListView column-arrow geometry must use its Header rectangle/order/dropdown contracts with Shell visible-column keys, rather than walking the whole UIA descendant tree during updates. Retain non-ListView fallback, split-button checks and navigation-generation validation after COM capture; verify native keys/bounds and keep mouse/DPI acceptance separate from timing probes.
 
+- Experimental background notification transport must own copied payload bytes and its code-module lifetime; do not send STA Shell interfaces, view HWNDs or owner callbacks to workers. Capacity counts queued plus accepted in-flight work. Retire without UI waiting, reject new work and clear queued work, while explicitly treating accepted delivery as non-retractable. Mock transport contracts do not prove PIDL validity, actual Shell delivery, navigation safety or DLL-unload races.
+
 ## Product boundary
 
 - A projected queue is settled only after queued and in-flight work completes and the visit remains valid. On a stale Created/Changed path-not-found result, reconcile native observed removal or verified native-row absence; retain the original queue work for retirement while using the actual removal outcome for confirmation. Do not stop the whole monitor merely because an older property event outlived its file, or silently discard unknown rows without checking them.

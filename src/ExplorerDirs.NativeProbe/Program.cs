@@ -20,6 +20,8 @@ internal static class Program
             return ProjectedWatcherLedgerProbe.Run();
         if (args is ["--projected-change-ledger-smoke"])
             return ProjectedChangeLedgerSmoke.Run();
+        if (args is ["--projected-delivery-queue-smoke", var deliveryQueueAdapter])
+            return ProjectedDeliveryQueueProbe.Run(deliveryQueueAdapter);
         if (args is ["--projected-metadata-generation-smoke", var metadataGenerationAdapter])
             return ProjectedMetadataGenerationProbe.Run(metadataGenerationAdapter);
         if (args is ["--product-drop-attributes", var dropAdapter])
