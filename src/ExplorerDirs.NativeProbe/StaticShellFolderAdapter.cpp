@@ -3796,6 +3796,21 @@ namespace
             if (message == SFVM_FSNOTIFY)
             {
 #if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+                struct CallbackTiming
+                {
+                    ULONGLONG started = GetTickCount64();
+                    DWORD context = 0;
+                    LONG event = 0;
+                    WCHAR name[MAX_PATH]{};
+                    ~CallbackTiming()
+                    {
+                        const auto elapsed = GetTickCount64() - started;
+                        // Inclusive callback wall time, not DefView's later row
+                        // application. Keep fast returns out of the bounded trace.
+                        if (elapsed >= 25)
+                            TraceProjectedDeliveryFieldsForProbe("view-callback-slow", elapsed, context, event, name);
+                    }
+                } callbackTiming;
                 if (wParam)
                 {
                     auto* pidls = reinterpret_cast<PCIDLIST_ABSOLUTE*>(wParam);
@@ -3804,6 +3819,10 @@ namespace
 #if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
                     context = _sizeSortContext ? _sizeSortContext->id : 0;
 #endif
+                    callbackTiming.context = context;
+                    callbackTiming.event = static_cast<LONG>(lParam) & ~SHCNE_INTERRUPT;
+                    StringCchCopyNW(callbackTiming.name, ARRAYSIZE(callbackTiming.name),
+                        child ? child->name : _backingPath.c_str(), ARRAYSIZE(callbackTiming.name) - 1);
                     // Observe the callback's delivered event; do not ask the view
                     // for state or resolve PIDLs from inside its message dispatch.
                     TraceProjectedDeliveryFieldsForProbe("view-event", 0, context,

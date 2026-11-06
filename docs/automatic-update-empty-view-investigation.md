@@ -1,3 +1,11 @@
+## 2026-11-06 Native view callback wall-time boundary
+
+Added experiment-only scoped timing around the full SFVM_FSNOTIFY handler, recording view-callback-slow only for inclusive wall time >=25ms. Its seq field is elapsed milliseconds (not delivery sequence). Copy the bounded item label before native calls rather than retaining a pointer to mutable root storage. Callback timing stops when our handler returns E_NOTIMPL; DefView's later application is outside this interval. Native compile passed; ordinary code is excluded by the existing experiment guard.
+
+Actual two-process/four-pane atomic+chunk4/batch64 repeat: src/.state/projected-view-callback.log and projected-view-callback-timeline.log. Full exit0; create6,425/7,528ms, delete2,026/1,551ms. No sampled zero rows; names/group/session/placement/registration cleanup and foreground/input guards passed; no trace truncation. PID39896 had15 slow callbacks totaling623ms inclusive, max125ms; PID72428 had none >=25ms. This does not include sub-threshold callbacks' cumulative time, cannot prove total callback cost negligible, and is not a CPU measurement. No seconds-long single callback was recorded this round despite seconds of end-to-end delay.
+
+The earlier failed atomic run remains valid evidence; this passing repeat does not establish reliability/performance. Do not remove recursive-size invalidation based on this measurement. Next measure per-view row application after delivered event and aggregate fast callback cost if needed. No product/default change or publication.
+
 ## 2026-11-06 Atomic submission bridge: real App regression
 
 Experiment ABI v6 IID F7936234-A72D-40FB-A169-21761B3D7126 appends BeginBatch(out token)/EndBatch(token,commit) slots13/14. Current App/native probe IDs updated together. Only EXPLORERDIRS_PROJECTED_ATOMIC_BATCH_CONTROL=1 wraps one dispatch turn. Each native arrival/removal/rename still prepares its owner's metadata/tickets; copied payloads are staged, included in pending status, and submitted atomically after successful still-current dispatch. Finally cancels after exceptions/retirement. Cancellation removes staged transport, not already prepared metadata; failed/current monitors stop and require reconciliation rather than silently resuming. Retire clears staging and invalidates tokens. No ordinary ABI or product path changes.
