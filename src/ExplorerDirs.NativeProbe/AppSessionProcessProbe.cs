@@ -163,6 +163,8 @@ internal static class AppSessionProcessProbe
                         readings.Any(item => item.Grouped == 1);
                 }, TimeSpan.FromSeconds(60), "Full app views/grouping did not become ready.");
                 VerifyProjectedMonitors();
+                if (Environment.GetEnvironmentVariable("EXPLORERDIRS_PROBE_IDLE_BASELINE") == "1")
+                    ObserveIdleBaseline(window, child);
                 VerifyExternalDirectoryChanges(window, child, expected, pass, settleExternalChanges, fillerCount, adapterOverride is null ? null : Path.Combine(app, "ExplorerDirs.ShellNamespace.dll.size-trace.log"), burstCount);
                 if (projectedExperiment)
                 {
@@ -534,6 +536,30 @@ internal static class AppSessionProcessProbe
             Thread.Sleep(pollMilliseconds);
         }
     }
+    private static void ObserveIdleBaseline(nint window, ProcessInfo child)
+    {
+        var trace = Environment.GetEnvironmentVariable("EXPLORERDIRS_PROJECTED_DELIVERY_TRACE");
+        int? Enumerations() => trace is not null && File.Exists(trace)
+            ? File.ReadLines(trace).Count(line => line.Contains($" enumerate;pid={child.ProcessId};", StringComparison.Ordinal))
+            : null;
+        var before = Enumerations();
+        var timer = Stopwatch.StartNew();
+        var samples = 0;
+        var emptySamples = 0;
+        // Observe startup work without manufacturing a directory event. Keep the
+        // ordinary mutation assertions unchanged after this opt-in timing control.
+        while (timer.Elapsed < TimeSpan.FromSeconds(8))
+        {
+            EnsureRunning(child);
+            var lists = VisibleFileViews(window);
+            if (lists.Count != 4) throw new InvalidOperationException("Idle baseline lost a visible pane.");
+            if (lists.Any(list => Message(list, 0x1004) == 0)) emptySamples++;
+            samples++;
+            Thread.Sleep(250);
+        }
+        Console.WriteLine($"app-idle-baseline: pid={child.ProcessId};ms={timer.ElapsedMilliseconds};samples={samples};empty-samples={emptySamples};enumerations={before?.ToString() ?? "unavailable"}->{Enumerations()?.ToString() ?? "unavailable"};no-fixture-mutations=True");
+    }
+
     private static nint Message(nint window, uint message) =>
         SendMessageTimeoutW(window, message, 0, 0, 2, 200, out var result) != 0 ? result : -1;
     private static List<nint> VisibleFileViews(nint window)

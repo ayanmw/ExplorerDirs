@@ -1,3 +1,14 @@
+## 2026-11-06 Idle-versus-immediate paired timing control
+
+Added opt-in EXPLORERDIRS_PROBE_IDLE_BASELINE=1 to the full-process harness only. After four views/grouping/monitor readiness, observe eight seconds with no fixture mutations; retain liveness/visible-pane checks and report native enumeration counts plus sparse 250ms empty-row samples. It does not delay the product or change the existing mutation assertions. This sampling does not prove visual smoothness.
+
+NativeProbe Release build passed (0 warnings/errors). Same prepared experiment and chunk4/batch64/background transport configuration, two processes per control, same physical root, 32-file burst, no filler rows:
+
+- Idle control: src/.state/projected-idle-baseline.log and projected-idle-baseline-timeline.log. Each process observed 8,150ms/31 samples, zero empty samples, enumeration 5->5. Subsequent create 5,309/8,071ms; delete 2,147/1,812ms. Full run exit0; actual row/name/group, session, placement, registration cleanup and foreground/input isolation assertions passed.
+- Immediate control: src/.state/projected-no-idle-control.log and projected-no-idle-control-timeline.log. Create 5,867/8,101ms; delete 2,093/1,961ms. Full exit0, ten total enumeration calls (five per process), no extra enumeration, same final assertions and isolation guards passed.
+
+Both controls passed this round, so the earlier intermittent re-enumeration is not reproduced. Eight seconds idle did not remove seconds of delivery latency; do not implement a startup sleep or call the race solved. Per-file tracing shows four owners accept the same physical path's event, and native views may receive repeated DELETE/UPDATEITEM callbacks; counts differ by view because Shell can merge notifications. Next inspect fanout and physical-root versus context identity semantics before considering deduplication: per-owner confirmation and size/sort facts must not be discarded. No product change or publication.
+
 ## 2026-11-06 Public-symbol interpretation of enumeration worker
 
 REA opened the system DLL but no native analysis provider was available; session was closed without configuration changes. Downloaded Microsoft's public PDBs by each image's RSDS key into src/.state/native-symbols. DbgHelp SymFromAddr returned error 126 even with the installed VS x64 helper; this attempt is not a successful symbol-handler validation. A read-only MSF/DBI/S_PUB32 parser then mapped section-relative public symbol addresses to the DLL's PE section RVAs.
