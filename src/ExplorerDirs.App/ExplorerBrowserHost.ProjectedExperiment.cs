@@ -74,6 +74,7 @@ internal sealed partial class ExplorerBrowserHost
         var lastLoggedSettled = 0;
         long nativeTicks = 0, readTicks = 0, ackTicks = 0;
         long lastTick = Stopwatch.GetTimestamp(), maximumActiveGap = 0, sampledPendingTicks = 0;
+        long callbackTicks = 0, maximumCallbackTicks = 0, loggingTicks = 0;
         var activeTicks = 0;
         var notReadyChecks = 0;
         T Measure<T>(ref long total, Func<T> action)
@@ -82,7 +83,7 @@ internal sealed partial class ExplorerBrowserHost
             try { return action(); }
             finally { total += Stopwatch.GetTimestamp() - started; }
         }
-        string Timing() => $"native-ms={nativeTicks * 1000.0 / Stopwatch.Frequency:F1};read-ms={readTicks * 1000.0 / Stopwatch.Frequency:F1};ack-ms={ackTicks * 1000.0 / Stopwatch.Frequency:F1};active-gap-max-ms={maximumActiveGap * 1000.0 / Stopwatch.Frequency:F1};sampled-pending-ms={sampledPendingTicks * 1000.0 / Stopwatch.Frequency:F1};active-ticks={activeTicks};not-ready={notReadyChecks}";
+        string Timing() => $"native-ms={nativeTicks * 1000.0 / Stopwatch.Frequency:F1};read-ms={readTicks * 1000.0 / Stopwatch.Frequency:F1};ack-ms={ackTicks * 1000.0 / Stopwatch.Frequency:F1};active-gap-max-ms={maximumActiveGap * 1000.0 / Stopwatch.Frequency:F1};sampled-pending-ms={sampledPendingTicks * 1000.0 / Stopwatch.Frequency:F1};callback-ms={callbackTicks * 1000.0 / Stopwatch.Frequency:F1};callback-max-ms={maximumCallbackTicks * 1000.0 / Stopwatch.Frequency:F1};logging-ms={loggingTicks * 1000.0 / Stopwatch.Frequency:F1};active-ticks={activeTicks};not-ready={notReadyChecks}";
 
         bool Current() => ReferenceEquals(_projectedQueue, queue) &&
             _directoryChangeVersion == monitorVersion && _viewReadiness.NavigationVersion == navigationVersion &&
@@ -180,13 +181,13 @@ internal sealed partial class ExplorerBrowserHost
                     if (!Current()) return;
                     if (lastLoggedDispatch != dispatched)
                     {
-                        LogProjectedExperiment($"dispatch path={path};owner={viewWindow:X};{Timing()};events={dispatched}");
+                        Measure(ref loggingTicks, () => { LogProjectedExperiment($"dispatch path={path};owner={viewWindow:X};{Timing()};events={dispatched}"); return 0; });
                         lastLoggedDispatch = dispatched;
                     }
                     if (dispatch.PendingCount == 0 && queue.Snapshot.Queued == 0 &&
                         (lastLoggedSettled != dispatched || lastEnumerations != enumerations))
                     {
-                        LogProjectedExperiment($"settled path={path};owner={viewWindow:X};{Timing()};events={dispatched};enumerations={baseline}->{enumerations}");
+                        Measure(ref loggingTicks, () => { LogProjectedExperiment($"settled path={path};owner={viewWindow:X};{Timing()};events={dispatched};enumerations={baseline}->{enumerations}"); return 0; });
                         lastLoggedSettled = dispatched;
                         lastEnumerations = enumerations;
                     }
@@ -202,7 +203,15 @@ internal sealed partial class ExplorerBrowserHost
                     StopProjectedMonitorExperiment();
                 }
             }
-            finally { Marshal.Release(bridge); }
+            finally
+            {
+                Marshal.Release(bridge);
+                // Inclusive wall time, including logging and synchronous reentry.
+                // Timing() reports earlier completed callbacks, not this live callback.
+                var elapsed = Stopwatch.GetTimestamp() - now;
+                callbackTicks += elapsed;
+                maximumCallbackTicks = Math.Max(maximumCallbackTicks, elapsed);
+            }
         };
         _projectedQueue = queue;
         _projectedWatcher = watcher;

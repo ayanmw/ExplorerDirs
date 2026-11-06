@@ -1,5 +1,13 @@
 # 自动变化期间短暂零行：刷新来源调查
 
+## 2026-11-06 完整回调与日志耗时对照
+
+新增实验 callback-ms/callback-max-ms/logging-ms，完整回调finally计时包含同步重入和日志；日志字段反映此前已完成回调，当前写日志尚未结束，不能视为当前回调的闭合计时。首轮补充计时漏接finally，仅日志计时有效，保留 `projected-callback-name32.log`，不将其中为零的callback字段作为证据；修正后重新准备并运行完整场景。
+
+有效结果 `src/.state/projected-callback-complete-name32.log`，owned run `src/.state/app-session-process/9852c6a0d13943c3a12640ef36ed9e6e`：两进程四窗格1025填充行/32文件增删、逐名、分组、确认及枚举检查均通过；前台/输入/清理守卫通过，整体退出0，自动阶段无零行。批量新增5841/5805ms、删除2884/2035ms。八owner最后settled累计回调115.1–145.3ms，单次最大7.9–13.7ms，日志累计5.9–9.2ms，而待办时回调最大间隔646.6–1084.2ms。完整回调与日志的已测耗时不能解释长间隔；仍需测量Dispatcher操作排队/执行与其他消息工作，不能直接归因Shell或调高优先级。所有值为墙钟时间，重入可重叠，不是CPU独占占比。
+
+普通HostProbe/App再次构建零警告零错误，普通输出排除实验入口；本批未发布。
+
 ## 2026-11-06 待办期间定时器间隔实测
 
 实验计时增加 active-gap-max-ms、sampled-pending-ms、active-ticks 和 not-ready，只记录回调开始间隔及待确认采样，不改变调度优先级、20ms周期或超时。
