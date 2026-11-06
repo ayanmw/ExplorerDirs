@@ -98,3 +98,14 @@ Microsoft SHChangeNotifyRegister文档说明通知可合并为UPDATEDIR：https:
 替换为仅诊断编译的WH_CALLWNDPROC线程钩子（不修改MSG，不消费事件，始终CallNextHookEx；首个订阅安装、最后注销卸载）。`src/.state/notification-sent-dispatch-control.log`原始目录`src/.state/app-session-process/93f482ce07414f27a5cd563c4e51c03c/app`，adapter SHA256 C7F3F7A99920C0D6A5CC4CA49CE8828237D0CFF3CB0E08CB61E558FC347621CA。四条分派记录与四条physical-delivery、physical-view-event匹配；独立观察器随后收到RMDIR时，两处均无对应删除，目录残留超时。故该轮没有“已到分派却被应用子类吞掉”的证据。不能据此证明所有消息投递场景均正确。
 
 共享输入变化，隔离守卫未通过，仍非性能/稳定性成功。钩子没有进入普通产品构建。安装成功时不解读未定义的GetLastError旧值；仅失败时记录错误码。下步侧重同进程DefView投影订阅与物理订阅的关系，而非无依据改写WPF键盘/主题分派。
+
+
+## 延后注册与软刷新拆分对照
+
+一次性PostMessage延后重建物理订阅的候选中，四窗格均记录queued及applied（原注册1/4/7/10替换3/6/9/12），仍缺少删除投递且目录残留。日志`src/.state/deferred-subscription-order-control.log`。候选已撤回，源码保存`src/.state/deferred-notification-registration.patch`；不增加产品延迟注册或重试。
+
+新增大目录/原生DLL对照命令可组合`--no-soft-refresh`。`src/.state/native-subscription-no-soft-control.log`两次独立进程业务流程通过，确实记录RMDIR；但同时启用了原有完整刷新恢复，第二进程累计184次含零行的轮询采样（不是闪烁次数），不能当作自然逐项通知或体验成功，也不是采用关闭软刷新的理由。输入守卫不通过。
+
+为拆分原生标志与managed恢复，将SetNoEnumRefresh(IntPtr,bool)只在隔离构建强制传false；其余_softRefresh=True不变。准备载荷`src/.state/gui-smoke/20261106-074256-620-d0f2bc`；`src/.state/noenum-flag-only-control.log`目录删除仍失败，原生RMDIR记录0。已反射读取两个载荷方法IL：基线02200000080003284F0000062A（ldarg.1），对照02200000080016284F0000062A（ldc.i4.0），确认构建确实应用控制。首次反射用错类型命名空间、随后未区分重载，均未取得证据；更正为全局类型且IntPtr重载后成功。不能将故障直接归因于FWF_NOENUMREFRESH。
+
+隔离宏和产品源码已撤回，补丁保存在`src/.state/noenum-flag-control.patch`，releases/profile不变。普通App重新构建恢复。后续应比较managed完整恢复具体触发了什么通知，而非关闭软刷新或删除原生标志当成修复。
