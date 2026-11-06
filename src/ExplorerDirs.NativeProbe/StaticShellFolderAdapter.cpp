@@ -109,6 +109,8 @@ namespace
 #if defined(EXPLORERDIRS_NOTIFICATION_TRACE_EXPERIMENT)
         if (strcmp(stage, "physical-view-event") && strcmp(stage, "provider-view-forwarded") &&
             strcmp(stage, "provider-identity-live") && strcmp(stage, "provider-identity-missing") &&
+            strcmp(stage, "physical-view-subscription") && strcmp(stage, "physical-view-unsubscribe") &&
+            strcmp(stage, "physical-delivery") && strcmp(stage, "physical-delivery-lock-failed") &&
             strcmp(stage, "same-name-metadata-compare") &&
             strcmp(stage, "view-enumeration") && strcmp(stage, "view-enumerator") &&
             strcmp(stage, "enum-next-external") && strcmp(stage, "size-publish-external") &&
@@ -5019,6 +5021,7 @@ namespace
                 self->_notificationWindow = nullptr;
                 const auto registration = self->_backingNotificationRegistration;
                 self->_backingNotificationRegistration = 0;
+                ED_SIZE_TRACE("physical-view-unsubscribe", self, nullptr, registration, 0, 0);
                 if (registration) SHChangeNotifyDeregister(registration);
                 RemoveWindowSubclass(window, BackingNotificationProc, subclassId);
                 self->ReleaseViewHold();
@@ -5058,6 +5061,9 @@ namespace
 #endif
             if (message == BackingNotificationMessage())
             {
+                // Record receipt before locking: absence of a parsed event alone
+                // must not be mistaken for absence of a window delivery.
+                ED_SIZE_TRACE("physical-delivery", self, nullptr, self->_backingNotificationRegistration, 0, 0);
                 PIDLIST_ABSOLUTE* pidls = nullptr;
                 LONG event = 0;
                 const auto lock = SHChangeNotification_Lock(reinterpret_cast<HANDLE>(wParam),
@@ -5083,6 +5089,8 @@ namespace
                     if (second) CoTaskMemFree(second);
                     self->Release();
                 }
+                else ED_SIZE_TRACE("physical-delivery-lock-failed", self, nullptr,
+                    self->_backingNotificationRegistration, GetLastError(), 0);
                 return 0;
             }
             return DefSubclassProc(window, message, wParam, lParam);
