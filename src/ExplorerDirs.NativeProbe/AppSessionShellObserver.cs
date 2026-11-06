@@ -27,6 +27,10 @@ internal sealed class AppSessionShellObserver : IDisposable
             {
                 Marshal.ThrowExceptionForHR(SHParseDisplayName(root, 0, out var pidl, 0, out _));
                 _roots.Add(pidl);
+                ulong pathHash = 14695981039346656037UL;
+                foreach (var character in root)
+                    pathHash = unchecked((pathHash ^ char.ToUpperInvariant(character)) * 1099511628211UL);
+                Console.WriteLine($"app-shell-observer-root: item={Path.GetFileName(root)}; path-hash={pathHash}");
                 _window.Register(pidl, recursive: false);
             }
             Console.WriteLine($"app-shell-observer-ready: roots={_roots.Count}; recursive=False; forwards=False");

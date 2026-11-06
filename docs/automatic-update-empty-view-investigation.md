@@ -109,3 +109,12 @@ Microsoft SHChangeNotifyRegister文档说明通知可合并为UPDATEDIR：https:
 为拆分原生标志与managed恢复，将SetNoEnumRefresh(IntPtr,bool)只在隔离构建强制传false；其余_softRefresh=True不变。准备载荷`src/.state/gui-smoke/20261106-074256-620-d0f2bc`；`src/.state/noenum-flag-only-control.log`目录删除仍失败，原生RMDIR记录0。已反射读取两个载荷方法IL：基线02200000080003284F0000062A（ldarg.1），对照02200000080016284F0000062A（ldc.i4.0），确认构建确实应用控制。首次反射用错类型命名空间、随后未区分重载，均未取得证据；更正为全局类型且IntPtr重载后成功。不能将故障直接归因于FWF_NOENUMREFRESH。
 
 隔离宏和产品源码已撤回，补丁保存在`src/.state/noenum-flag-control.patch`，releases/profile不变。普通App重新构建恢复。后续应比较managed完整恢复具体触发了什么通知，而非关闭软刷新或删除原生标志当成修复。
+
+
+## 跨进程实际路径核对
+
+此前仅比较订阅PIDL与适配器自身_backingPath，不能证明它等于测试实际修改的目录。补充诊断对实际FILESYSPATH与观察器输入路径按相同大写字符单元计算64位FNV指纹（测试路径均ASCII），只输出叶名与指纹，不输出完整路径。`src/.state/cross-process-root-path-control.log`四根指纹全部匹配：pane-0-tab-1=11491140687868505830，pane-1-tab-0=5821811756782557410，pane-2-tab-0=18049280870254145511，pane-3-tab-0=13487777824083529520。这是本轮跨进程路径一致的补证，未发现会话副本仍浏览旧根；指纹比较不替代通用Windows路径身份合同。
+
+该轮仍目录删除失败，独立Shell收到RMDIR，产品无对应记录；共享输入变化，隔离守卫不通过。日志未达上限。需继续检查恢复链，不能宣称已修复。
+
+另核查旧IShellFolderView.RemoveObject方案：微软说明IShellFolderView从Windows 7起不再供使用，应使用IFolderView/IFolderView2（https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nn-shlobj_core-ishellfolderview），不采用旧接口作为本项目支持基线。没有因这一探索加入直接操纵原生列表或全视图刷新。

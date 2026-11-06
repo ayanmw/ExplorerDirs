@@ -111,6 +111,7 @@ namespace
             strcmp(stage, "provider-identity-live") && strcmp(stage, "provider-identity-missing") &&
             strcmp(stage, "physical-view-subscription") && strcmp(stage, "physical-view-unsubscribe") &&
             strcmp(stage, "physical-subscription-root") && strcmp(stage, "physical-root-reinitialized") &&
+            strcmp(stage, "physical-subscription-path-hash") &&
             strcmp(stage, "physical-delivery") && strcmp(stage, "physical-delivery-lock-failed") &&
             strcmp(stage, "physical-dispatch-message") && strcmp(stage, "physical-dispatch-hook") &&
             strcmp(stage, "same-name-metadata-compare") &&
@@ -4971,7 +4972,18 @@ namespace
                 static_cast<DWORD>(subscriptionPathResult),
                 subscriptionPath && _wcsicmp(subscriptionPath, _backingPath.c_str()) == 0 ? 1 : 0,
                 ILGetSize(_backingRoot));
-            if (subscriptionPath) CoTaskMemFree(subscriptionPath);
+            if (subscriptionPath)
+            {
+                ULONGLONG pathHash = 14695981039346656037ull;
+                for (const auto* character = subscriptionPath; *character; ++character)
+                {
+                    pathHash ^= static_cast<USHORT>(towupper(*character));
+                    pathHash *= 1099511628211ull;
+                }
+                ED_SIZE_TRACE("physical-subscription-path-hash", this, PathFindFileNameW(subscriptionPath),
+                    ILGetSize(_backingRoot), 0, pathHash);
+                CoTaskMemFree(subscriptionPath);
+            }
 #endif
             SHChangeNotifyEntry entry{ _backingRoot, FALSE };
             _backingNotificationRegistration = SHChangeNotifyRegister(window,
