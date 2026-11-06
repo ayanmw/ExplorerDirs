@@ -1,3 +1,11 @@
+## 2026-11-07 Owner-scoped queue retirement primitive
+
+Before sharing a transport between same-root views, Queue now assigns nonzero monotonically increasing owner tokens within that queue. Payload.owner=0 preserves legacy unscoped behavior. Enqueue validates every scoped payload before inserting any batch item; retired/unknown tokens reject the whole submission. RetireOwner removes only its queued payloads, preserves peer FIFO work, and leaves its already accepted in-flight call non-retractable. Registration uses active tokens only, not an ever-growing retired-token history; queue-wide retirement clears active registrations. Tokens are scoped to their queue instance, not global IDs.
+
+RED: new owner test failed native queue smoke stage11 with registration stub. GREEN: native compile and NativeProbe Release build passed, final smoke passed all previous cases plus owner retirement. With A in flight and A/B queued, retire A leaves B queued and queue live; completion delivers accepted A then B, never queued A. Replacement registration gets a fresh token and cannot revive A. A batch containing an unregistered owner inserts nothing. Null registration, retired queue registration/output-zero, and old enqueue rejection covered. No Shell calls, windows, files, COM view state or performance assertions in this contract test.
+
+Actual bridge does not register owners or use shared queues yet. This is a prerequisite lifecycle primitive, not a deduplication/performance fix. Next attach an opt-in physical-root shared queue with owner-specific retirement and shared pending status; metadata preparation/tickets remain local. Ordinary native SHA256 unchanged B61059F45CC281131820D22FB831BCF01D1530B70BC6539ACBC2A8C9313399FF. No product/default change or publication.
+
 ## 2026-11-06 Revised confirmation recorder: owner idle is not global idle
 
 Revised recorder executed in prepared payload src/.state/gui-smoke/20261106-155621-940-16bfb6. Actual full two-process/four-pane same-root run src/.state/projected-confirmation-v2.log exited0, with row/name/group/session/placement/registration cleanup and foreground/input guards passed. Create8,725/7,225ms, delete2,394/8,798ms, no sampled empty lists; native trace not truncated. This remains slow and does not supersede prior intermittent failures.

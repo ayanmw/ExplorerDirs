@@ -155,6 +155,32 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunProjectedDeliveryQueueSmoke(D
         queue->Retire();
         if (queue->EnqueueBatch(batch) != CO_E_OBJNOTCONNECTED) return E_FAIL;
         *stage = 11;
+        gate = std::make_shared<Gate>(); queue = makeQueue(8, gate, 4);
+        ULONGLONG firstOwner = 0, secondOwner = 0;
+        if (queue->RegisterOwner(&firstOwner) != S_OK || queue->RegisterOwner(&secondOwner) != S_OK ||
+            !firstOwner || !secondOwner || firstOwner == secondOwner) return E_FAIL;
+        auto ownedFirst = first; ownedFirst.owner = firstOwner;
+        if (queue->Enqueue(ownedFirst) != S_OK || !waitStarted(gate)) return E_FAIL;
+        auto retiredPending = first; retiredPending.owner = firstOwner; retiredPending.event = 12;
+        auto survivingPending = first; survivingPending.owner = secondOwner; survivingPending.event = 22;
+        if (queue->EnqueueBatch({ retiredPending, survivingPending }) != S_OK) return E_FAIL;
+        queue->RetireOwner(firstOwner);
+        ULONGLONG replacementOwner = 0;
+        if (queue->RegisterOwner(&replacementOwner) != S_OK || replacementOwner == firstOwner ||
+            replacementOwner == secondOwner) { finish(queue, gate); return E_FAIL; }
+        if (queue->Enqueue(ownedFirst) != CO_E_OBJNOTCONNECTED || queue->Read().queued != 1 || queue->Read().retired)
+        { finish(queue, gate); return E_FAIL; }
+        if (!finish(queue, gate) || gate->delivered.size() != 2 ||
+            gate->delivered[0].owner != firstOwner || gate->delivered[1].owner != secondOwner) return E_FAIL;
+        *stage = 12;
+        gate = std::make_shared<Gate>(); queue = makeQueue(8, gate, 4);
+        if (queue->RegisterOwner(&secondOwner) != S_OK || queue->RegisterOwner(nullptr) != E_POINTER) return E_FAIL;
+        survivingPending.owner = secondOwner; retiredPending.owner = secondOwner + 1;
+        if (queue->EnqueueBatch({ survivingPending, retiredPending }) != CO_E_OBJNOTCONNECTED ||
+            queue->Read().running || queue->Read().queued != 0) return E_FAIL;
+        queue->Retire();
+        if (queue->RegisterOwner(&firstOwner) != CO_E_OBJNOTCONNECTED || firstOwner != 0) return E_FAIL;
+        *stage = 13;
         return S_OK;
     }
     catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }

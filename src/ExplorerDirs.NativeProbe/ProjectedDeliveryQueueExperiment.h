@@ -2,6 +2,7 @@
 
 #if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
 #include <deque>
+#include <set>
 
 // Experimental transport only. No Shell interface pointers, HWNDs or owner callbacks
 // cross threads. The caller prepares payloads; the worker receives independent bytes.
@@ -15,6 +16,7 @@ namespace ProjectedDeliveryExperiment
         ULONGLONG sequence = 0;
         DWORD context = 0;
         std::wstring name;
+        ULONGLONG owner = 0; // Zero retains the original unscoped transport contract.
     };
 
     class Queue : public std::enable_shared_from_this<Queue>
@@ -32,12 +34,39 @@ namespace ProjectedDeliveryExperiment
         HRESULT EnqueueBatch(const std::vector<Payload>& payloads)
         { return EnqueueItems(payloads.data(), payloads.size()); }
 
+        HRESULT RegisterOwner(ULONGLONG* owner)
+        {
+            if (!owner) return E_POINTER;
+            *owner = 0;
+            std::lock_guard<std::mutex> lock(_mutex);
+            if (_retired) return CO_E_OBJNOTCONNECTED;
+            if (_nextOwner == ~ULONGLONG{ 0 }) return HRESULT_FROM_WIN32(ERROR_ARITHMETIC_OVERFLOW);
+            const auto next = _nextOwner + 1;
+            try { _owners.insert(next); }
+            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+            *owner = _nextOwner = next;
+            return S_OK;
+        }
+
+        void RetireOwner(ULONGLONG owner)
+        {
+            if (!owner) return;
+            std::lock_guard<std::mutex> lock(_mutex);
+            _owners.erase(owner);
+            _pending.erase(std::remove_if(_pending.begin(), _pending.end(),
+                [owner](const Payload& payload) { return payload.owner == owner; }), _pending.end());
+            // The accepted call is deliberately left intact. Other owners'
+            // queued items retain FIFO order and the worker keeps its module pin.
+        }
+
     private:
         HRESULT EnqueueItems(const Payload* payloads, size_t count)
         {
             std::lock_guard<std::mutex> lock(_mutex);
             if (_retired) return CO_E_OBJNOTCONNECTED;
             if (count == 0) return S_OK;
+            for (size_t index = 0; index < count; ++index)
+                if (payloads[index].owner && !_owners.count(payloads[index].owner)) return CO_E_OBJNOTCONNECTED;
             const auto occupied = _pending.size() + (_inFlight ? 1 : 0);
             if (occupied > _capacity || count > _capacity - occupied)
             {
@@ -102,6 +131,7 @@ namespace ProjectedDeliveryExperiment
         {
             _retired = true;
             _pending.clear();
+            _owners.clear();
             if (FAILED(failure)) _failure = failure;
             // An accepted in-flight call may finish after retirement. Do not hold
             // this mutex during delivery or join from the UI; do not claim retraction.
@@ -150,6 +180,8 @@ namespace ProjectedDeliveryExperiment
         std::mutex _mutex;
         std::condition_variable _idle;
         std::deque<Payload> _pending;
+        std::set<ULONGLONG> _owners;
+        ULONGLONG _nextOwner = 0;
         bool _inFlight = false;
         bool _running = false;
         bool _retired = false;
