@@ -14,6 +14,8 @@ internal static class Program
     [STAThread]
     static int Main(string[] args)
     {
+        if (args is ["--projected-metadata-generation-smoke", var metadataGenerationAdapter])
+            return ProjectedMetadataGenerationProbe.Run(metadataGenerationAdapter);
         if (args is ["--product-drop-attributes", var dropAdapter])
             return SyntheticShellSortProbe.RunProductDropAttributes(dropAdapter);
         if (args is ["--product-item-comparison", var comparisonAdapter])

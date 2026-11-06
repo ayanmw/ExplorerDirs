@@ -1659,11 +1659,12 @@ namespace
         using SnapshotMap = std::map<std::wstring, SyntheticRecursiveSizeSnapshot, ShellParsingNameLess>;
         enum class ScanReservation { Cached, Acquired, InProgress, Failed };
 #if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
-        // Share facts across Shell worker folder objects; retain only live view roots.
+        // Monotonic versions survive root close/reopen for this owner lifetime.
         void RetainObservedRoot(PCWSTR root)
         {
             std::lock_guard<std::mutex> lock(_mutex);
-            ++_observedRoots[root].views;
+            auto& observed = _observedRoots[root];
+            if (observed.views++ == 0) observed.version = ++_observedSequence;
         }
         void ReleaseObservedRoot(PCWSTR root)
         {
@@ -1671,21 +1672,32 @@ namespace
             const auto found = _observedRoots.find(root);
             if (found != _observedRoots.end() && --found->second.views == 0) _observedRoots.erase(found);
         }
-        void RecordObservedChildren(PCWSTR root, const std::vector<SyntheticChild>& children)
+        ULONGLONG BeginObservedEnumeration(PCWSTR root)
         {
             std::lock_guard<std::mutex> lock(_mutex);
             const auto found = _observedRoots.find(root);
-            if (found == _observedRoots.end()) return;
-            for (const auto& child : children) found->second.children[child.name] = child.attributes;
+            return found == _observedRoots.end() ? 0 : found->second.version;
         }
-        bool TryGetObservedAttributes(PCWSTR root, PCWSTR leaf, DWORD* attributes)
+        bool RecordObservedChildren(PCWSTR root, const std::vector<SyntheticChild>& children, ULONGLONG expectedVersion)
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            const auto found = _observedRoots.find(root);
+            if (!expectedVersion || found == _observedRoots.end() || found->second.version != expectedVersion) return false;
+            // Retire competing snapshots before allocations can fail partway through.
+            found->second.version = ++_observedSequence;
+            for (const auto& child : children)
+                found->second.children[child.name] = { child.attributes, ++_observedSequence };
+            return true;
+        }
+        bool TryGetObservedAttributes(PCWSTR root, PCWSTR leaf, DWORD* attributes, ULONGLONG* version = nullptr)
         {
             std::lock_guard<std::mutex> lock(_mutex);
             const auto found = _observedRoots.find(root);
             if (found == _observedRoots.end()) return false;
             const auto child = found->second.children.find(leaf);
             if (child == found->second.children.end()) return false;
-            *attributes = child->second;
+            *attributes = child->second.attributes;
+            if (version) *version = child->second.version;
             return true;
         }
         bool RecordObservedChild(PCWSTR root, const SyntheticChild& child)
@@ -1693,14 +1705,35 @@ namespace
             std::lock_guard<std::mutex> lock(_mutex);
             const auto found = _observedRoots.find(root);
             if (found == _observedRoots.end()) return false;
-            found->second.children[child.name] = child.attributes;
+            const auto version = ++_observedSequence;
+            found->second.children[child.name] = { child.attributes, version };
+            found->second.version = version;
             return true;
         }
-        void ForgetObservedChild(PCWSTR root, PCWSTR leaf)
+        bool PrepareObservedRemoval(PCWSTR root, PCWSTR leaf, DWORD* attributes, ULONGLONG* ticket)
         {
             std::lock_guard<std::mutex> lock(_mutex);
             const auto found = _observedRoots.find(root);
-            if (found != _observedRoots.end()) found->second.children.erase(leaf);
+            if (found == _observedRoots.end()) return false;
+            const auto child = found->second.children.find(leaf);
+            if (child == found->second.children.end()) return false;
+            const auto version = ++_observedSequence;
+            child->second.version = version;
+            found->second.version = version;
+            *attributes = child->second.attributes;
+            *ticket = version;
+            return true;
+        }
+        bool ForgetObservedChild(PCWSTR root, PCWSTR leaf, ULONGLONG expectedVersion)
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            const auto found = _observedRoots.find(root);
+            if (!expectedVersion || found == _observedRoots.end()) return false;
+            const auto child = found->second.children.find(leaf);
+            if (child == found->second.children.end() || child->second.version != expectedVersion) return false;
+            found->second.children.erase(child);
+            found->second.version = ++_observedSequence;
+            return true;
         }
         void ObservedCounts(ULONG* roots, ULONG* children)
         {
@@ -2036,11 +2069,14 @@ namespace
         const size_t _maximumSnapshots;
         mutable std::mutex _mutex;
 #if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+        struct ObservedChild { DWORD attributes = 0; ULONGLONG version = 0; };
         struct ObservedRoot
         {
             ULONG views = 0;
-            std::map<std::wstring, DWORD, ShellParsingNameLess> children;
+            ULONGLONG version = 0;
+            std::map<std::wstring, ObservedChild, ShellParsingNameLess> children;
         };
+        ULONGLONG _observedSequence = 0;
         std::map<std::wstring, ObservedRoot, ShellParsingNameLess> _observedRoots;
 #endif
         mutable SnapshotMap _sizes;
@@ -3303,15 +3339,15 @@ namespace
 #endif
 #if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
     // Isolated prototype ABI: not part of the shipped adapter contract.
-    struct __declspec(uuid("F4962CBB-36B7-420B-8A14-7EE85A191C22")) IExplorerDirsProjectedNotificationProbe : public IUnknown
+    struct __declspec(uuid("412ED4D4-9750-4525-8C90-345CBDB5FE95")) IExplorerDirsProjectedNotificationProbe : public IUnknown
     {
         virtual HRESULT STDMETHODCALLTYPE PausePhysicalNotificationsForProbe() = 0;
-        virtual HRESULT STDMETHODCALLTYPE NotifyProjectedRemovalForProbe(PCWSTR leaf) = 0;
+        virtual HRESULT STDMETHODCALLTYPE NotifyProjectedRemovalForProbe(PCWSTR leaf, ULONGLONG* ticket) = 0;
         virtual HRESULT STDMETHODCALLTYPE GetEnumerationCountForProbe(ULONG* count) = 0;
         virtual HRESULT STDMETHODCALLTYPE GetObservedMetadataCountsForProbe(ULONG* roots, ULONG* children) = 0;
-        virtual HRESULT STDMETHODCALLTYPE AcknowledgeRemovalForProbe(PCWSTR leaf) = 0;
+        virtual HRESULT STDMETHODCALLTYPE AcknowledgeRemovalForProbe(PCWSTR leaf, ULONGLONG ticket) = 0;
         virtual HRESULT STDMETHODCALLTYPE NotifyProjectedArrivalForProbe(PCWSTR leaf) = 0;
-        virtual HRESULT STDMETHODCALLTYPE NotifyProjectedRenameForProbe(PCWSTR oldLeaf, PCWSTR newLeaf) = 0;
+        virtual HRESULT STDMETHODCALLTYPE NotifyProjectedRenameForProbe(PCWSTR oldLeaf, PCWSTR newLeaf, ULONGLONG* oldTicket) = 0;
     };
 #endif
     class SyntheticSortFolder final : public IShellFolder2, public IPersistFolder2, public IShellFolderViewCB
@@ -3931,6 +3967,9 @@ namespace
             *value = nullptr;
             if (!g_syntheticSizeMetricsObservation) ED_PROBE_METRIC_INCREMENT(g_syntheticEnumObjectsCount);
             if (!_inner) return E_UNEXPECTED;
+#if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+            const auto observedEnumeration = _recursiveSizeStore ? _recursiveSizeStore->BeginObservedEnumeration(_backingPath.c_str()) : 0;
+#endif
             std::vector<SyntheticChild> children;
             HRESULT result = S_OK;
 #if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
@@ -3950,7 +3989,7 @@ namespace
 #endif
             if (FAILED(result)) return result;
 #if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
-            try { if (_recursiveSizeStore) _recursiveSizeStore->RecordObservedChildren(_backingPath.c_str(), children); }
+            try { if (_recursiveSizeStore) _recursiveSizeStore->RecordObservedChildren(_backingPath.c_str(), children, observedEnumeration); }
             catch (const std::bad_alloc&) { } // Missing facts fail closed in the notification capability.
 #endif
             if (_recursiveSizeStore &&
@@ -5187,8 +5226,10 @@ namespace
             }
             catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
         }
-        HRESULT STDMETHODCALLTYPE NotifyProjectedRenameForProbe(PCWSTR oldLeaf, PCWSTR newLeaf) override
+        HRESULT STDMETHODCALLTYPE NotifyProjectedRenameForProbe(PCWSTR oldLeaf, PCWSTR newLeaf, ULONGLONG* oldTicket) override
         {
+            if (!oldTicket) return E_POINTER;
+            *oldTicket = 0;
             if (!IsProjectedLeaf(oldLeaf) || !IsProjectedLeaf(newLeaf)) return E_INVALIDARG;
             if (!_notificationWindow || _bridgeObservedPath != _backingPath) return CO_E_OBJNOTCONNECTED;
             if (wcscmp(oldLeaf, newLeaf) == 0) return S_FALSE;
@@ -5196,7 +5237,8 @@ namespace
             try
             {
                 DWORD oldAttributes = 0, targetAttributes = 0;
-                if (!_recursiveSizeStore->TryGetObservedAttributes(_bridgeObservedPath.c_str(), oldLeaf, &oldAttributes))
+                ULONGLONG previousVersion = 0;
+                if (!_recursiveSizeStore->TryGetObservedAttributes(_bridgeObservedPath.c_str(), oldLeaf, &oldAttributes, &previousVersion))
                     return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
                 if (!caseOnly && _recursiveSizeStore->TryGetObservedAttributes(_bridgeObservedPath.c_str(), newLeaf, &targetAttributes)) return S_FALSE;
                 const auto oldPath = _backingPath + L"\\" + oldLeaf;
@@ -5229,23 +5271,23 @@ namespace
                 ProjectedPidl newAbsolute(CloneProjectedAbsoluteChild(newChild));
                 if (!oldAbsolute || !newAbsolute) return E_OUTOFMEMORY;
                 if (!_recursiveSizeStore->RecordObservedChild(_bridgeObservedPath.c_str(), newChild)) return CO_E_OBJNOTCONNECTED;
+                *oldTicket = previousVersion;
                 SHChangeNotify((oldAttributes & FILE_ATTRIBUTE_DIRECTORY) ? SHCNE_RENAMEFOLDER : SHCNE_RENAMEITEM,
                     SHCNF_IDLIST | SHCNF_FLUSHNOWAIT, oldAbsolute.get(), newAbsolute.get());
                 return S_OK;
             }
             catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
         }
-        HRESULT STDMETHODCALLTYPE AcknowledgeRemovalForProbe(PCWSTR leaf) override
+        HRESULT STDMETHODCALLTYPE AcknowledgeRemovalForProbe(PCWSTR leaf, ULONGLONG ticket) override
         {
             if (!leaf || !*leaf) return E_INVALIDARG;
             if (!_notificationWindow || _bridgeObservedPath != _backingPath) return CO_E_OBJNOTCONNECTED;
-            DWORD attributes = 0;
-            if (!_recursiveSizeStore->TryGetObservedAttributes(_bridgeObservedPath.c_str(), leaf, &attributes)) return S_FALSE;
-            _recursiveSizeStore->ForgetObservedChild(_bridgeObservedPath.c_str(), leaf);
-            return S_OK;
+            return _recursiveSizeStore->ForgetObservedChild(_bridgeObservedPath.c_str(), leaf, ticket) ? S_OK : S_FALSE;
         }
-        HRESULT STDMETHODCALLTYPE NotifyProjectedRemovalForProbe(PCWSTR leaf) override
+        HRESULT STDMETHODCALLTYPE NotifyProjectedRemovalForProbe(PCWSTR leaf, ULONGLONG* ticket) override
         {
+            if (!ticket) return E_POINTER;
+            *ticket = 0;
             if (!IsProjectedLeaf(leaf)) return E_INVALIDARG;
             if (!_notificationWindow || !_root) return CO_E_OBJNOTCONNECTED;
             try
@@ -5255,8 +5297,8 @@ namespace
                 const auto error = GetLastError();
                 if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) return HRESULT_FROM_WIN32(error);
                 DWORD attributes = 0;
-                if (_bridgeObservedPath != _backingPath || !_recursiveSizeStore->TryGetObservedAttributes(
-                    _bridgeObservedPath.c_str(), leaf, &attributes)) return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+                if (_bridgeObservedPath != _backingPath || !_recursiveSizeStore->PrepareObservedRemoval(
+                    _bridgeObservedPath.c_str(), leaf, &attributes, ticket)) return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
                 const bool directory = (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
                 SyntheticChild child{};
                 child.cb = sizeof(child);
@@ -7161,6 +7203,79 @@ extern "C" ED_SORT_PROBE_EXPORT void WINAPI ReleaseDynamicSizeSortLeaseForProbe(
 
 extern "C" ED_SORT_PROBE_EXPORT void WINAPI SetSizeSortShellPartitionForProbe(BOOL enabled)
 { InterlockedExchange(&g_sizeSortShellPartition, enabled ? 1 : 0); }
+
+#if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+extern "C" __declspec(dllexport) HRESULT WINAPI RunProjectedMetadataGenerationSmoke(ULONG* stage)
+{
+    if (!stage) return E_POINTER;
+    *stage = 1;
+    try
+    {
+        const auto release = [](SyntheticRecursiveSizeSnapshotStore* value) { value->Release(); };
+        std::unique_ptr<SyntheticRecursiveSizeSnapshotStore, decltype(release)> store(new SyntheticRecursiveSizeSnapshotStore(), release);
+        constexpr auto root = L"D:\\ProjectedMetadataGenerationSmoke";
+        SyntheticChild child{};
+        child.cb = sizeof(child);
+        child.attributes = FILE_ATTRIBUTE_NORMAL;
+        StringCchCopyW(child.name, ARRAYSIZE(child.name), L"same-name");
+        store->RetainObservedRoot(root);
+        const auto initial = store->BeginObservedEnumeration(root);
+        if (!store->RecordObservedChildren(root, { child }, initial)) return E_FAIL;
+        DWORD attributes = 0;
+        ULONGLONG oldTicket = 0, newTicket = 0;
+        if (!store->TryGetObservedAttributes(root, child.name, &attributes, &oldTicket)) return E_FAIL;
+        *stage = 2;
+        const auto staleEnumeration = store->BeginObservedEnumeration(root);
+        child.attributes = FILE_ATTRIBUTE_DIRECTORY;
+        if (!store->RecordObservedChild(root, child)) return E_FAIL;
+        child.attributes = FILE_ATTRIBUTE_NORMAL;
+        if (store->RecordObservedChildren(root, { child }, staleEnumeration)) return E_FAIL;
+        if (!store->TryGetObservedAttributes(root, child.name, &attributes, &newTicket) || attributes != FILE_ATTRIBUTE_DIRECTORY || oldTicket == newTicket) return E_FAIL;
+        *stage = 3;
+        if (store->ForgetObservedChild(root, child.name, oldTicket) || store->ForgetObservedChild(root, child.name, 0)) return E_FAIL;
+        const auto beforeRemoval = store->BeginObservedEnumeration(root);
+        if (!store->PrepareObservedRemoval(root, child.name, &attributes, &newTicket)) return E_FAIL;
+        if (store->RecordObservedChildren(root, { child }, beforeRemoval)) return E_FAIL;
+        const auto supersededRemoval = newTicket;
+        if (!store->PrepareObservedRemoval(root, child.name, &attributes, &newTicket) || newTicket <= supersededRemoval) return E_FAIL;
+        if (store->ForgetObservedChild(root, child.name, supersededRemoval)) return E_FAIL;
+        if (!store->ForgetObservedChild(root, child.name, newTicket)) return E_FAIL;
+        *stage = 4;
+        const auto retiredRoot = store->BeginObservedEnumeration(root);
+        store->ReleaseObservedRoot(root);
+        store->RetainObservedRoot(root);
+        if (store->BeginObservedEnumeration(root) <= retiredRoot) return E_FAIL;
+        if (store->RecordObservedChildren(root, { child }, retiredRoot)) return E_FAIL;
+        if (!store->RecordObservedChild(root, child)) return E_FAIL;
+        if (store->ForgetObservedChild(root, child.name, newTicket)) return E_FAIL;
+        *stage = 5;
+        store->RetainObservedRoot(root);
+        store->ReleaseObservedRoot(root);
+        ULONG roots = 0, facts = 0;
+        store->ObservedCounts(&roots, &facts);
+        if (roots != 1 || facts != 1) return E_FAIL;
+        store->ReleaseObservedRoot(root);
+        store->ObservedCounts(&roots, &facts);
+        if (roots || facts) return E_FAIL;
+        *stage = 6;
+        constexpr auto peerRoot = L"D:\\ProjectedMetadataGenerationPeer";
+        store->RetainObservedRoot(root);
+        store->RetainObservedRoot(peerRoot);
+        const auto independentSnapshot = store->BeginObservedEnumeration(root);
+        if (!store->RecordObservedChild(peerRoot, child)) return E_FAIL;
+        if (!store->RecordObservedChildren(root, { child }, independentSnapshot)) return E_FAIL;
+        store->ObservedCounts(&roots, &facts);
+        if (roots != 2 || facts != 2) return E_FAIL;
+        store->ReleaseObservedRoot(root);
+        store->ReleaseObservedRoot(peerRoot);
+        store->ObservedCounts(&roots, &facts);
+        if (roots || facts) return E_FAIL;
+        *stage = 0;
+        return S_OK;
+    }
+    catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+}
+#endif
 
 // Product ABI; old adapters without these entries remain capability-detected.
 extern "C" __declspec(dllexport) HRESULT WINAPI CreateFolderSizeSortContext(

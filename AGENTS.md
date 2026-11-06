@@ -31,6 +31,8 @@
 
 ## Product boundary
 
+- Projected metadata enumeration commits must validate the root version captured before I/O; item retirement must match its emitted per-item ticket. Rejected cache commits do not cancel Shell-owned enumerators or notifications. Keep these evidence scopes separate when wiring the application queue.
+
 - The projected child-notification bridge remains an opt-in isolated prototype until authoritative item type/identity, concurrent same-name recreation, navigation retirement, and full-App multi-pane/group/burst checks pass. Pausing physical subscriptions is test-only. Prove absence of re-enumeration with native counters, and do not equate a single native-view pass with product repair.
 
 - Projected filesystem folders must preserve backing Shell drag/drop capability attributes for both GetAttributesOf(0) and encoded-root IShellItem queries; native IDataObject must expose physical source paths. A successful direct IDropTarget transfer does not establish physical OLE routing. Shell file-operation workers can open progress windows on the shared desktop even when invoked from a private desktop: transfer/DoDragDrop probes require explicit interactive opt-in and must not enter unattended background suites.

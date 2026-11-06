@@ -30,7 +30,7 @@ dotnet run --project src/ExplorerDirs.NativeProbe -c Release --no-build -- --pro
 
 ## 产品接线前剩余项
 
-1. 初始枚举、新建及普通/大小写重命名的类型记录已完成原型验证；文件身份世代和并发枚举覆盖仍待做。删除查找使用有序映射，不增加同步全列表扫描；仍须评估大目录和多标签的实际成本。
+1. 初始枚举、新建及普通/大小写重命名记录，以及缓存提交/确认世代保护已完成原型验证；磁盘身份、应用事件协调和已投递Shell通知的竞态仍待做。删除查找使用有序映射，不增加同步全列表扫描；仍须评估大目录和多标签的实际成本。
 2. 保留已存在/同名重建保护，并验证异步投递期间的重建、导航退休、关闭和COM重入。当前测试只有“调用前已重建”的子项。
 3. 将已有FileSystemWatcher事件定向到当前目录能力，保留普通物理/虚拟Shell位置后备语义和手动F5；不增加自动完整刷新。
 4. 真实四窗格、分组、大小排序、突发多项、名称变更、会话切换与重启的完整App验证；原型单视图通过不能替代。
@@ -70,3 +70,22 @@ dotnet run --project src/ExplorerDirs.NativeProbe -c Release --no-build -- --pro
 
 
 普通DLL本批重建SHA256仍为CADC37A135D8F0551767976EA0258F0A3075499BDFF6518C4101E90B903904EF，与本批改动前一致。试验范围还未证明覆盖重命名、短名/尾点空格别名、大小写敏感目录及重解析点的所有组合；这些不能由普通NTFS文件/目录的大小写改名通过外推。
+
+
+## 2026-11-06 缓存世代与确认令牌
+
+每个活动物理根持有提交版本；项目记录保存属性和独立单调版本，根关闭后重新打开也不重用旧版本。枚举前捕获根版本，枚举后仅在该根版本未变时提交记录；发送删除前先推进根/项目版本，令之前的枚举失效。确认必须携带发送时的项目令牌，不再按叶名无条件删除记录。其它根的变化不会使本根枚举失效，同根多视图则共享根引用。
+
+新试验IID避免旧ABI被新签名误调用。`src/.state/projected-generations-before.log`记录旧DLL缺少测试入口的失败；`--projected-metadata-generation-smoke`直接测试实际原生存储，不创建窗口/测试文件。`src/.state/projected-generations-contract-final.log`通过旧枚举、旧/零/被后续删除取代的确认、同路径关闭重开、同根引用和不同根独立性合同。后续补强仍使用同名日志重跑。
+
+`src/.state/projected-generations-native-view.log`的1029行视图通过同名重建后拒绝旧确认、大小写改名后拒绝旧确认，继续通过增删改名、精确8KB值、选区/焦点、不重新枚举及销毁清理。前台未变、输入变化，isolation-clean=False；这是本批业务子断言，不能沿用上一批的干净守卫结果。
+
+范围限制：拒绝旧缓存提交不等于取消Shell已持有的旧IEnumIDList；令牌确认保护也不等于磁盘检查到通知生效全过程原子化。已经发出的通知、尚未观察到的重建、导航访问代际和应用队列仍待协调，尚不接入产品。普通编译仍完全排除这些记录/导出/能力。
+
+无窗口合同命令：
+```powershell
+dotnet run --project src/ExplorerDirs.NativeProbe -c Release --no-build -- --projected-metadata-generation-smoke src/ExplorerDirs.NativeProbe/bin/native-product-x64-notification-trace-projected-notify-experiment/ExplorerDirs.ShellNamespace.dll
+```
+
+
+本批最终普通DLL SHA256仍为CADC37A135D8F0551767976EA0258F0A3075499BDFF6518C4101E90B903904EF；四个试验IID及RunProjectedMetadataGenerationSmoke导出均不在普通构建中。新增世代字段仅为试验的活跃根/项目记录，不改变当前日用版本的缓存或内存行为。
