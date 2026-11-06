@@ -6188,9 +6188,12 @@ internal sealed partial class ExplorerBrowserHost : HwndHost, ExplorerBrowserHos
 
 #if EXPLORERDIRS_REFRESH_ORIGIN_TRACE
     private int _listStructureTraceEntries;
+    private static readonly bool RefreshRequestsOnlyForProbe =
+        Environment.GetEnvironmentVariable("EXPLORERDIRS_REFRESH_REQUESTS_ONLY") == "1";
     private long _lastTracedListCount = -1;
     private void TraceNativeListStructure(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam)
     {
+        if (RefreshRequestsOnlyForProbe) return;
         // Diagnostic-only: correlate zero-row samples with native clear/count/sort
         // commands without asking Shell for state inside its message dispatch.
         // These are received commands, not proof of forwarding or visible painting.

@@ -1,5 +1,15 @@
 # 自动变化期间短暂零行：刷新来源调查
 
+## 2026-11-06 刷新请求与视图通知分开观测
+
+仅REFRESH_ORIGIN_TRACE构建增加进程级EXPLORERDIRS_REFRESH_REQUESTS_ONLY=1：保留RefreshWithPresentation调用栈及native enter/return，但TraceNativeListStructure直接返回；默认原追踪行为不变，普通产品不含此字段。最初将字段插入方法内导致编译失败，已移至类成员区并重建成功；失败prepare不是已运行产物。
+
+projected-refresh-requests-only.log（prepared140731-494753，owned0062bbc396e0415d83b7f621d28f8f24）两个进程完整同根32文件/同名大小、枚举不增及所有隔离守卫通过。仍可见冷启动分组恢复请求返回S_FALSE，未复现额外根枚举，不能据此消除之前失败记录。
+
+原生通知实验补充SFVM_FSNOTIFY实际view-event，不解析/bind PIDL、不调用视图getter；记录已有合成child名称或当前根路径与context。为覆盖四视图重复事件将显式文件追踪上限增至每进程4096条。projected-view-event-same-root32.log及projected-view-event-timeline.log（owned0b898c024e4041babb4a977419d3b68e）：两个进程完整功能/确认/枚举与全部隔离守卫通过，整体退出0，无零行；新增8713/8210ms、删除3467/3304ms。实际没有view-structure-origin.log，确认请求追踪与结构追踪已分离。两PID分别2888/2920条，未达上限；该通过轮无view-event UPDATEDIR。没有额外枚举的轮次不能反证失败轮由什么触发，文件追踪本身仍有同步IO并可能影响时序。
+
+此批无产品修复，不将多轮通过改写为间歇问题已解决。后台交付/metadata世代合同继续通过；普通App/HostProbe恢复构建零警告零错误并排除实验/请求追踪入口，普通DLL仍B61059F45CC281131820D22FB831BCF01D1530B70BC6539ACBC2A8C9313399FF。未发布。下一步用更少热路径IO的事件记录定位失败时的根枚举调用来源，同时保留旧创建确认和同根门槛，不调整超时。
+
 ## 2026-11-06 旧创建确认被后续删除取代，剩余根枚举仍失败
 
 先跑RefreshOriginTrace的projected-size-guard-refresh-origin.log（owned6cd208a477574d51a4f102b05de9ccee），两进程完整同根/32文件/同名大小及隔离通过，枚举5→5、无零行。日志仍有冷启动分组恢复的manual=False/full=True请求，但发生在首批watcher dispatch前且native返回S_FALSE，不能据此归因之前的后续枚举。

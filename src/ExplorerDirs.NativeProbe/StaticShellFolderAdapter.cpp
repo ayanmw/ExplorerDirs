@@ -3760,6 +3760,21 @@ namespace
             if (message == SFVM_GETNOTIFY) TraceSyntheticSortStage("synthetic-sort: SFVM_GETNOTIFY");
             if (message == SFVM_FSNOTIFY)
             {
+#if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+                if (wParam)
+                {
+                    auto* pidls = reinterpret_cast<PCIDLIST_ABSOLUTE*>(wParam);
+                    const auto* child = pidls[0] ? SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(ILFindLastID(pidls[0]))) : nullptr;
+                    DWORD context = 0;
+#if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
+                    context = _sizeSortContext ? _sizeSortContext->id : 0;
+#endif
+                    // Observe the callback's delivered event; do not ask the view
+                    // for state or resolve PIDLs from inside its message dispatch.
+                    TraceProjectedDeliveryFieldsForProbe("view-event", 0, context,
+                        static_cast<LONG>(lParam) & ~SHCNE_INTERRUPT, child ? child->name : _backingPath.c_str());
+                }
+#endif
 #if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
                 InterlockedIncrement(&g_productViewItemNotificationCallbacks);
                 if (wParam)
@@ -5409,7 +5424,7 @@ namespace
             const auto length = GetEnvironmentVariableW(L"EXPLORERDIRS_PROJECTED_DELIVERY_TRACE", path, ARRAYSIZE(path));
             if (!length || length >= ARRAYSIZE(path)) return;
             static std::atomic<ULONG> records{ 0 };
-            if (++records > 1024) return;
+            if (++records > 4096) return;
             char name[1040]{};
             WideCharToMultiByte(CP_UTF8, 0, itemName, -1, name, ARRAYSIZE(name), nullptr, nullptr);
             char line[1280]{};
