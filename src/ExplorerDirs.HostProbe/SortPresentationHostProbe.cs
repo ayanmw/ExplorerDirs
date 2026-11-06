@@ -64,6 +64,33 @@ internal static class SortPresentationHostProbe
             var readSizes = helpers.GetMethod("ReadRecursiveValues", BindingFlags.Static | BindingFlags.NonPublic)!;
             Wait(() => ((string[])readSizes.Invoke(null, [hostType, host, 3])!).All(value => ulong.TryParse(value, out _)), "known folder totals");
             var header = (nint)helpers.GetMethod("FindSortHeader", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, [(nint)viewField.GetValue(host)!])!;
+            if (Environment.GetEnvironmentVariable("EXPLORERDIRS_PROBE_HEADER_GEOMETRY") == "1")
+            {
+                // Opt-in private-Desktop route only; no activation or injected input.
+                ShowWindow(source.Handle, 4); // SW_SHOWNOACTIVATE
+                var capture = hostType.GetMethod("CaptureColumnHeaderArrowTargets", Instance)!;
+                object[] targets = [];
+                Wait(() =>
+                {
+                    targets = ((System.Collections.IEnumerable)capture.Invoke(host, null)!).Cast<object>().ToArray();
+                    return targets.Length == 2;
+                }, "native column arrow geometry");
+                for (var index = 0; index < targets.Length; index++)
+                {
+                    var target = targets[index];
+                    var bounds = (Rect)target.GetType().GetProperty("Bounds")!.GetValue(target)!;
+                    var key = target.GetType().GetProperty("Key")!.GetValue(target)!;
+                    var expected = columnType.GetProperty("Key")!.GetValue(columns.GetValue(index))!;
+                    if (!key.Equals(expected) || bounds.Width <= 20 || bounds.Height <= 0)
+                        throw new Exception("Native column arrow geometry lost its property key or bounds.");
+                    if (index > 0)
+                    {
+                        var previous = (Rect)targets[index - 1].GetType().GetProperty("Bounds")!.GetValue(targets[index - 1])!;
+                        if (bounds.Left < previous.Right) throw new Exception("Native column geometry does not follow visible order.");
+                    }
+                }
+                Console.WriteLine("Native header geometry: PASS actual product capture; Name/Size keys and ordered screen bounds.");
+            }
             var click = helpers.GetMethod("ClickHeaderColumn", BindingFlags.Static | BindingFlags.NonPublic)!;
             var lease = hostType.GetField("_sortPaintLease", Instance)!;
             if (groupedRecovery)
@@ -175,6 +202,8 @@ internal static class SortPresentationHostProbe
     }
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int SelectRow(nint self, int row, uint flags);
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(nint window, int command);
 
     private static void Wait(Func<bool> ready, string stage)
     {

@@ -15,6 +15,7 @@ internal sealed partial class ExplorerBrowserHost
     private FileSystemWatcher? _projectedWatcher;
     private DispatcherTimer? _projectedTimer;
     private nint _projectedBridge;
+    private IDisposable? _projectedDispatcherTiming;
     private bool _projectedNeedsRecovery;
     private static readonly Guid ProjectedBridgeExperimentId = new("412ED4D4-9750-4525-8C90-345CBDB5FE95");
 
@@ -229,6 +230,7 @@ internal sealed partial class ExplorerBrowserHost
             Marshal.ThrowExceptionForHR(GetMethod<ProjectedPause>(bridge, 3)(bridge));
             if (!Current()) return true;
             watcher.EnableRaisingEvents = true;
+            _projectedDispatcherTiming = ProjectedDispatcherTimingExperiment.Acquire(Dispatcher);
             timer.Start();
             LastShellRefreshStatus = "projected-experiment-monitor-started";
             _projectedNeedsRecovery = false;
@@ -249,6 +251,8 @@ internal sealed partial class ExplorerBrowserHost
         _projectedQueue = null;
         _projectedTimer?.Stop();
         _projectedTimer = null;
+        _projectedDispatcherTiming?.Dispose();
+        _projectedDispatcherTiming = null;
         var watcher = _projectedWatcher;
         _projectedWatcher = null;
         if (watcher is not null) _ = ShellDirectoryWatcherStartup.DisposeSafelyAsync(watcher.Dispose);

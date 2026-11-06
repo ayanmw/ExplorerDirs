@@ -1,5 +1,17 @@
 # 自动变化期间短暂零行：刷新来源调查
 
+## 2026-11-06 定位并替换列标题UIA遍历热点
+
+实验新增共享Dispatcher操作观察器，仅在通知实验编译，监视器引用计数归零时解绑；记录超过50ms操作的方法名/优先级/嵌套深度，最多256条，不记录委托参数。使用运行时私有_method字段仅识别诊断标签，不参与产品功能；字段缺失显示unavailable。操作耗时为含嵌套/原生消息循环的墙钟时间，不等于排他CPU或完整原生消息剖析。
+
+RED实测 `src/.state/projected-dispatcher-operations-name32.log`，owned run `src/.state/app-session-process/b5593042ed8a464b84c08413f5966b71`：两进程功能及隔离守卫通过，发现22条QueueColumnHeaderGeometryRefresh慢操作，55–999.8ms，累计约9999.5ms。其CaptureColumnHeaderArrowTargets从文件列表根做UIA Descendants遍历，与大量行相关的慢操作构成了具体可修改路径，而不是此前猜测通知调用慢。批量新增5605/6407ms、删除1530/3418ms。
+
+普通产品修正：SysListView32改读其原生Header的项目矩形、显示顺序与下拉矩形，结合IColumnManager可见属性键；无有效split-button则不注册命中区域，不改变现有20px命中规则。其他非ListView宿主保留UIA路径。列几何捕获后重新检查browser/generation/pending，避免COM重入导航后将旧几何标成新视图。此缓存重入保护是同一路径审查发现的连带修正，不宣称已经实际复现它。
+
+GREEN名称对照 `src/.state/projected-native-header-name32.log`，owned run `src/.state/app-session-process/0595c72fc4bb4f3db48be8407661027a`：两进程功能、逐名、分组、不增加枚举及全部隔离守卫通过，自动阶段无零行；两段attached→detached均records=0，无超过50ms的Dispatcher操作。新增3061/2957ms、删除2489/1639ms。最终补上split-button要求后，默认Size主排序复测 `src/.state/projected-native-header-size32-final.log`，owned run `src/.state/app-session-process/7e1af691286c4823ac3382c3c23f1824`，同样全部通过且records=0，新增4083/5820ms、删除2108/3656ms。秒级剩余延迟没有解决，不把Name与Size跨场景差异解释为单一因果。
+
+`native-header-geometry-final.log` 实际普通产品宿主Name/Size属性键与有序屏幕矩形、两列各6次排序、选区/焦点、混合排序、已正确排序跳过mutation、销毁及全部隔离守卫通过，整体退出0。仅私有Desktop无激活地显示测试宿主，不操作共享桌面；真实鼠标箭头点击/列重排/DPI仍需集中验收。39项后台检查全部通过，报告 `src/.state/background-checks/20261106-203114-ac678ce1e6894e519bd281e35f6dba63/summary.json`；该整轮早于最后增加的split-button矩形检查，最终普通构建和原生宿主检查已重新通过。普通App/HostProbe输出恢复，排除实验监视器/Dispatcher诊断类型；未发布。
+
 ## 2026-11-06 降低跨进程行采样负载
 
 AppSessionProcessProbe新增仅探针进程的EXPLORERDIRS_PROBE_SPARSE_ROW_SAMPLING=1控制，将AwaitRows轮询间隔25ms改为250ms，其他等待、15秒期限、最终条目/名称/分组/枚举/隔离断言保留。默认仍25ms；日志记录实际周期。稀疏采样较易漏掉短暂零行，不能用它替代瞬态覆盖，也不能把最终通过视为视觉无闪。

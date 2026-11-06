@@ -1450,6 +1450,10 @@ internal sealed partial class ExplorerBrowserHost : HwndHost, ExplorerBrowserHos
     {
         var content = FindContentFocusWindow();
         if (content == 0) return [];
+        // Dispatcher timing identified 0.1-1s UIA descendant walks here during
+        // automatic updates. A native ListView already exposes its header geometry.
+        if (WindowClass(content) == "SysListView32")
+            return CaptureNativeColumnHeaderArrowTargets(content);
         try
         {
             var root = AutomationElement.FromHandle(content);
@@ -1483,6 +1487,43 @@ internal sealed partial class ExplorerBrowserHost : HwndHost, ExplorerBrowserHos
         catch (InvalidOperationException) { return []; }
     }
 
+    private IReadOnlyList<ShellColumnHeaderArrowTarget> CaptureNativeColumnHeaderArrowTargets(nint content)
+    {
+        var header = SendMessage(content, 0x101F, 0, 0); // LVM_GETHEADER
+        if (header == 0 || !IsWindowVisible(header)) return [];
+        var count = SendMessage(header, 0x1200, 0, 0).ToInt32(); // HDM_GETITEMCOUNT
+        if (count is <= 0 or > ColumnLayout.MaximumColumns) return [];
+        var view = GetFolderView2Pointer();
+        if (view == 0) return [];
+        try
+        {
+            if (ShellColumnManager.CaptureForExport(view, out var columns) != 0 || columns?.Count != count)
+                return [];
+            var targets = new ShellColumnHeaderArrowTarget[count];
+            for (var order = 0; order < count; order++)
+            {
+                // ColumnManager returns visible order; header indices can differ
+                // after a user reorders columns. Preserve that mapping explicitly.
+                var index = SendMessage(header, 0x120F, order, 0).ToInt32(); // HDM_ORDERTOINDEX
+                var bounds = new Rect();
+                if ((uint)index >= (uint)count || SendHeaderItemRect(header, 0x1207, index, ref bounds) == 0)
+                    return [];
+                var dropdown = new Rect();
+                if (SendHeaderItemRect(header, 0x1219, index, ref dropdown) == 0 || dropdown.Right <= dropdown.Left)
+                    return []; // Preserve the UIA path's split-button requirement.
+                var origin = new NativePoint { X = bounds.Left, Y = bounds.Top };
+                if (!ClientToScreen(header, ref origin) || bounds.Right <= bounds.Left || bounds.Bottom <= bounds.Top)
+                    return [];
+                targets[order] = new ShellColumnHeaderArrowTarget(
+                    new System.Windows.Rect(origin.X, origin.Y, bounds.Right - bounds.Left, bounds.Bottom - bounds.Top),
+                    columns[order].Key, columns[order].Name);
+            }
+            return targets;
+        }
+        catch (COMException) { return []; }
+        finally { Marshal.Release(view); }
+    }
+
     private void QueueColumnHeaderGeometryRefresh()
     {
         _columnHeaderArrowTargets = [];
@@ -1494,8 +1535,14 @@ internal sealed partial class ExplorerBrowserHost : HwndHost, ExplorerBrowserHos
         {
             _columnHeaderGeometryRefreshQueued = false;
             if (_browser is null || !IsVisible || _viewReadiness.Pending) return;
-            _columnHeaderArrowTargets = CaptureColumnHeaderArrowTargets();
-            _columnHeaderArrowTargetsGeneration = _viewReadiness.Generation;
+            var browser = _browser;
+            var generation = _viewReadiness.Generation;
+            var targets = CaptureColumnHeaderArrowTargets();
+            // Shell getters can pump navigation; never stamp old geometry as a new view.
+            if (!ReferenceEquals(browser, _browser) || generation != _viewReadiness.Generation || _viewReadiness.Pending)
+                return;
+            _columnHeaderArrowTargets = targets;
+            _columnHeaderArrowTargetsGeneration = generation;
         }));
     }
 
@@ -6975,6 +7022,8 @@ internal sealed partial class ExplorerBrowserHost : HwndHost, ExplorerBrowserHos
         [MarshalAs(UnmanagedType.Interface)] out IShellItem item);
     [DllImport("user32.dll")]
     private static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll", EntryPoint = "SendMessageW")]
+    private static extern IntPtr SendHeaderItemRect(IntPtr hwnd, uint message, IntPtr item, ref Rect bounds);
     [DllImport("user32.dll")]
     private static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")]

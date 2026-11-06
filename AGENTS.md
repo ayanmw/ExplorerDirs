@@ -29,6 +29,8 @@
 
 - On 2026-11-03 the user explicitly separated automatic updates from manual F5: Soft-Refresh defaults on for an unconfigured profile; automatic item notifications must not trigger a full-view fallback or full-directory sort refresh while enabled. F5 requests complete enumeration even with soft updates enabled, and may be slower. Incomplete automatic reconciliation may wait for F5; preserve explicitly saved preferences and selection/focus.
 
+- Native ListView column-arrow geometry must use its Header rectangle/order/dropdown contracts with Shell visible-column keys, rather than walking the whole UIA descendant tree during updates. Retain non-ListView fallback, split-button checks and navigation-generation validation after COM capture; verify native keys/bounds and keep mouse/DPI acceptance separate from timing probes.
+
 ## Product boundary
 
 - A projected queue is settled only after queued and in-flight work completes and the visit remains valid. On a stale Created/Changed path-not-found result, reconcile native observed removal or verified native-row absence; retain the original queue work for retirement while using the actual removal outcome for confirmation. Do not stop the whole monitor merely because an older property event outlived its file, or silently discard unknown rows without checking them.
