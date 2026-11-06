@@ -235,8 +235,20 @@ internal static class AppSessionProcessProbe
         using var observer3 = Observe(2);
         using var observer4 = Observe(3);
         using var shellObserver = new AppSessionShellObserver(additions.Select(path => Path.GetDirectoryName(path)!));
-        var grouped = VisibleFileViews(window).Where(list => Message(list, 0x10AF) == 1).ToArray();
-        if (grouped.Length != 1) throw new InvalidOperationException("Expected exactly one grouped pane before external changes.");
+        nint[] grouped = [];
+        // Observer setup parses PIDLs and may pump startup callbacks. Re-establish
+        // the existing four-pane/group/count fixture after that work, before mutation.
+        Wait(() =>
+        {
+            shellObserver.Pump();
+            EnsureRunning(child);
+            var lists = VisibleFileViews(window);
+            var candidate = lists.Where(list => Message(list, 0x10AF) == 1).ToArray();
+            if (lists.Count != 4 || candidate.Length != 1 || lists.Any(list => Message(list, 0x1004) != fillerCount + 2))
+                return false;
+            grouped = candidate;
+            return true;
+        }, TimeSpan.FromSeconds(15), "Four-pane/group/count fixture did not settle after observer setup.");
         var transientEmptySamples = 0;
         var zeroPaneSamplesWithDisableFlag = 0;
         var zeroPaneSamplesWithVisibilityChange = 0;
