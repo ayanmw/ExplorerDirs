@@ -161,10 +161,11 @@ public static partial class SyntheticShellSortProbe
                 throw new InvalidOperationException("Arrival accepted a wildcard instead of a direct child leaf.");
             if (arrive(bridge, "missing-arrival") != unchecked((int)0x80070002))
                 throw new InvalidOperationException("Arrival fabricated a missing item.");
+            VerifyProjectedWatcherView(bridge, list, fixture, Names, AssertRetainedSelection);
             Check(metadataCounts(bridge, out roots, out facts));
             Check(enumerationCount(bridge, out var finalEnumerations));
             if (facts != fillerCount + 2 || roots != 1 || finalEnumerations != initialEnumerations)
-                throw new InvalidOperationException("Create/rename/delete lost facts or re-enumerated the folder.");
+                throw new InvalidOperationException($"Create/rename/delete lost facts or re-enumerated the folder: roots={roots}; facts={facts}; expected-facts={fillerCount + 2}; enumerations={initialEnumerations}->{finalEnumerations}.");
             Console.WriteLine("projected-arrival-rename: PASS file/folder create, rename, case-only rename and inferred-type delete; no EnumObjects; selection/focus retained");
             AssertRetainedSelection();
             Console.WriteLine("projected-notification-bridge: PASS file/folder rows removed; unrelated selection/focus retained; versioned child types; stale confirmations/unknown/recreated/invalid leaf rejected; no Refresh invoked; no EnumObjects; filler-count=" + fillerCount);

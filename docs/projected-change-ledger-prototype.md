@@ -1,5 +1,15 @@
 # 通知事件队列协调实验
 
+## 真实事件到原生视图
+
+2026-11-06，`ProjectedWatcherViewProbe` 将实际 FileSystemWatcher 事件经队列派发到原生通知桥，在物理订阅暂停的 1029 行原生视图验证文件/目录增删改名、精确 8KB 更新、确认删除后的同名重建及 32 文件突发新增/删除，保留原选区和焦点，最终 metadata facts 回到 1027。
+
+保留失败对照：`src/.state/projected-watcher-view-burst-diagnostic.log` 中行内容和 facts 正确，但 EnumObjects 为 1→2。分阶段日志 `projected-watcher-view-stages.log` 将首次额外枚举定位到 32 文件创建阶段；插入 DoEvents 的对照 `projected-watcher-view-yield.log` 仍失败。不能据此确定 Shell 内部的具体合并规则。
+
+逐项确认新增行到达后再继续派发的候选，最终 `src/.state/projected-watcher-view-confirmed-bounded.log` 退出 0：11 个阶段的枚举计数均为 1，原有通知桥合同及销毁清理通过，前台/输入守卫均通过。原 5 秒整阶段预算因串行确认耗时失败；仅批量阶段改为 30 秒有界预算，保留逐项 5 秒预算和“不增加枚举”断言。最终 32 项新增阶段约 5187ms，删除约 3674ms，不满足产品性能预期。
+
+此为实验内的同步消息循环驱动，不能照搬到 App UI。正式接线前需异步确认、有界批次、事件重协调/背压，以及同根多视图、分组、并发重建和导航期间的检查。现有证据只证明受控顺序操作与小批量原型路径，不证明全部自动刷新已修复。普通产品 DLL、App 和预览均未修改。
+
 真实事件来源补证：`--projected-watcher-ledger-smoke` 使用独占临时目录和实际 FileSystemWatcher，无窗口验证文件新增、改名、删除后同名重建、目录新增/删除，以及 128 个文件连续创建的所有 Created 事件均到达。测试逐条核对队列序号，离开访问后拒绝晚到事件，最后关闭 watcher 并删除自建临时目录。最终收到 264 条事件（包括允许重复的 Changed），不要求 Windows 提供固定事件总数。Release 构建及原 4096 条队列合同再验通过；尚未连接原生视图派发，也不证明极端负载下不会发生 watcher 缓冲区溢出。
 
 2026-11-06。本批只修改 NativeProbe，不接入正式应用，不更新预览。
