@@ -33,6 +33,8 @@
 
 - Experimental background notification transport must own copied payload bytes and its code-module lifetime; do not send STA Shell interfaces, view HWNDs or owner callbacks to workers. Capacity counts queued plus accepted in-flight work. Retire without UI waiting, reject new work and clear queued work, while explicitly treating accepted delivery as non-retractable. Mock transport contracts do not prove PIDL validity, actual Shell delivery, navigation safety or DLL-unload races.
 
+- Queued size-completion UPDATEITEM must not republish a confirmed missing physical item after its deletion. Recheck immediately before publication; drop only FILE_NOT_FOUND/PATH_NOT_FOUND, preserve unknown/access-error behavior, and release the queued PIDL. Keep this existence check distinct from file-identity/generation and atomic-delivery guarantees. Trace the size publisher separately from projected watcher delivery when diagnosing stale rows.
+
 ## Product boundary
 
 - A projected queue is settled only after queued and in-flight work completes and the visit remains valid. On a stale Created/Changed path-not-found result, reconcile native observed removal or verified native-row absence; retain the original queue work for retirement while using the actual removal outcome for confirmation. Do not stop the whole monitor merely because an older property event outlived its file, or silently discard unknown rows without checking them.

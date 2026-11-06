@@ -1,5 +1,19 @@
 # 自动变化期间短暂零行：刷新来源调查
 
+## 2026-11-06 确认并拦截删除后的过期大小通知
+
+先验证根身份假设：临时仅实验区分context ID、忽略其可变低2位；无窗口旧规则/新规则/同context排序位/对称性/路径合同红绿通过，但完整App projected-context-identity-same-root32.log仍在第二进程出现一个旧目录残留。该无效身份改动、开关及临时探针均已移除，普通根CompareIDs规则未改，避免保留没有修复价值的语义变化。
+
+实验增加显式EXPLORERDIRS_PROJECTED_DELIVERY_TRACE文件路径，最多每进程1024条，记录PID/seq/context/event/name及accepted/enter/returned；载荷携带独立诊断字段。accepted在Enqueue返回后写，worker可能先写enter，不能用打印行顺序代替接受顺序；FLUSH returned也不证明视图已应用。projected-timeline-same-root32.log及projected-delivery-timeline-same-root.log再次复现，第二进程所有MKDIR/UPDATEITEM的worker调用返回早于RMDIR开始，反驳该轮由worker迟发MKDIR导致残留的解释。
+
+补充原有异步大小发布路径后，projected-size-publish-same-root32.log及projected-size-publish-timeline.log复现并记录：PID77192四份RMDIR在tick516063562前返回，随后516063593原大小扫描路径再次发送该目录UPDATEITEM；四列表均出现external-notification-fixture残留。这是通知桥外另一条真实过期发布路径。
+
+普通native修正：发送排队的逐项大小UPDATEITEM前读取其物理路径属性，仅ERROR_FILE_NOT_FOUND/PATH_NOT_FOUND明确确认不存在时释放该待发PIDL并跳过，未知/权限错误仍保留原路径。没有取消物理删除事件或全面静默掉更新，也没有完整刷新兜底。检查与交付之间仍有竞态，不声明原子保证；同名替换的身份变化不在此简单存在性检查覆盖内。
+
+projected-size-guard-same-root32.log及projected-size-guard-timeline.log：两个进程的创建目录→删除→创建文件→删除文件阶段均通过，记录到两份size-skipped-missing，未再在该阶段保留旧目录。但整体仍退出1：第二进程后续确认超时、枚举5→7和3次零行采样，不能宣称后台通知方案或完整同根场景已通过。首进程完整32文件和同名大小场景通过，只作为子项证据。
+
+39项后台检查全部通过，报告src/.state/background-checks/20261106-212332-05d15efe35d849d6b847a788fb8a1014/summary.json；普通native四个真实ExplorerBrowser视图stale-size-normal-browser-final.log整项/隔离守卫通过（12/25KB/0、40KB更新、选区焦点、F5、列重排、数字排序和销毁）。普通DLL因真实修正更新为B61059F45CC281131820D22FB831BCF01D1530B70BC6539ACBC2A8C9313399FF。普通App/HostProbe恢复并排除实验入口；预览未发布。下一步继续定位第二进程的确认超时与枚举触发源。
+
 ## 2026-11-06 后台交付接入隔离通知桥，发现同根旧目录残留
 
 私有ABI v5改为57561654-2DB4-42F9-BC73-7A67F5FD8B38，新增slot10 Begin、11 Retire、12 Status。普通构建排除。仅进程EXPLORERDIRS_PROJECTED_BACKGROUND_DELIVERY_CONTROL=1启用；默认仍同步原路径。UI准备绝对PIDL并复制ILGetSize字节，worker仅CoInitializeEx(MTA)/SHChangeNotify(IDLIST|FLUSH)/CoUninitialize，不捕获this/COM接口/HWND。开始新监视器创建独立队列，停止/视图NCDESTROY/有队列的根重初始化/析构退休；后台错误与在途数回传timer，排序就绪和settled日志均包含后台未完成门槛。已接受通知仍允许完成，未证明可以撤回。

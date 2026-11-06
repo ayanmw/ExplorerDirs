@@ -5347,8 +5347,10 @@ namespace
                             // an IShellFolder/IShellView pointer or a window handle.
                             const auto initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
                             if (FAILED(initialized)) throw initialized;
+                            TraceProjectedDeliveryForProbe("enter", payload);
                             SHChangeNotify(payload.event, SHCNF_IDLIST | SHCNF_FLUSH,
                                 payload.first.data(), payload.second.empty() ? nullptr : payload.second.data());
+                            TraceProjectedDeliveryForProbe("returned", payload);
                             CoUninitialize();
                         });
                 }
@@ -5377,6 +5379,12 @@ namespace
             }
             ProjectedDeliveryExperiment::Payload payload;
             payload.event = event;
+            static std::atomic<ULONGLONG> sequence{ 0 };
+            payload.sequence = ++sequence;
+#if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
+            payload.context = _sizeSortContext ? _sizeSortContext->id : 0;
+#endif
+            if (const auto* child = SyntheticData(ILFindLastID(first))) payload.name = child->name;
             const auto* bytes = reinterpret_cast<const BYTE*>(first);
             payload.first.assign(bytes, bytes + ILGetSize(first));
             if (second)
@@ -5384,7 +5392,29 @@ namespace
                 bytes = reinterpret_cast<const BYTE*>(second);
                 payload.second.assign(bytes, bytes + ILGetSize(second));
             }
-            return _projectedDelivery->Enqueue(payload);
+            const auto result = _projectedDelivery->Enqueue(payload);
+            if (SUCCEEDED(result)) TraceProjectedDeliveryForProbe("accepted", payload);
+            return result;
+        }
+        static void TraceProjectedDeliveryForProbe(const char* stage, const ProjectedDeliveryExperiment::Payload& payload)
+        {
+            wchar_t path[4096]{};
+            const auto length = GetEnvironmentVariableW(L"EXPLORERDIRS_PROJECTED_DELIVERY_TRACE", path, ARRAYSIZE(path));
+            if (!length || length >= ARRAYSIZE(path)) return;
+            static std::atomic<ULONG> records{ 0 };
+            if (++records > 1024) return;
+            char name[1040]{};
+            WideCharToMultiByte(CP_UTF8, 0, payload.name.c_str(), -1, name, ARRAYSIZE(name), nullptr, nullptr);
+            char line[1280]{};
+            const auto bytes = sprintf_s(line, "%llu %s;pid=%lu;seq=%llu;context=%lu;event=0x%08lX;name=%s\n",
+                GetTickCount64(), stage, GetCurrentProcessId(), payload.sequence, payload.context, static_cast<ULONG>(payload.event), name);
+            if (bytes <= 0) return;
+            const auto file = CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (file == INVALID_HANDLE_VALUE) return;
+            DWORD written = 0;
+            WriteFile(file, line, static_cast<DWORD>(bytes), &written, nullptr);
+            CloseHandle(file);
         }
         PIDLIST_ABSOLUTE CloneProjectedAbsoluteChild(const SyntheticChild& child)
         {
@@ -6439,6 +6469,28 @@ namespace
                         {
                             for (const auto& notification : itemNotifications)
                             {
+                                // A queued size completion can outlive the physical item.
+                                // Actual notification timing reproduced UPDATEITEM after RMDIR,
+                                // resurrecting that deleted row. Unknown/access failures keep
+                                // the existing path; only confirmed absence drops this update.
+                                if (GetFileAttributesW(notification.first.c_str()) == INVALID_FILE_ATTRIBUTES)
+                                {
+                                    const auto error = GetLastError();
+                                    if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND)
+                                    {
+#if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+                                        if (const auto* child = SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(ILFindLastID(notification.second))))
+                                        {
+                                            ProjectedDeliveryExperiment::Payload trace;
+                                            trace.event = SHCNE_UPDATEITEM;
+                                            trace.name = child->name;
+                                            TraceProjectedDeliveryForProbe("size-skipped-missing", trace);
+                                        }
+#endif
+                                        CoTaskMemFree(notification.second);
+                                        continue;
+                                    }
+                                }
                                 ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeNotificationsSentForProbe);
                                 ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeItemNotificationsSentForProbe);
 #if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
@@ -6462,6 +6514,15 @@ namespace
                                 if (publishedChild && wcsncmp(publishedChild->name, L"external-", 9) == 0)
                                     ED_SIZE_TRACE("size-publish-external", self, publishedChild->name, SHCNE_UPDATEITEM,
                                         publishedChild->attributes, publishedChild->size);
+#endif
+#if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+                                if (const auto* child = SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(ILFindLastID(notification.second))))
+                                {
+                                    ProjectedDeliveryExperiment::Payload trace;
+                                    trace.event = SHCNE_UPDATEITEM;
+                                    trace.name = child->name;
+                                    TraceProjectedDeliveryForProbe("size-publish", trace);
+                                }
 #endif
                                 SHChangeNotify(SHCNE_UPDATEITEM, notifyFlags, notification.second, nullptr);
                                 CoTaskMemFree(notification.second);

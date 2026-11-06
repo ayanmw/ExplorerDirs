@@ -12,6 +12,9 @@ namespace ProjectedDeliveryExperiment
         LONG event = 0;
         std::vector<BYTE> first;
         std::vector<BYTE> second;
+        ULONGLONG sequence = 0;
+        DWORD context = 0;
+        std::wstring name;
     };
 
     class Queue : public std::enable_shared_from_this<Queue>
