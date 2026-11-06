@@ -82,3 +82,10 @@ Microsoft SHChangeNotifyRegister文档说明通知可合并为UPDATEDIR：https:
 - 删除后显式发物理PATHW删除通知（探针控制，不是产品恢复）：前两轮`physical-delete-notification-control.log`及`control2.log`在操作前分组夹具检查失败，未实际运行补发，不能算该方案反例。第三轮`src/.state/physical-delete-notification-control3.log`确实执行了四次RMDIR补发，独立Shell收到但产品仍残留。物理PATHW补发也不足以解决。
 
 三轮有效候选均发生共享输入变化，非干净性能/稳定性验收。候选源码已撤回，保留在src/.state下同名patch及physical-delete-notification-control.patch作实验记录；正常源代码及构建入口恢复，不留产品开关。只保留探针就绪修正：观察器初始化解析PIDL可能泵启动回调，在任何文件操作前重新等待四窗格、预期行数及恰好一个分组窗格，不降低原断言或用固定延时替代。下步验证实际注册根PIDL与显示目录是否一致，并检查同一适配器实例初始化/绑定后的订阅关系。
+
+
+## 注册根目录身份与重新初始化
+
+`src/.state/subscription-root-identity-control.log`针对既有名称排序大目录夹具对照；诊断读取实际_backingRoot的FILESYSPATH，只输出叶名、与_backingPath是否完全一致、PIDL长度。四根pane-0-tab-1、pane-2-tab-0、pane-1-tab-0、pane-3-tab-0均S_OK且匹配标志1；对应注册均成功。没有已挂载/有注册的对象重新Initialize记录。独立Shell仍收到删除，子进程未记录删除投递，目录残留超时。此轮输入守卫失败，不作性能结论。
+
+初次诊断同时记录了大量未挂载解析/绑定临时对象初始化（1245条），会扰动时序；总日志1293条未达到4096上限。现只在_notificationWindow或注册ID非零时记录重初始化，保留实际订阅根检查；不能由该调整声称产品性能提升。根身份对照排除了该轮“订阅路径与显示路径不一致”的解释，没有证明通知注册在系统内部始终有效。后续应关注同进程物理订阅与原生DefView投影订阅的相互影响，以及消息在App线程中的投递/分派；继续保留失败门槛，不新增自动完整刷新。

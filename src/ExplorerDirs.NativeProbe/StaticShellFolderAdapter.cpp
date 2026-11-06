@@ -110,6 +110,7 @@ namespace
         if (strcmp(stage, "physical-view-event") && strcmp(stage, "provider-view-forwarded") &&
             strcmp(stage, "provider-identity-live") && strcmp(stage, "provider-identity-missing") &&
             strcmp(stage, "physical-view-subscription") && strcmp(stage, "physical-view-unsubscribe") &&
+            strcmp(stage, "physical-subscription-root") && strcmp(stage, "physical-root-reinitialized") &&
             strcmp(stage, "physical-delivery") && strcmp(stage, "physical-delivery-lock-failed") &&
             strcmp(stage, "same-name-metadata-compare") &&
             strcmp(stage, "view-enumeration") && strcmp(stage, "view-enumerator") &&
@@ -3508,6 +3509,13 @@ namespace
 #endif
             if (_backingRoot) CoTaskMemFree(_backingRoot);
             _backingRoot = backingRoot;
+#if defined(EXPLORERDIRS_PROVIDER_VIEW_NOTIFICATIONS)
+            // Ignore temporary parse/bind objects: only a live subscribed instance
+            // can invalidate the registration relationship under investigation.
+            if (_notificationWindow || _backingNotificationRegistration)
+                ED_SIZE_TRACE("physical-root-reinitialized", this, PathFindFileNameW(backingPath.c_str()),
+                    _backingNotificationRegistration, _notificationWindow ? 1 : 0, 0);
+#endif
             if (_inner) _inner->Release();
             _inner = backingFolder;
             try { _backingPath = std::move(backingPath); }
@@ -4922,6 +4930,16 @@ namespace
             _notificationWindow = window;
 #if defined(EXPLORERDIRS_FOLDER_SIZE_DISPLAY)
             _sizeDisplayWindow.store(window);
+#endif
+#if defined(EXPLORERDIRS_NOTIFICATION_TRACE_EXPERIMENT)
+            LPWSTR subscriptionPath = nullptr;
+            const auto subscriptionPathResult = SHGetNameFromIDList(_backingRoot, SIGDN_FILESYSPATH, &subscriptionPath);
+            ED_SIZE_TRACE("physical-subscription-root", this,
+                subscriptionPath ? PathFindFileNameW(subscriptionPath) : nullptr,
+                static_cast<DWORD>(subscriptionPathResult),
+                subscriptionPath && _wcsicmp(subscriptionPath, _backingPath.c_str()) == 0 ? 1 : 0,
+                ILGetSize(_backingRoot));
+            if (subscriptionPath) CoTaskMemFree(subscriptionPath);
 #endif
             SHChangeNotifyEntry entry{ _backingRoot, FALSE };
             _backingNotificationRegistration = SHChangeNotifyRegister(window,
