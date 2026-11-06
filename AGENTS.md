@@ -31,6 +31,8 @@
 
 ## Product boundary
 
+- Projected notification facts/tickets for the same physical directory must be scoped to the existing tab sort context; transient enumeration objects use that same key and view destruction releases it. Keep the shared size cache separate. A rename destination receiving a later event does not invalidate the old source's native ticket by itself: native generation validation remains authoritative for acknowledgement, and stale native acknowledgements must preserve newer facts. Verify same-directory panes by independent native view owners, not path-only log matches.
+
 - Projected metadata enumeration commits must validate the root version captured before I/O; item retirement must match its emitted per-item ticket. Rejected cache commits do not cancel Shell-owned enumerators or notifications. Keep these evidence scopes separate when wiring the application queue.
 
 - The projected child-notification bridge remains an opt-in isolated prototype until authoritative item type/identity, concurrent same-name recreation, navigation retirement, and full-App multi-pane/group/burst checks pass. Pausing physical subscriptions is test-only. Prove absence of re-enumeration with native counters, and do not equate a single native-view pass with product repair.

@@ -3968,7 +3968,14 @@ namespace
             if (!g_syntheticSizeMetricsObservation) ED_PROBE_METRIC_INCREMENT(g_syntheticEnumObjectsCount);
             if (!_inner) return E_UNEXPECTED;
 #if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
-            const auto observedEnumeration = _recursiveSizeStore ? _recursiveSizeStore->BeginObservedEnumeration(_backingPath.c_str()) : 0;
+            std::wstring observedKey;
+            ULONGLONG observedEnumeration = 0;
+            try
+            {
+                observedKey = ObservedMetadataKey();
+                observedEnumeration = _recursiveSizeStore ? _recursiveSizeStore->BeginObservedEnumeration(observedKey.c_str()) : 0;
+            }
+            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
 #endif
             std::vector<SyntheticChild> children;
             HRESULT result = S_OK;
@@ -3989,7 +3996,7 @@ namespace
 #endif
             if (FAILED(result)) return result;
 #if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
-            try { if (_recursiveSizeStore) _recursiveSizeStore->RecordObservedChildren(_backingPath.c_str(), children, observedEnumeration); }
+            try { if (_recursiveSizeStore) _recursiveSizeStore->RecordObservedChildren(observedKey.c_str(), children, observedEnumeration); }
             catch (const std::bad_alloc&) { } // Missing facts fail closed in the notification capability.
 #endif
             if (_recursiveSizeStore &&
@@ -5136,13 +5143,23 @@ namespace
             try
             {
                 _bridgeObservedPath = _backingPath;
-                _recursiveSizeStore->RetainObservedRoot(_bridgeObservedPath.c_str());
+                _bridgeObservedKey = ObservedMetadataKey();
+                _recursiveSizeStore->RetainObservedRoot(_bridgeObservedKey.c_str());
             }
-            catch (const std::bad_alloc&) { _bridgeObservedPath.clear(); }
+            catch (const std::bad_alloc&) { _bridgeObservedPath.clear(); _bridgeObservedKey.clear(); }
 #endif
             return S_OK;
         }
 #if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+        std::wstring ObservedMetadataKey() const
+        {
+#if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
+            // Same physical directory in independent tabs must not retire each
+            // other's removal tickets. Worker folder objects share this context id.
+            if (_sizeSortContext) return _backingPath + L"\ncontext:" + std::to_wstring(_sizeSortContext->id);
+#endif
+            return _backingPath;
+        }
         HRESULT STDMETHODCALLTYPE GetObservedMetadataCountsForProbe(ULONG* roots, ULONG* children) override
         {
             if (!roots || !children) return E_POINTER;
@@ -5215,11 +5232,11 @@ namespace
                 const auto result = DescribeProjectedLiveChild(leaf, &child);
                 if (FAILED(result)) return result;
                 DWORD previousAttributes = 0;
-                const bool known = _recursiveSizeStore->TryGetObservedAttributes(_bridgeObservedPath.c_str(), child.name, &previousAttributes);
+                const bool known = _recursiveSizeStore->TryGetObservedAttributes(_bridgeObservedKey.c_str(), child.name, &previousAttributes);
                 if (known && ((previousAttributes ^ child.attributes) & FILE_ATTRIBUTE_DIRECTORY)) return S_FALSE;
                 ProjectedPidl absolute(CloneProjectedAbsoluteChild(child));
                 if (!absolute) return E_OUTOFMEMORY;
-                if (!_recursiveSizeStore->RecordObservedChild(_bridgeObservedPath.c_str(), child)) return CO_E_OBJNOTCONNECTED;
+                if (!_recursiveSizeStore->RecordObservedChild(_bridgeObservedKey.c_str(), child)) return CO_E_OBJNOTCONNECTED;
                 const LONG event = known ? SHCNE_UPDATEITEM : (child.attributes & FILE_ATTRIBUTE_DIRECTORY) ? SHCNE_MKDIR : SHCNE_CREATE;
                 SHChangeNotify(event, SHCNF_IDLIST | SHCNF_FLUSHNOWAIT, absolute.get(), nullptr);
                 return S_OK;
@@ -5238,9 +5255,9 @@ namespace
             {
                 DWORD oldAttributes = 0, targetAttributes = 0;
                 ULONGLONG previousVersion = 0;
-                if (!_recursiveSizeStore->TryGetObservedAttributes(_bridgeObservedPath.c_str(), oldLeaf, &oldAttributes, &previousVersion))
+                if (!_recursiveSizeStore->TryGetObservedAttributes(_bridgeObservedKey.c_str(), oldLeaf, &oldAttributes, &previousVersion))
                     return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
-                if (!caseOnly && _recursiveSizeStore->TryGetObservedAttributes(_bridgeObservedPath.c_str(), newLeaf, &targetAttributes)) return S_FALSE;
+                if (!caseOnly && _recursiveSizeStore->TryGetObservedAttributes(_bridgeObservedKey.c_str(), newLeaf, &targetAttributes)) return S_FALSE;
                 const auto oldPath = _backingPath + L"\\" + oldLeaf;
                 SyntheticChild oldChild{}, newChild{};
                 const auto result = DescribeProjectedLiveChild(newLeaf, &newChild);
@@ -5270,7 +5287,7 @@ namespace
                 ProjectedPidl oldAbsolute(CloneProjectedAbsoluteChild(oldChild));
                 ProjectedPidl newAbsolute(CloneProjectedAbsoluteChild(newChild));
                 if (!oldAbsolute || !newAbsolute) return E_OUTOFMEMORY;
-                if (!_recursiveSizeStore->RecordObservedChild(_bridgeObservedPath.c_str(), newChild)) return CO_E_OBJNOTCONNECTED;
+                if (!_recursiveSizeStore->RecordObservedChild(_bridgeObservedKey.c_str(), newChild)) return CO_E_OBJNOTCONNECTED;
                 *oldTicket = previousVersion;
                 SHChangeNotify((oldAttributes & FILE_ATTRIBUTE_DIRECTORY) ? SHCNE_RENAMEFOLDER : SHCNE_RENAMEITEM,
                     SHCNF_IDLIST | SHCNF_FLUSHNOWAIT, oldAbsolute.get(), newAbsolute.get());
@@ -5282,7 +5299,7 @@ namespace
         {
             if (!leaf || !*leaf) return E_INVALIDARG;
             if (!_notificationWindow || _bridgeObservedPath != _backingPath) return CO_E_OBJNOTCONNECTED;
-            return _recursiveSizeStore->ForgetObservedChild(_bridgeObservedPath.c_str(), leaf, ticket) ? S_OK : S_FALSE;
+            return _recursiveSizeStore->ForgetObservedChild(_bridgeObservedKey.c_str(), leaf, ticket) ? S_OK : S_FALSE;
         }
         HRESULT STDMETHODCALLTYPE NotifyProjectedRemovalForProbe(PCWSTR leaf, ULONGLONG* ticket) override
         {
@@ -5298,7 +5315,7 @@ namespace
                 if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) return HRESULT_FROM_WIN32(error);
                 DWORD attributes = 0;
                 if (_bridgeObservedPath != _backingPath || !_recursiveSizeStore->PrepareObservedRemoval(
-                    _bridgeObservedPath.c_str(), leaf, &attributes, ticket)) return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+                    _bridgeObservedKey.c_str(), leaf, &attributes, ticket)) return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
                 const bool directory = (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
                 SyntheticChild child{};
                 child.cb = sizeof(child);
@@ -5398,8 +5415,9 @@ namespace
 #if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
                 if (!self->_bridgeObservedPath.empty())
                 {
-                    self->_recursiveSizeStore->ReleaseObservedRoot(self->_bridgeObservedPath.c_str());
+                    self->_recursiveSizeStore->ReleaseObservedRoot(self->_bridgeObservedKey.c_str());
                     self->_bridgeObservedPath.clear();
+                    self->_bridgeObservedKey.clear();
                 }
 #endif
                 self->_notificationWindow = nullptr;
@@ -6748,6 +6766,7 @@ namespace
         ULONG _backingNotificationRegistration = 0;
 #if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
         std::wstring _bridgeObservedPath;
+        std::wstring _bridgeObservedKey;
 #endif
 #if defined(EXPLORERDIRS_FOLDER_SIZE_DISPLAY)
         std::atomic<HWND> _sizeDisplayWindow{nullptr};

@@ -61,6 +61,15 @@ internal static class ProjectedDispatchSmoke
             Require(reconciledCount == Math.Min((turn + 1) * 8, 17) && replacementPump.PendingCount == 0);
         }
         Require(replaced.Snapshot == (0, 0, false));
+        var chained = new ProjectedChangeLedger();
+        chained.Record(ProjectedChangeKind.Renamed, "old", "new");
+        var chainedPump = new ProjectedChangeDispatch(chained, 8);
+        var confirmations = 0;
+        chainedPump.Advance(() => true, _ => new(11), _ => true, (_, _) => { });
+        chained.Record(ProjectedChangeKind.Deleted, "new");
+        chainedPump.Advance(() => true, _ => new(12), _ => true, (_, ticket) => { Require(ticket == 11); confirmations++; });
+        chainedPump.Advance(() => true, _ => throw new InvalidOperationException(), _ => true, (_, ticket) => { Require(ticket == 12); confirmations++; });
+        Require(confirmations == 2 && chained.Snapshot == (0, 0, false));
         var failed = new ProjectedChangeLedger();
         failed.Record(ProjectedChangeKind.Created, "failed");
         var broken = new ProjectedChangeDispatch(failed, 8);

@@ -61,6 +61,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunFullAppSession(largeRun, fillerCount: fillerCount);
         if (args is ["--full-app-session-private-desktop", var tracedRun, "--adapter", var tracedAdapter])
             return PrivateDesktopShellProbe.RunFullAppSession(tracedRun, adapterOverride: tracedAdapter);
+        if (args is ["--full-app-session-same-root-private-desktop", var sharedRootRun, "--adapter", var sharedRootAdapter])
+            return PrivateDesktopShellProbe.RunFullAppSession(sharedRootRun, adapterOverride: sharedRootAdapter, sameRoot: true);
         if (args is ["--full-app-session-private-desktop", var settledRun, "--settle-external-changes"])
             return PrivateDesktopShellProbe.RunFullAppSession(settledRun, settleExternalChanges: true);
         if (args is ["--full-app-session-private-desktop", var comparisonRun, "--no-soft-refresh"])

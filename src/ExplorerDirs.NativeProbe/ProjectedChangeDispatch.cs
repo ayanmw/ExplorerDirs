@@ -35,7 +35,10 @@ internal sealed class ProjectedChangeDispatch(ProjectedChangeLedger queue, int m
                 if (!Active()) return;
                 if (work.Kind is ProjectedChangeKind.Deleted or ProjectedChangeKind.Renamed)
                 {
-                    if (!queue.IsCurrent(work)) throw new InvalidOperationException("Structural work requires reconciliation before acknowledgement.");
+                    // A rename's destination may already have a queued deletion.
+                    // Path freshness is then false even though the old source ticket
+                    // can retire safely. The callback must validate the native item
+                    // generation, never erase facts by name alone.
                     acknowledge(work, ticket);
                     if (!Active()) return;
                 }

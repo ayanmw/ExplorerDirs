@@ -117,8 +117,9 @@ internal sealed partial class ExplorerBrowserHost
                     (work, ticket) =>
                     {
                         var result = GetMethod<ProjectedAcknowledge>(bridge, 7)(bridge, work.Name, ticket);
-                        if (result == 1 && work.Kind == ProjectedChangeKind.Renamed &&
-                            string.Equals(work.Name, work.NewName, StringComparison.OrdinalIgnoreCase)) return;
+                        // Native S_FALSE preserves a newer generation or an already
+                        // retired fact. It emits no notification and is safe to retain.
+                        if (result == 1) return;
                         if (result != 0) throw new InvalidOperationException($"Projected confirmation: 0x{result:X8}");
                     });
                 if (Current() && enumerationBaseline is { } baseline)
@@ -127,13 +128,13 @@ internal sealed partial class ExplorerBrowserHost
                     if (!Current()) return;
                     if (lastLoggedDispatch != dispatched)
                     {
-                        LogProjectedExperiment($"dispatch path={path};events={dispatched}");
+                        LogProjectedExperiment($"dispatch path={path};owner={viewWindow:X};events={dispatched}");
                         lastLoggedDispatch = dispatched;
                     }
                     if (dispatch.PendingCount == 0 && queue.Snapshot.Queued == 0 &&
                         (lastLoggedSettled != dispatched || lastEnumerations != enumerations))
                     {
-                        LogProjectedExperiment($"settled path={path};events={dispatched};enumerations={baseline}->{enumerations}");
+                        LogProjectedExperiment($"settled path={path};owner={viewWindow:X};events={dispatched};enumerations={baseline}->{enumerations}");
                         lastLoggedSettled = dispatched;
                         lastEnumerations = enumerations;
                     }
@@ -144,7 +145,7 @@ internal sealed partial class ExplorerBrowserHost
                 if (Current())
                 {
                     LastShellRefreshStatus = $"projected-experiment-stopped={error.GetType().Name},hr=0x{error.HResult:X8}";
-                    LogProjectedExperiment($"error path={path};status={LastShellRefreshStatus};message={error.Message}");
+                    LogProjectedExperiment($"error path={path};owner={viewWindow:X};status={LastShellRefreshStatus};message={error.Message}");
                     StopProjectedMonitorExperiment();
                 }
             }
@@ -164,7 +165,7 @@ internal sealed partial class ExplorerBrowserHost
             watcher.EnableRaisingEvents = true;
             timer.Start();
             LastShellRefreshStatus = "projected-experiment-monitor-started";
-            LogProjectedExperiment($"started path={path};navigation={navigationVersion}");
+            LogProjectedExperiment($"started path={path};owner={viewWindow:X};navigation={navigationVersion}");
             return true;
         }
         catch

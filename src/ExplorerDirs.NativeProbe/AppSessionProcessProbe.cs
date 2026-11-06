@@ -10,7 +10,7 @@ using Microsoft.Win32.SafeHandles;
 // Only processes created here are queried/closed; no input injection or Shell restart.
 internal static class AppSessionProcessProbe
 {
-    internal static int Run(string preparedRun, bool softRefresh = true, bool settleExternalChanges = false, string? adapterOverride = null, int fillerCount = 0)
+    internal static int Run(string preparedRun, bool softRefresh = true, bool settleExternalChanges = false, string? adapterOverride = null, int fillerCount = 0, bool sameRoot = false)
     {
         preparedRun = Path.GetFullPath(preparedRun);
         using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(preparedRun, "preparation.json")));
@@ -52,7 +52,7 @@ internal static class AppSessionProcessProbe
             var tabs = new List<TabSettings>();
             for (var tab = 0; tab < (pane == 0 ? 2 : 1); tab++)
             {
-                var directory = Path.Combine(run, "fixtures", $"pane-{pane}-tab-{tab}");
+                var directory = Path.Combine(run, "fixtures", sameRoot ? "shared-root" : $"pane-{pane}-tab-{tab}");
                 foreach (var (name, size) in new[] { ("small", 5), ("large", 29) })
                 {
                     var child = Path.Combine(directory, name);
@@ -82,7 +82,7 @@ internal static class AppSessionProcessProbe
         File.WriteAllText(sessionPath, seed + File.ReadAllText(sessionPath));
         File.WriteAllText(Path.Combine(profile, "FolderSize.ini"), "[FolderSize]\nFormatVersion=1\nEnabled=true\nSource=BuiltIn\n");
         File.WriteAllText(Path.Combine(profile, "SoftRefresh.ini"), $"[View]\nFormatVersion=1\nSoftRefresh={softRefresh}\n");
-        Console.WriteLine($"app-session-configuration: soft-refresh={softRefresh}");
+        Console.WriteLine($"app-session-configuration: soft-refresh={softRefresh}; same-root={sameRoot}");
         var executable = Path.Combine(app, "ExplorerDirs.App.exe");
         var expectedPlacement = default(WindowPlacementState);
         var pids = new List<uint>();
@@ -96,6 +96,9 @@ internal static class AppSessionProcessProbe
                 var lines = File.Exists(projectedLog) ? File.ReadAllLines(projectedLog).Skip(projectedLogStart).ToArray() : [];
                 if (lines.Any(line => line.Contains(" error path=", StringComparison.Ordinal)))
                     throw new InvalidOperationException("Projected App monitor stopped with an error: " + string.Join(" | ", lines));
+                var owners = lines.Where(line => line.Contains(" started path=", StringComparison.Ordinal))
+                    .Select(line => line.Split(";owner=")[1].Split(';')[0]).Distinct(StringComparer.Ordinal).ToArray();
+                if (owners.Length != 4) throw new InvalidOperationException($"Expected four independent projected monitor owners, got {owners.Length}.");
                 for (var pane = 0; pane < 4; pane++)
                 {
                     var activePath = expected.Panes[pane][expected.ActiveTabIndices![pane]].Path;
@@ -109,6 +112,14 @@ internal static class AppSessionProcessProbe
                             lastDispatch.Split(";events=")[1] != lastSettled.Split(";events=")[1].Split(';')[0])
                             throw new InvalidOperationException($"Projected App pane {pane + 1} still has unconfirmed work.");
                     }
+                }
+                if (requireSettled) foreach (var owner in owners)
+                {
+                    var marker = $";owner={owner};";
+                    var sent = lines.LastOrDefault(line => line.Contains(" dispatch path=", StringComparison.Ordinal) && line.Contains(marker, StringComparison.Ordinal));
+                    var settled = lines.LastOrDefault(line => line.Contains(" settled path=", StringComparison.Ordinal) && line.Contains(marker, StringComparison.Ordinal));
+                    if (sent is null || settled is null || sent.Split(";events=")[1] != settled.Split(";events=")[1].Split(';')[0])
+                        throw new InvalidOperationException($"Projected monitor owner {owner} has unconfirmed work.");
                 }
                 foreach (var line in lines.Where(line => line.Contains(" settled path=", StringComparison.Ordinal)))
                 {
@@ -413,14 +424,14 @@ internal static class AppSessionProcessProbe
         }
         // Mutate only fresh test roots created above, without commands or input to the App.
         Mark("before-create");
-        foreach (var directory in additions)
+        foreach (var directory in additions.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             Directory.CreateDirectory(directory);
             File.WriteAllBytes(Path.Combine(directory, "data.bin"), new byte[64]);
         }
         AwaitRows(3, "create");
         Mark("before-delete");
-        foreach (var directory in additions)
+        foreach (var directory in additions.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             File.Delete(Path.Combine(directory, "data.bin"));
             Directory.Delete(directory);
@@ -428,7 +439,8 @@ internal static class AppSessionProcessProbe
         AwaitRows(2, "delete");
         Mark("delete-completed");
 
-        var files = additions.Select(directory => Path.Combine(Path.GetDirectoryName(directory)!, "external-file.txt")).ToArray();
+        var files = additions.Select(directory => Path.Combine(Path.GetDirectoryName(directory)!, "external-file.txt"))
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         Mark("before-file-create");
         foreach (var file in files) File.WriteAllBytes(file, new byte[37]);
         AwaitRows(3, "file-create");

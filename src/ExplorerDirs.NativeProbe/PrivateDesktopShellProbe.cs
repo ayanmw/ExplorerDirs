@@ -63,8 +63,8 @@ internal static class PrivateDesktopShellProbe
         ExplorerDirs.App.FolderSizeSource source = ExplorerDirs.App.FolderSizeSource.BuiltIn, bool sortPolicyExperiment = false, bool? encodedSortPolicy = null, bool columnStateSortPolicy = false, int encodedSortDirection = 1, bool dynamicSortPolicy = false, bool nativeSortEntrypoints = false, uint nativeSortMode = 4, bool shellFolderPartition = false, bool reconcileSortCommands = false) => Run("product-size-display",
         () => SyntheticShellSortProbe.RunProductSizeDisplay(adapterPath, explorerBrowser, rootControl, source, sortPolicyExperiment, encodedSortPolicy, columnStateSortPolicy, encodedSortDirection, dynamicSortPolicy, nativeSortEntrypoints, nativeSortMode, shellFolderPartition, reconcileSortCommands), TimeSpan.FromSeconds(30), initializeOle: true);
 
-    internal static int RunFullAppSession(string preparedRun, bool softRefresh = true, bool settleExternalChanges = false, string? adapterOverride = null, int fillerCount = 0) => Run("full-app-session",
-        () => AppSessionProcessProbe.Run(preparedRun, softRefresh, settleExternalChanges, adapterOverride, fillerCount), TimeSpan.FromSeconds(fillerCount > 0 ? 180 : 120));
+    internal static int RunFullAppSession(string preparedRun, bool softRefresh = true, bool settleExternalChanges = false, string? adapterOverride = null, int fillerCount = 0, bool sameRoot = false) => Run("full-app-session",
+        () => AppSessionProcessProbe.Run(preparedRun, softRefresh, settleExternalChanges, adapterOverride, fillerCount, sameRoot), TimeSpan.FromSeconds(fillerCount > 0 ? 180 : 120));
 
     internal static int RunProductEverythingHosts(string hostProbePath, string adapterPath) => Run("product-everything-hosts",
         () => ProductFourPaneHostProbe.Run(hostProbePath, sortContextAdapter: adapterPath, realEverything: true), TimeSpan.FromSeconds(90), initializeOle: true);
