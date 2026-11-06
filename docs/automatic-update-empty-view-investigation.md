@@ -1,5 +1,13 @@
 # 自动变化期间短暂零行：刷新来源调查
 
+## 2026-11-06 降低跨进程行采样负载
+
+AppSessionProcessProbe新增仅探针进程的EXPLORERDIRS_PROBE_SPARSE_ROW_SAMPLING=1控制，将AwaitRows轮询间隔25ms改为250ms，其他等待、15秒期限、最终条目/名称/分组/枚举/隔离断言保留。默认仍25ms；日志记录实际周期。稀疏采样较易漏掉短暂零行，不能用它替代瞬态覆盖，也不能把最终通过视为视觉无闪。
+
+使用同一prepared App `20261106-121746-056-24ab90`、Name主排序、Background优先级、1025填充行和32文件场景，`src/.state/projected-sparse-sampling-name32.log` 两进程功能与全部隔离守卫通过，整体退出0，owned run `src/.state/app-session-process/0816b2c314ef4989b493e935ece764c8`。新增3164/3184ms、删除1708/2307ms；第二进程部分owner最大回调间隔786ms仍存在。相比前一25ms组3879/4065ms新增、4042/1940ms删除，部分较快，但顺序非随机、样本少、存在其他负载波动，不足以归因探针主导，更不是产品性能修复。下一步仍需UI线程操作或堆栈证据。
+
+NativeProbe重新构建零警告零错误；仅改探针，无普通产品行为或发布改变。
+
 ## 2026-11-06 同一二进制调度优先级对照
 
 实验构建读取进程级 EXPLORERDIRS_PROJECTED_NORMAL_PRIORITY_CONTROL=1 时使用Normal，否则仍Background；启动日志记录实际priority。仅用于对照，不是普通产品选项。两个变量均由探针调用finally还原，普通构建不包含此入口。采用同一prepared payload `20261106-121746-056-24ab90`、名称排序控制、相同1025填充/32文件场景，先Normal再Background，顺序非随机，样本有限。

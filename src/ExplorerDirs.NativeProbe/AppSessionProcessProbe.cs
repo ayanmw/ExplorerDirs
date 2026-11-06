@@ -307,6 +307,10 @@ internal static class AppSessionProcessProbe
             grouped = candidate;
             return true;
         }, TimeSpan.FromSeconds(15), "Four-pane/group/count fixture did not settle after observer setup.");
+        // Control observer load without weakening final row/name/group assertions.
+        // Sparse sampling cannot support the same transient-empty coverage as 25ms.
+        var rowPollMilliseconds = Environment.GetEnvironmentVariable("EXPLORERDIRS_PROBE_SPARSE_ROW_SAMPLING") == "1" ? 250 : 25;
+        Console.WriteLine($"app-row-sampling: interval-ms={rowPollMilliseconds}");
         var transientEmptySamples = 0;
         var zeroPaneSamplesWithDisableFlag = 0;
         var zeroPaneSamplesWithVisibilityChange = 0;
@@ -361,7 +365,7 @@ internal static class AppSessionProcessProbe
                     }
                     return lists.Count == 4 && counts.All(rows => rows == count) &&
                         grouped.All(list => Message(list, 0x10AF) == 1);
-                }, TimeSpan.FromSeconds(15), $"External {stage} did not update all four panes while retaining grouping.");
+                }, TimeSpan.FromSeconds(15), $"External {stage} did not update all four panes while retaining grouping.", rowPollMilliseconds);
             }
             catch (TimeoutException)
             {
@@ -519,13 +523,13 @@ internal static class AppSessionProcessProbe
     {
         if (WaitForSingleObject(child.Process, 0) == 0) throw new InvalidOperationException("Owned app exited before readiness.");
     }
-    private static void Wait(Func<bool> predicate, TimeSpan timeout, string message)
+    private static void Wait(Func<bool> predicate, TimeSpan timeout, string message, int pollMilliseconds = 25)
     {
         var clock = Stopwatch.StartNew();
         while (!predicate())
         {
             if (clock.Elapsed >= timeout) throw new TimeoutException(message);
-            Thread.Sleep(25);
+            Thread.Sleep(pollMilliseconds);
         }
     }
     private static nint Message(nint window, uint message) =>
