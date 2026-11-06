@@ -24,6 +24,7 @@ public static partial class SyntheticShellSortProbe
         GetCounter? enumCounter = null;
         ProfileShellNamespaceOwner? owner = null;
         StreamViewHost? host = null;
+        Action? verifyProjectedAfterClose = null;
         try
         {
             foreach (var bytes in new[] { 12 * 1024, 25 * 1024 })
@@ -98,7 +99,7 @@ public static partial class SyntheticShellSortProbe
             WaitForSizes("initial");
             if (projectedNotifyBridge)
             {
-                VerifyProjectedNotificationBridge(view, listView, fixture, projectedNotifyFillerCount);
+                verifyProjectedAfterClose = VerifyProjectedNotificationBridge(view, listView, fixture, projectedNotifyFillerCount);
                 return 0;
             }
             if (dynamicSortPolicy) VerifySortExternalIdentity(root, folder, mainIdentity, fixture);
@@ -636,6 +637,7 @@ public static partial class SyntheticShellSortProbe
                 Check(At<DestroyDisplayBrowser>(browser, 4)(browser));
                 Marshal.Release(browser);
             }
+            verifyProjectedAfterClose?.Invoke();
             if (displayBrowsers.Count != 0)
                 Console.WriteLine($"product-size-display-lifecycle: destroyed={displayBrowsers.Count}; surviving-list-HWNDs={siblingLists.Count(item => IsWindow(item.List))}");
             // The private-desktop harness owns this process. DestroyViewWindow can

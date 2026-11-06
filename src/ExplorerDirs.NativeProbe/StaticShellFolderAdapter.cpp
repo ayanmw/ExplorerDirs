@@ -1658,6 +1658,50 @@ namespace
     public:
         using SnapshotMap = std::map<std::wstring, SyntheticRecursiveSizeSnapshot, ShellParsingNameLess>;
         enum class ScanReservation { Cached, Acquired, InProgress, Failed };
+#if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+        // Share facts across Shell worker folder objects; retain only live view roots.
+        void RetainObservedRoot(PCWSTR root)
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            ++_observedRoots[root].views;
+        }
+        void ReleaseObservedRoot(PCWSTR root)
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            const auto found = _observedRoots.find(root);
+            if (found != _observedRoots.end() && --found->second.views == 0) _observedRoots.erase(found);
+        }
+        void RecordObservedChildren(PCWSTR root, const std::vector<SyntheticChild>& children)
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            const auto found = _observedRoots.find(root);
+            if (found == _observedRoots.end()) return;
+            for (const auto& child : children) found->second.children[child.name] = child.attributes;
+        }
+        bool TryGetObservedAttributes(PCWSTR root, PCWSTR leaf, DWORD* attributes)
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            const auto found = _observedRoots.find(root);
+            if (found == _observedRoots.end()) return false;
+            const auto child = found->second.children.find(leaf);
+            if (child == found->second.children.end()) return false;
+            *attributes = child->second;
+            return true;
+        }
+        void ForgetObservedChild(PCWSTR root, PCWSTR leaf)
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            const auto found = _observedRoots.find(root);
+            if (found != _observedRoots.end()) found->second.children.erase(leaf);
+        }
+        void ObservedCounts(ULONG* roots, ULONG* children)
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            *roots = static_cast<ULONG>(_observedRoots.size());
+            *children = 0;
+            for (const auto& root : _observedRoots) *children += static_cast<ULONG>(root.second.children.size());
+        }
+#endif
 
         explicit SyntheticRecursiveSizeSnapshotStore(size_t maximumSnapshots = 256) noexcept
             : _maximumSnapshots(maximumSnapshots) {}
@@ -1983,6 +2027,14 @@ namespace
         volatile LONG _references = 1;
         const size_t _maximumSnapshots;
         mutable std::mutex _mutex;
+#if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+        struct ObservedRoot
+        {
+            ULONG views = 0;
+            std::map<std::wstring, DWORD, ShellParsingNameLess> children;
+        };
+        std::map<std::wstring, ObservedRoot, ShellParsingNameLess> _observedRoots;
+#endif
         mutable SnapshotMap _sizes;
         std::map<std::wstring, bool, ShellParsingNameLess> _scansInProgress;
         mutable ULONGLONG _accessSequence = 0;
@@ -3243,11 +3295,13 @@ namespace
 #endif
 #if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
     // Isolated prototype ABI: not part of the shipped adapter contract.
-    struct __declspec(uuid("A6FB5E8E-8BE5-48E7-98B2-1C8D282D2033")) IExplorerDirsProjectedNotificationProbe : public IUnknown
+    struct __declspec(uuid("B0B7756F-4BDD-479F-B52C-18C4EC55258D")) IExplorerDirsProjectedNotificationProbe : public IUnknown
     {
         virtual HRESULT STDMETHODCALLTYPE PausePhysicalNotificationsForProbe() = 0;
-        virtual HRESULT STDMETHODCALLTYPE NotifyProjectedRemovalForProbe(PCWSTR leaf, BOOL directory) = 0;
+        virtual HRESULT STDMETHODCALLTYPE NotifyProjectedRemovalForProbe(PCWSTR leaf) = 0;
         virtual HRESULT STDMETHODCALLTYPE GetEnumerationCountForProbe(ULONG* count) = 0;
+        virtual HRESULT STDMETHODCALLTYPE GetObservedMetadataCountsForProbe(ULONG* roots, ULONG* children) = 0;
+        virtual HRESULT STDMETHODCALLTYPE AcknowledgeRemovalForProbe(PCWSTR leaf) = 0;
     };
 #endif
     class SyntheticSortFolder final : public IShellFolder2, public IPersistFolder2, public IShellFolderViewCB
@@ -3885,6 +3939,10 @@ namespace
             RecordProductSyntheticEnum(enumStartMilliseconds, children.size());
 #endif
             if (FAILED(result)) return result;
+#if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+            try { if (_recursiveSizeStore) _recursiveSizeStore->RecordObservedChildren(_backingPath.c_str(), children); }
+            catch (const std::bad_alloc&) { } // Missing facts fail closed in the notification capability.
+#endif
             if (_recursiveSizeStore &&
                 InterlockedCompareExchange(&g_syntheticTranslateChildNotificationsForProbe, 0, 0) &&
                 InterlockedCompareExchange(&g_syntheticRecursiveSizeScanEnabledForProbe, 0, 0) &&
@@ -5025,9 +5083,23 @@ namespace
 #if defined(EXPLORERDIRS_NOTIFICATION_TRACE_EXPERIMENT)
             AttachNotificationDispatchHook();
 #endif
+#if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+            try
+            {
+                _bridgeObservedPath = _backingPath;
+                _recursiveSizeStore->RetainObservedRoot(_bridgeObservedPath.c_str());
+            }
+            catch (const std::bad_alloc&) { _bridgeObservedPath.clear(); }
+#endif
             return S_OK;
         }
 #if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+        HRESULT STDMETHODCALLTYPE GetObservedMetadataCountsForProbe(ULONG* roots, ULONG* children) override
+        {
+            if (!roots || !children) return E_POINTER;
+            _recursiveSizeStore->ObservedCounts(roots, children);
+            return S_OK;
+        }
         HRESULT STDMETHODCALLTYPE GetEnumerationCountForProbe(ULONG* count) override
         {
             if (!count) return E_POINTER;
@@ -5046,7 +5118,16 @@ namespace
 #endif
             return S_OK;
         }
-        HRESULT STDMETHODCALLTYPE NotifyProjectedRemovalForProbe(PCWSTR leaf, BOOL directory) override
+        HRESULT STDMETHODCALLTYPE AcknowledgeRemovalForProbe(PCWSTR leaf) override
+        {
+            if (!leaf || !*leaf) return E_INVALIDARG;
+            if (!_notificationWindow || _bridgeObservedPath != _backingPath) return CO_E_OBJNOTCONNECTED;
+            DWORD attributes = 0;
+            if (!_recursiveSizeStore->TryGetObservedAttributes(_bridgeObservedPath.c_str(), leaf, &attributes)) return S_FALSE;
+            _recursiveSizeStore->ForgetObservedChild(_bridgeObservedPath.c_str(), leaf);
+            return S_OK;
+        }
+        HRESULT STDMETHODCALLTYPE NotifyProjectedRemovalForProbe(PCWSTR leaf) override
         {
             if (!leaf || !*leaf || wcschr(leaf, L'\\') || wcschr(leaf, L'/') || wcschr(leaf, L':') ||
                 wcscmp(leaf, L".") == 0 || wcscmp(leaf, L"..") == 0) return E_INVALIDARG;
@@ -5057,10 +5138,14 @@ namespace
                 if (GetFileAttributesW(physical.c_str()) != INVALID_FILE_ATTRIBUTES) return S_FALSE;
                 const auto error = GetLastError();
                 if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) return HRESULT_FROM_WIN32(error);
+                DWORD attributes = 0;
+                if (_bridgeObservedPath != _backingPath || !_recursiveSizeStore->TryGetObservedAttributes(
+                    _bridgeObservedPath.c_str(), leaf, &attributes)) return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+                const bool directory = (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
                 SyntheticChild child{};
                 child.cb = sizeof(child);
                 child.id = 1;
-                child.attributes = directory ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
+                child.attributes = attributes;
                 if (FAILED(StringCchCopyW(child.name, ARRAYSIZE(child.name), leaf))) return E_INVALIDARG;
                 auto* relative = CloneSyntheticChild(child);
                 if (!relative) return E_OUTOFMEMORY;
@@ -5151,6 +5236,13 @@ namespace
                 self->_sizeDisplayWindow.store(nullptr);
                 self->_sizeDisplayRows.clear();
                 self->_sizeDisplayList = nullptr;
+#endif
+#if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+                if (!self->_bridgeObservedPath.empty())
+                {
+                    self->_recursiveSizeStore->ReleaseObservedRoot(self->_bridgeObservedPath.c_str());
+                    self->_bridgeObservedPath.clear();
+                }
 #endif
                 self->_notificationWindow = nullptr;
                 const auto registration = self->_backingNotificationRegistration;
@@ -6496,6 +6588,9 @@ namespace
 #if defined(EXPLORERDIRS_PROVIDER_VIEW_NOTIFICATIONS)
         HWND _notificationWindow = nullptr;
         ULONG _backingNotificationRegistration = 0;
+#if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+        std::wstring _bridgeObservedPath;
+#endif
 #if defined(EXPLORERDIRS_FOLDER_SIZE_DISPLAY)
         std::atomic<HWND> _sizeDisplayWindow{nullptr};
         const ULONG_PTR _sizeDisplayCookie = ++g_sizeDisplayCookie;

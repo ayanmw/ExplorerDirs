@@ -3,9 +3,9 @@ using System.Diagnostics;
 
 public static partial class SyntheticShellSortProbe
 {
-    private static readonly Guid ProjectedNotificationBridgeId = new("A6FB5E8E-8BE5-48E7-98B2-1C8D282D2033");
+    private static readonly Guid ProjectedNotificationBridgeId = new("B0B7756F-4BDD-479F-B52C-18C4EC55258D");
 
-    private static void VerifyProjectedNotificationBridge(nint shell, nint list, string fixture, int fillerCount)
+    private static Action VerifyProjectedNotificationBridge(nint shell, nint list, string fixture, int fillerCount)
     {
         Check(Marshal.QueryInterface(shell, in FolderView2Id, out var folderView));
         nint bridge = 0;
@@ -47,6 +47,12 @@ public static partial class SyntheticShellSortProbe
             var remove = At<RemoveProjectedChild>(bridge, 4);
             var enumerationCount = At<ReadProjectedEnumerations>(bridge, 5);
             Check(enumerationCount(bridge, out var initialEnumerations));
+            var metadataCounts = At<ReadProjectedMetadataCounts>(bridge, 6);
+            Check(metadataCounts(bridge, out var roots, out var facts));
+            if (roots != 1 || facts != fillerCount + 4)
+                throw new InvalidOperationException($"Expected one observed root and complete metadata facts, got {roots}/{facts}.");
+            var acknowledge = At<RemoveProjectedChild>(bridge, 7);
+            uint retainedFacts = (uint)(fillerCount + 4);
             foreach (var (name, directory, expected) in new[] { ("folder-empty", true, 3), ("file-2048.bin", false, 2) })
             {
                 var path = Path.Combine(fixture, name);
@@ -54,22 +60,46 @@ public static partial class SyntheticShellSortProbe
                 PumpBaseline();
                 if (!Names().Contains(name)) throw new InvalidOperationException("Baseline already removed the row; bridge was not isolated.");
                 Console.WriteLine($"projected-notification-baseline: item={name}; stale-row-retained=True; physical-subscription-paused=True");
-                Check(remove(bridge, name, directory ? 1 : 0));
+                Check(remove(bridge, name));
+                Check(metadataCounts(bridge, out roots, out facts));
+                if (facts != retainedFacts) throw new InvalidOperationException("Unconfirmed notification discarded its item type.");
                 PumpUntil(() => Names().Length == expected + fillerCount && !Names().Contains(name));
+                Check(acknowledge(bridge, name));
+                retainedFacts--;
                 AssertRetainedSelection();
                 Check(enumerationCount(bridge, out var actualEnumerations));
                 if (actualEnumerations != initialEnumerations)
                     throw new InvalidOperationException("Projected deletion re-enumerated the native folder.");
             }
+            if (remove(bridge, "never-observed") != unchecked((int)0x80070490))
+                throw new InvalidOperationException("Deletion bridge guessed an unobserved child type.");
+            Check(metadataCounts(bridge, out roots, out facts));
+            if (roots != 1 || facts != fillerCount + 2)
+                throw new InvalidOperationException("Deleted child metadata was not retired.");
             var recreated = Path.Combine(fixture, "folder-empty");
             Directory.CreateDirectory(recreated);
-            if (remove(bridge, "folder-empty", 1) != 1 || !Directory.Exists(recreated))
+            if (remove(bridge, "folder-empty") != 1 || !Directory.Exists(recreated))
                 throw new InvalidOperationException("Deletion bridge did not reject a recreated path.");
-            if (remove(bridge, "..", 1) != unchecked((int)0x80070057) ||
-                remove(bridge, "sub/child", 0) != unchecked((int)0x80070057))
+            if (remove(bridge, "..") != unchecked((int)0x80070057) ||
+                remove(bridge, "sub/child") != unchecked((int)0x80070057))
                 throw new InvalidOperationException("Deletion bridge accepted a non-child leaf.");
             AssertRetainedSelection();
-            Console.WriteLine("projected-notification-bridge: PASS file/folder rows removed; unrelated selection/focus retained; recreated path and invalid leaf rejected; no Refresh invoked; no EnumObjects; filler-count=" + fillerCount);
+            Console.WriteLine("projected-notification-bridge: PASS file/folder rows removed; unrelated selection/focus retained; authoritative child types; unknown/recreated/invalid leaf rejected; no Refresh invoked; no EnumObjects; filler-count=" + fillerCount);
+            Marshal.AddRef(bridge);
+            var retainedBridge = bridge;
+            return () =>
+            {
+                try
+                {
+                    Check(metadataCounts(retainedBridge, out var closedRoots, out var closedFacts));
+                    if (closedRoots != 0 || closedFacts != 0 || IsWindow(list))
+                        throw new InvalidOperationException("Closed view retained child metadata or a native list window.");
+                    if (remove(retainedBridge, "folder-12288") != unchecked((int)0x800401FD))
+                        throw new InvalidOperationException("Retired native view accepted an incremental notification.");
+                    Console.WriteLine("projected-notification-lifecycle: PASS roots=0; facts=0; list-destroyed=True; retired-capability-rejected=True");
+                }
+                finally { Marshal.Release(retainedBridge); }
+            };
         }
         finally
         {
@@ -77,8 +107,9 @@ public static partial class SyntheticShellSortProbe
             Marshal.Release(folderView);
         }
     }
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ReadProjectedMetadataCounts(nint self, out uint roots, out uint facts);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ReadProjectedEnumerations(nint self, out uint count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetProjectedBridge(nint self, in Guid iid, out nint bridge);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PauseProjectedPhysicalNotifications(nint self);
-    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int RemoveProjectedChild(nint self, [MarshalAs(UnmanagedType.LPWStr)] string leaf, int directory);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int RemoveProjectedChild(nint self, [MarshalAs(UnmanagedType.LPWStr)] string leaf);
 }
