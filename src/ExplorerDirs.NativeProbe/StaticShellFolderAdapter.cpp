@@ -4021,9 +4021,33 @@ namespace
                     (leftChild->size << 32) | (rightChild->size & 0xffffffff));
 #endif
             ED_PROBE_METRIC_INCREMENT(g_syntheticCompareCount);
+            if (column & SHCIDS_ALLFIELDS)
+            {
+                // Shell uses ALLFIELDS to distinguish a retained row from a fresh
+                // PIDL for the same name. Name-only equality hides metadata updates.
+                // id/parentBytes describe an enumeration's ordering/aggregate, not
+                // this item's metadata; parsing a child cannot reproduce them.
+                const auto compareValue = [](ULONGLONG a, ULONGLONG b) { return a < b ? -1 : a > b ? 1 : 0; };
+                auto order = _wcsicmp(leftChild->name, rightChild->name);
+                if (!order) order = compareValue(leftChild->size, rightChild->size);
+                if (!order) order = compareValue(leftChild->attributes, rightChild->attributes);
+                if (!order) order = compareValue(leftChild->fileCount, rightChild->fileCount);
+                if (!order) order = compareValue(leftChild->folderCount, rightChild->folderCount);
+                if (!order) order = compareValue(leftChild->identity.available, rightChild->identity.available);
+                if (!order && leftChild->identity.available)
+                {
+                    order = compareValue(leftChild->identity.volumeSerial, rightChild->identity.volumeSerial);
+                    if (!order) order = memcmp(leftChild->identity.fileId, rightChild->identity.fileId,
+                        sizeof(leftChild->identity.fileId));
+                }
+                if (order) return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL,
+                    order < 0 ? static_cast<USHORT>(-1) : 1);
+                // Equal first components still require the existing recursive tail comparison.
+            }
             const auto compareColumn = LOWORD(column);
 #if defined(EXPLORERDIRS_SIZE_SORT_POLICY_EXPERIMENT)
-            // Canonical equality must never depend on current sort policy or metadata.
+            // Identity/ALLFIELDS comparisons must not enter the display category policy.
+            // ALLFIELDS metadata was compared above; canonical identity remains name-based.
             const bool canonical = (column & (SHCIDS_CANONICALONLY | SHCIDS_ALLFIELDS)) != 0;
             const bool nativeSize = compareColumn == 1 && !InterlockedCompareExchange(&g_folderSizeEnabled, 0, 0);
             const bool mixed = CurrentMixedSizeSort() && !nativeSize;
@@ -6019,6 +6043,16 @@ namespace
             }
             if (attributes & SFGAO_FOLDER) child->attributes |= FILE_ATTRIBUTE_DIRECTORY;
             if (attributes & SFGAO_HIDDEN) child->attributes |= FILE_ATTRIBUTE_HIDDEN;
+            // EnumObjects/physical notifications retain WIN32 attributes, whereas this
+            // parse path previously kept only FOLDER/HIDDEN. Normalize physical entries
+            // before ALLFIELDS compares them; unchanged rows must not differ by origin.
+            std::wstring parsedPath, extendedParsedPath;
+            try { parsedPath = backingPath + L"\\" + child->name; }
+            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+            WIN32_FILE_ATTRIBUTE_DATA physicalData{};
+            if (SUCCEEDED(GetExtendedFilesystemPath(parsedPath, &extendedParsedPath)) &&
+                GetFileAttributesExW(extendedParsedPath.c_str(), GetFileExInfoStandard, &physicalData))
+                child->attributes = physicalData.dwFileAttributes;
             if (!(child->attributes & FILE_ATTRIBUTE_DIRECTORY))
             {
                 VARIANT size{};
@@ -6040,16 +6074,18 @@ namespace
             }
             else
             {
-                std::wstring childPath;
-                try { childPath = backingPath + L"\\" + child->name; }
-                catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
-                TryGetSyntheticFileIdentity(childPath.c_str(), &child->identity);
-                if (!(child->attributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
+                // Match EnumObjects' snapshot eligibility; otherwise ALLFIELDS
+                // would see different metadata solely because a row was parsed.
+                const bool snapshotEligible = !(child->attributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
+                    (child->attributes & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM)) !=
+                        (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM);
+                if (snapshotEligible) TryGetSyntheticFileIdentity(parsedPath.c_str(), &child->identity);
+                if (snapshotEligible &&
                     InterlockedCompareExchange(&g_syntheticRecursiveSizeScanEnabledForProbe, 0, 0) &&
                     !InterlockedCompareExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, 0, 0))
                 {
                     SyntheticDirectoryMetrics metrics{};
-                    result = GetSyntheticDirectoryMetrics(childPath, &metrics);
+                    result = GetSyntheticDirectoryMetrics(parsedPath, &metrics);
                     if (FAILED(result)) return result;
                     child->size = metrics.bytes;
                     child->fileCount = metrics.files;

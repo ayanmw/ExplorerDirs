@@ -16,6 +16,8 @@ internal static class Program
     {
         if (args is ["--product-drop-attributes", var dropAdapter])
             return SyntheticShellSortProbe.RunProductDropAttributes(dropAdapter);
+        if (args is ["--product-item-comparison", var comparisonAdapter])
+            return SyntheticShellSortProbe.RunProductItemComparison(comparisonAdapter);
         if (args is ["--product-navigation-selection-private-desktop", var navigationSelectionAdapter])
             return PrivateDesktopShellProbe.RunNavigationSelection(navigationSelectionAdapter);
         if (args is ["--product-drop-registration-private-desktop", var registrationHost, var registrationAdapter])
