@@ -86,6 +86,31 @@ internal sealed partial class ExplorerBrowserHost
         long callbackTicks = 0, maximumCallbackTicks = 0, loggingTicks = 0;
         var activeTicks = 0;
         var notReadyChecks = 0;
+        // Bounded diagnostic history only. Record predicate transitions without
+        // adding native reads, and write outside the per-item confirmation path.
+        var confirmationStarts = new Dictionary<long, (long Sent, bool? Ready, uint Pending)>();
+        var confirmationTrace = new List<string>();
+        void TraceConfirmation(ProjectedChangeLedger.Work work, bool? ready)
+        {
+            if (!confirmationStarts.TryGetValue(work.Sequence, out var previous))
+            {
+                if (ready is not null || confirmationStarts.Count >= 256) return;
+                previous = (Environment.TickCount64, null, _projectedDeliveryPending);
+                confirmationStarts.Add(work.Sequence, previous);
+            }
+            else if (ready is null || (previous.Ready == ready &&
+                !(ready == false && previous.Pending != 0 && _projectedDeliveryPending == 0))) return;
+            confirmationStarts[work.Sequence] = (previous.Sent, ready, _projectedDeliveryPending);
+            if (confirmationTrace.Count < 768)
+                confirmationTrace.Add($"{Environment.TickCount64} confirmation-observation owner={viewWindow:X};sequence={work.Sequence};kind={work.Kind};name={work.Name};ready={ready?.ToString() ?? "submitted"};since-submit-ms={Environment.TickCount64 - previous.Sent};sampled-native-pending={_projectedDeliveryPending}");
+        }
+        void FlushConfirmationTrace()
+        {
+            if (confirmationTrace.Count == 0) return;
+            try { File.AppendAllLines(Path.Combine(AppContext.BaseDirectory, "projected-confirmation-observations.log"), confirmationTrace); }
+            catch (IOException) { }
+            confirmationTrace.Clear();
+        }
         T Measure<T>(ref long total, Func<T> action)
         {
             var started = Stopwatch.GetTimestamp();
@@ -138,6 +163,7 @@ internal sealed partial class ExplorerBrowserHost
                                 enumerationBaseline = initial;
                             }
                             dispatched++;
+                            TraceConfirmation(work, null);
                             ulong ticket = 0;
                             var result = work.Kind switch
                             {
@@ -180,6 +206,7 @@ internal sealed partial class ExplorerBrowserHost
                                 _ => true
                             };
                             if (!ready) notReadyChecks++;
+                            if (Current()) TraceConfirmation(work, ready);
                             return ready;
                         }),
                         (work, ticket) => Measure(ref ackTicks, () =>
@@ -220,11 +247,13 @@ internal sealed partial class ExplorerBrowserHost
                         Measure(ref loggingTicks, () => { LogProjectedExperiment($"settled path={path};owner={viewWindow:X};{Timing()};events={dispatched};enumerations={baseline}->{enumerations}"); return 0; });
                         lastLoggedSettled = dispatched;
                         lastEnumerations = enumerations;
+                        FlushConfirmationTrace();
                     }
                 }
             }
             catch (Exception error)
             {
+                FlushConfirmationTrace();
                 if (Current())
                 {
                     LastShellRefreshStatus = $"projected-experiment-stopped={error.GetType().Name},hr=0x{error.HResult:X8}";

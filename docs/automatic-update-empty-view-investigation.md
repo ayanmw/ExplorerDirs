@@ -1,3 +1,11 @@
+## 2026-11-06 Bounded per-work confirmation observations
+
+Experiment App now records submission and first predicate transitions for up to256 work sequences per owner, buffering at most768 lines between settled/error flushes. It reuses existing reads and does not add native queries. Timestamps are Environment.TickCount64; elapsed is from managed dispatch submission, including atomic staging/transport and confirmation head-of-line waiting. Changed's true predicate is not proof of an updated property value. History is diagnostic and cannot replace the independent exact8KB/name/group assertions.
+
+Initial recorder actual run: prepared src/.state/gui-smoke/20261106-155159-780-6d038a; src/.state/projected-confirmation.log, projected-confirmation-timeline.log, and owned run fbcb2eaca68b49eebcdbad3258903007/app/projected-confirmation-observations.log. Full two-process/four-pane same-root exit0; create6,431/5,671ms, delete3,047/2,454ms; identity/group/session/placement/cleanup and foreground/input guards passed. 1,852 buffered observations across eight owners; max first-observed-ready delay5,484-6,781ms. No first-false record sampled native pending zero. This does NOT establish that pending never became zero while still false: the initial recorder only emitted boolean changes.
+
+Review caught that visibility gap. Revised recorder also emits a still-false observation when sampled transport pending changes nonzero->zero; this preserves existing assertions and adds no read. That final revision passed experiment and ordinary builds (zero warnings/errors), but has not yet run in an actual App. Ordinary outputs restored and verified absent experiment markers. Next repeat with the revised recorder before making a delivery-versus-application attribution. No product/default change or publication.
+
 ## 2026-11-06 Native view callback wall-time boundary
 
 Added experiment-only scoped timing around the full SFVM_FSNOTIFY handler, recording view-callback-slow only for inclusive wall time >=25ms. Its seq field is elapsed milliseconds (not delivery sequence). Copy the bounded item label before native calls rather than retaining a pointer to mutable root storage. Callback timing stops when our handler returns E_NOTIMPL; DefView's later application is outside this interval. Native compile passed; ordinary code is excluded by the existing experiment guard.
