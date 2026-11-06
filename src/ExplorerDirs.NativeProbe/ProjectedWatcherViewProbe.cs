@@ -32,39 +32,12 @@ public static partial class SyntheticShellSortProbe
             const int maximumInFlight = 8;
             var elapsed = Stopwatch.StartNew();
             var quiet = Stopwatch.StartNew();
-            var pending = new List<(ProjectedChangeLedger.Work Work, ulong Ticket)>();
+            var dispatcher = new ProjectedChangeDispatch(queue, maximumInFlight);
             while (elapsed.Elapsed < TimeSpan.FromSeconds(timeoutSeconds))
             {
                 if (Volatile.Read(ref failure) is { } error) throw new InvalidOperationException("Native view watcher failed.", error);
-                // Confirmation is polled on a later message-loop turn. Never wait
-                // inside an individual dispatch, and bound outstanding notifications.
-                if (pending.Count > 0)
-                {
-                    var ready = pending.All(item => item.Work.Kind switch
-                    {
-                        ProjectedChangeKind.Created => ContainsRow(item.Work.Name),
-                        ProjectedChangeKind.Deleted => !ContainsRow(item.Work.Name),
-                        ProjectedChangeKind.Renamed => !ContainsRow(item.Work.Name) && ContainsRow(item.Work.NewName!),
-                        _ => true
-                    });
-                    if (ready)
-                    {
-                        foreach (var (work, ticket) in pending)
-                        {
-                            if (work.Kind is ProjectedChangeKind.Deleted or ProjectedChangeKind.Renamed)
-                            {
-                                if (!queue.IsCurrent(work)) throw new InvalidOperationException("Watcher structural work superseded during confirmation.");
-                                if (acknowledge(bridge, work.Name, ticket) != 0)
-                                    throw new InvalidOperationException("Watcher structural confirmation rejected.");
-                            }
-                            queue.Release(work);
-                        }
-                        pending.Clear();
-                    }
-                }
-                if (pending.Count == 0)
-                {
-                    while (pending.Count < maximumInFlight && queue.TryTake(out var work))
+                dispatcher.Advance(() => !queue.Snapshot.Invalidated,
+                    work =>
                     {
                         quiet.Restart();
                         ulong ticket = 0;
@@ -75,12 +48,23 @@ public static partial class SyntheticShellSortProbe
                             _ => rename(bridge, work.Name, work.NewName!, out ticket)
                         };
                         if (result != 0) throw new InvalidOperationException($"Watcher dispatch {work.Kind} {work.Name}: 0x{result:X8}.");
-                        pending.Add((work, ticket));
                         processed++;
-                    }
-                }
+                        return ticket;
+                    },
+                    work => work.Kind switch
+                    {
+                        ProjectedChangeKind.Created => ContainsRow(work.Name),
+                        ProjectedChangeKind.Deleted => !ContainsRow(work.Name),
+                        ProjectedChangeKind.Renamed => !ContainsRow(work.Name) && ContainsRow(work.NewName!),
+                        _ => true
+                    },
+                    (work, ticket) =>
+                    {
+                        if (acknowledge(bridge, work.Name, ticket) != 0)
+                            throw new InvalidOperationException("Watcher structural confirmation rejected.");
+                    });
                 System.Windows.Forms.Application.DoEvents();
-                if (pending.Count == 0 && condition() && quiet.ElapsedMilliseconds >= 150)
+                if (dispatcher.PendingCount == 0 && condition() && quiet.ElapsedMilliseconds >= 150)
                 {
                     assertSelection();
                     Check(enumerationCount(bridge, out var enumerations));
@@ -89,7 +73,7 @@ public static partial class SyntheticShellSortProbe
                 }
                 Thread.Sleep(10);
             }
-            throw new TimeoutException($"Watcher-driven view did not settle: pending={pending.Count}; queued={queue.Snapshot.Queued}.");
+            throw new TimeoutException($"Watcher-driven view did not settle: pending={dispatcher.PendingCount}; queued={queue.Snapshot.Queued}.");
         }
 
         try

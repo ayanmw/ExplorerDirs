@@ -14,6 +14,8 @@ internal static class Program
     [STAThread]
     static int Main(string[] args)
     {
+        if (args is ["--projected-dispatch-smoke"])
+            return ProjectedDispatchSmoke.Run();
         if (args is ["--projected-watcher-ledger-smoke"])
             return ProjectedWatcherLedgerProbe.Run();
         if (args is ["--projected-change-ledger-smoke"])

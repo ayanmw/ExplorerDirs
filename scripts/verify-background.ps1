@@ -62,6 +62,8 @@ try {
     Invoke-BackgroundCheck 'folder-navigation-provider-callbacks' 'dotnet' @('run', '--project', $hostProject, '-c', 'Release', '--no-build', '--',
         '--folder-navigation-provider-callbacks', 'src/ExplorerDirs.NativeProbe/bin/native-product-x64/ExplorerDirs.ShellNamespace.dll')
     $nativeProject = 'src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj'
+    Invoke-BackgroundCheck 'projected-dispatch' 'dotnet' @('run', '--project', $nativeProject, '-c', 'Release', '--no-build', '--',
+        '--projected-dispatch-smoke')
     Invoke-BackgroundCheck 'projected-change-ledger' 'dotnet' @('run', '--project', $nativeProject, '-c', 'Release', '--no-build', '--',
         '--projected-change-ledger-smoke')
     Invoke-BackgroundCheck 'projected-watcher-ledger' 'dotnet' @('run', '--project', $nativeProject, '-c', 'Release', '--no-build', '--',
