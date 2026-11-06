@@ -17,9 +17,10 @@ internal sealed partial class ExplorerBrowserHost
     private nint _projectedBridge;
     private IDisposable? _projectedDispatcherTiming;
     private bool _projectedNeedsRecovery;
-    private static readonly Guid ProjectedBridgeExperimentId = new("412ED4D4-9750-4525-8C90-345CBDB5FE95");
+    private uint _projectedDeliveryPending;
+    private static readonly Guid ProjectedBridgeExperimentId = new("57561654-2DB4-42F9-BC73-7A67F5FD8B38");
 
-    private bool IsProjectedUpdateSettled() => !_projectedNeedsRecovery && (_projectedQueue?.IsSettled ?? true);
+    private bool IsProjectedUpdateSettled() => !_projectedNeedsRecovery && _projectedDeliveryPending == 0 && (_projectedQueue?.IsSettled ?? true);
 
     private bool TryStartProjectedMonitorExperiment(string path, long navigationVersion)
     {
@@ -115,6 +116,7 @@ internal sealed partial class ExplorerBrowserHost
             Marshal.AddRef(bridge);
             try
             {
+                Marshal.ThrowExceptionForHR(GetMethod<ProjectedDeliveryStatus>(bridge, 12)(bridge, out _projectedDeliveryPending));
                 if (queue.Overflowed) throw new InternalBufferOverflowException("Projected event capacity exceeded; navigate again to reconcile.");
                 if (Volatile.Read(ref watcherError) is { } error) throw error;
                 if (dispatch.PendingCount > 0 && progress.Elapsed > TimeSpan.FromSeconds(10))
@@ -185,6 +187,7 @@ internal sealed partial class ExplorerBrowserHost
                     }));
                 if (Current() && enumerationBaseline is { } baseline)
                 {
+                    Marshal.ThrowExceptionForHR(GetMethod<ProjectedDeliveryStatus>(bridge, 12)(bridge, out _projectedDeliveryPending));
                     Marshal.ThrowExceptionForHR(GetMethod<ProjectedEnumerationCount>(bridge, 5)(bridge, out var enumerations));
                     if (!Current()) return;
                     if (lastLoggedDispatch != dispatched)
@@ -192,7 +195,7 @@ internal sealed partial class ExplorerBrowserHost
                         Measure(ref loggingTicks, () => { LogProjectedExperiment($"dispatch path={path};owner={viewWindow:X};{Timing()};events={dispatched}"); return 0; });
                         lastLoggedDispatch = dispatched;
                     }
-                    if (dispatch.PendingCount == 0 && queue.Snapshot.Queued == 0 &&
+                    if (_projectedDeliveryPending == 0 && dispatch.PendingCount == 0 && queue.Snapshot.Queued == 0 &&
                         (lastLoggedSettled != dispatched || lastEnumerations != enumerations))
                     {
                         Measure(ref loggingTicks, () => { LogProjectedExperiment($"settled path={path};owner={viewWindow:X};{Timing()};events={dispatched};enumerations={baseline}->{enumerations}"); return 0; });
@@ -232,6 +235,7 @@ internal sealed partial class ExplorerBrowserHost
             // would both translate the same physical event.
             Marshal.ThrowExceptionForHR(GetMethod<ProjectedPause>(bridge, 3)(bridge));
             if (!Current()) return true;
+            Marshal.ThrowExceptionForHR(GetMethod<ProjectedPause>(bridge, 10)(bridge));
             watcher.EnableRaisingEvents = true;
             _projectedDispatcherTiming = ProjectedDispatcherTimingExperiment.Acquire(Dispatcher);
             timer.Start();
@@ -261,7 +265,12 @@ internal sealed partial class ExplorerBrowserHost
         if (watcher is not null) _ = ShellDirectoryWatcherStartup.DisposeSafelyAsync(watcher.Dispose);
         var bridge = _projectedBridge;
         _projectedBridge = 0;
-        if (bridge != 0) Marshal.Release(bridge);
+        _projectedDeliveryPending = 0;
+        if (bridge != 0)
+        {
+            try { GetMethod<ProjectedPause>(bridge, 11)(bridge); }
+            finally { Marshal.Release(bridge); }
+        }
     }
 
     private Action? PrepareProjectedManualRefresh(bool manual)
@@ -330,6 +339,7 @@ internal sealed partial class ExplorerBrowserHost
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProjectedGetFolder(nint self, ref Guid id, out nint folder);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProjectedPause(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProjectedEnumerationCount(nint self, out uint count);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProjectedDeliveryStatus(nint self, out uint pending);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProjectedArrival(nint self, [MarshalAs(UnmanagedType.LPWStr)] string name);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProjectedRemoval(nint self, [MarshalAs(UnmanagedType.LPWStr)] string name, out ulong ticket);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProjectedRename(nint self, [MarshalAs(UnmanagedType.LPWStr)] string oldName, [MarshalAs(UnmanagedType.LPWStr)] string newName, out ulong ticket);

@@ -370,7 +370,8 @@ internal static class AppSessionProcessProbe
             catch (TimeoutException)
             {
                 // Failure-only observation cannot turn a pending assertion into a pass.
-                if (fillerCount > 0)
+                // Small same-root fixtures can also retain stale or duplicate rows.
+                // Capture their names on failure rather than losing the key distinction.
                 {
                     foreach (var list in VisibleFileViews(window))
                     {

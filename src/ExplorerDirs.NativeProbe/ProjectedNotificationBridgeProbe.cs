@@ -4,7 +4,7 @@ using ExplorerDirs.NativeProbe;
 
 public static partial class SyntheticShellSortProbe
 {
-    private static readonly Guid ProjectedNotificationBridgeId = new("412ED4D4-9750-4525-8C90-345CBDB5FE95");
+    private static readonly Guid ProjectedNotificationBridgeId = new("57561654-2DB4-42F9-BC73-7A67F5FD8B38");
 
     private static Action VerifyProjectedNotificationBridge(nint shell, nint list, string fixture, int fillerCount)
     {

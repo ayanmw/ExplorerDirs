@@ -1,5 +1,19 @@
 # 自动变化期间短暂零行：刷新来源调查
 
+## 2026-11-06 后台交付接入隔离通知桥，发现同根旧目录残留
+
+私有ABI v5改为57561654-2DB4-42F9-BC73-7A67F5FD8B38，新增slot10 Begin、11 Retire、12 Status。普通构建排除。仅进程EXPLORERDIRS_PROJECTED_BACKGROUND_DELIVERY_CONTROL=1启用；默认仍同步原路径。UI准备绝对PIDL并复制ILGetSize字节，worker仅CoInitializeEx(MTA)/SHChangeNotify(IDLIST|FLUSH)/CoUninitialize，不捕获this/COM接口/HWND。开始新监视器创建独立队列，停止/视图NCDESTROY/有队列的根重初始化/析构退休；后台错误与在途数回传timer，排序就绪和settled日志均包含后台未完成门槛。已接受通知仍允许完成，未证明可以撤回。
+
+`src/.state/projected-background-batch64-size32.log`（prepared125240-8b06af，owned run c96a0020234b46d98f1988b69b46f2b4）：默认Size、不同根四窗格1025填充/32文件、64批次/后台FLUSH，两进程功能/逐名/分组/不增加枚举与全部隔离守卫通过，整体退出0，自动阶段无零行；新增5363/5199ms，删除2559/1851ms。Dispatcher两段记录均0，末尾部分owner callback-max33–36ms，native累计约27–31ms。它避免该轮UI同步flush的大阻塞，但总完成时间未显著优化，不能宣称吞吐达标。
+
+`projected-background-lifecycle.log` 实际App宿主的A-B-A、受控在途排序协调、stale Changed、容量停止、真实F5恢复/同名文件转目录、旧刷新回调、关闭roots/facts=0及隔离守卫通过，整体退出0。受控在途是原有托管待办，未新增实际worker阻塞门槛；roots/facts归零不等于后台worker已全部结束。
+
+同物理目录独立视图失败：`projected-background-same-root32.log` owned run6abfccb547ec4260a204368b6acb99d0，第一进程包含32文件/同名37→83KB场景通过，第二进程file-create四列表从2到4（预期3）后超时，整体退出1。此same-root路由没有1025填充行，不能外推为大目录同根压力通过。补充小夹具失败清单后，`projected-background-same-root32-inventory.log` owned rundb5bb56f304345c18c7ff80bae204ad3，在delete阶段失败，四列表均残留small|large|external-notification-fixture；实际已删除目录未从视图移除。两轮隔离守卫通过不改变功能失败。不能启用此方案。
+
+源码线索：根path-marker CompareIDs仅比较物理路径，忽略各标签编码上下文；独立后台队列可能让跨视图同根通知交错。该交错尚无逐项投递时间线，不能将此认定唯一原因。下一步验证通知域/根身份隔离或同根单生产者协调，保留旧目录残留的红色门槛，不扩大超时或完整枚举掩盖。
+
+最终增加根重初始化退休保护后，队列合同与v5原生1025行基础通知桥复测通过（projected-background-v5-baseline-bridge.log，隔离通过），此基础探针不调用新Begin，因此不等于后台交付通过。普通native重建哈希仍CADC37A135D8F0551767976EA0258F0A3075499BDFF6518C4101E90B903904EF；普通App/HostProbe恢复构建零警告零错误并排除实验入口。未发布。
+
 ## 2026-11-06 后台交付队列独立原型
 
 新增仅PROJECTED_NOTIFY_BRIDGE_EXPERIMENT编译的ProjectedDeliveryQueueExperiment.h及无窗口导出RunProjectedDeliveryQueueSmoke。尚未接入NotifyProjectedArrival/Removal/Rename，也没有向Shell发送通知。队列复制事件号/两份字节载荷，单worker按序消费，不捕获Shell接口/HWND/宿主回调。容量包含排队与已接受在途项；溢出明确退休并清空未接受项，保留失败码，不静默淘汰后续继续。交付回调异常同样退休。

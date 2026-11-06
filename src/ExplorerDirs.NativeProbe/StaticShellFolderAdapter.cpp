@@ -3430,7 +3430,7 @@ namespace
 #endif
 #if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
     // Isolated prototype ABI: not part of the shipped adapter contract.
-    struct __declspec(uuid("412ED4D4-9750-4525-8C90-345CBDB5FE95")) IExplorerDirsProjectedNotificationProbe : public IUnknown
+    struct __declspec(uuid("57561654-2DB4-42F9-BC73-7A67F5FD8B38")) IExplorerDirsProjectedNotificationProbe : public IUnknown
     {
         virtual HRESULT STDMETHODCALLTYPE PausePhysicalNotificationsForProbe() = 0;
         virtual HRESULT STDMETHODCALLTYPE NotifyProjectedRemovalForProbe(PCWSTR leaf, ULONGLONG* ticket) = 0;
@@ -3439,6 +3439,9 @@ namespace
         virtual HRESULT STDMETHODCALLTYPE AcknowledgeRemovalForProbe(PCWSTR leaf, ULONGLONG ticket) = 0;
         virtual HRESULT STDMETHODCALLTYPE NotifyProjectedArrivalForProbe(PCWSTR leaf) = 0;
         virtual HRESULT STDMETHODCALLTYPE NotifyProjectedRenameForProbe(PCWSTR oldLeaf, PCWSTR newLeaf, ULONGLONG* oldTicket) = 0;
+        virtual HRESULT STDMETHODCALLTYPE BeginProjectedDeliveryForProbe() = 0;
+        virtual HRESULT STDMETHODCALLTYPE RetireProjectedDeliveryForProbe() = 0;
+        virtual HRESULT STDMETHODCALLTYPE GetProjectedDeliveryStatusForProbe(ULONG* pending) = 0;
     };
 #endif
     class SyntheticSortFolder final : public IShellFolder2, public IPersistFolder2, public IShellFolderViewCB
@@ -3713,6 +3716,11 @@ namespace
             CoTaskMemFree(backingPidl);
             TraceSyntheticSortStage("synthetic-sort: backing-folder-BindToObject-return");
             if (FAILED(result)) { CoTaskMemFree(backingRoot); CoTaskMemFree(copy); return result; }
+#if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+            // A live folder can be reinitialized; retire queued bytes before replacing
+            // its namespace root. Accepted delivery still has the documented boundary.
+            if (_projectedDelivery) RetireProjectedDeliveryForProbe();
+#endif
             if (_root) CoTaskMemFree(_root);
             _root = copy;
 #if defined(EXPLORERDIRS_PROVIDER_VIEW_NOTIFICATIONS)
@@ -5316,6 +5324,68 @@ namespace
             const bool flush = GetEnvironmentVariableW(L"EXPLORERDIRS_PROJECTED_FLUSH_CONTROL", value, ARRAYSIZE(value)) == 1 && value[0] == L'1';
             return SHCNF_IDLIST | (flush ? SHCNF_FLUSH : SHCNF_FLUSHNOWAIT);
         }
+        HRESULT STDMETHODCALLTYPE RetireProjectedDeliveryForProbe() override
+        {
+            _projectedDeliveryRetired = true;
+            if (_projectedDelivery) _projectedDelivery->Retire();
+            return S_OK;
+        }
+        HRESULT STDMETHODCALLTYPE BeginProjectedDeliveryForProbe() override
+        {
+            if (!_notificationWindow) return CO_E_OBJNOTCONNECTED;
+            RetireProjectedDeliveryForProbe();
+            _projectedDelivery.reset();
+            wchar_t value[2]{};
+            if (GetEnvironmentVariableW(L"EXPLORERDIRS_PROJECTED_BACKGROUND_DELIVERY_CONTROL", value, ARRAYSIZE(value)) == 1 && value[0] == L'1')
+            {
+                try
+                {
+                    _projectedDelivery = ProjectedDeliveryExperiment::Queue::Create(8192,
+                        [](const ProjectedDeliveryExperiment::Payload& payload)
+                        {
+                            // Only immutable absolute PIDL bytes cross threads, never this,
+                            // an IShellFolder/IShellView pointer or a window handle.
+                            const auto initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+                            if (FAILED(initialized)) throw initialized;
+                            SHChangeNotify(payload.event, SHCNF_IDLIST | SHCNF_FLUSH,
+                                payload.first.data(), payload.second.empty() ? nullptr : payload.second.data());
+                            CoUninitialize();
+                        });
+                }
+                catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+            }
+            _projectedDeliveryRetired = false;
+            return S_OK;
+        }
+        HRESULT STDMETHODCALLTYPE GetProjectedDeliveryStatusForProbe(ULONG* pending) override
+        {
+            if (!pending) return E_POINTER;
+            *pending = 0;
+            if (_projectedDeliveryRetired) return CO_E_OBJNOTCONNECTED;
+            if (!_projectedDelivery) return S_OK;
+            const auto state = _projectedDelivery->Read();
+            *pending = static_cast<ULONG>(state.queued + (state.inFlight ? 1 : 0));
+            return state.failure;
+        }
+        HRESULT DeliverProjectedNotificationForProbe(LONG event, PCIDLIST_ABSOLUTE first, PCIDLIST_ABSOLUTE second = nullptr)
+        {
+            if (_projectedDeliveryRetired) return CO_E_OBJNOTCONNECTED;
+            if (!_projectedDelivery)
+            {
+                SHChangeNotify(event, ProjectedNotifyFlagsForProbe(), first, second);
+                return S_OK;
+            }
+            ProjectedDeliveryExperiment::Payload payload;
+            payload.event = event;
+            const auto* bytes = reinterpret_cast<const BYTE*>(first);
+            payload.first.assign(bytes, bytes + ILGetSize(first));
+            if (second)
+            {
+                bytes = reinterpret_cast<const BYTE*>(second);
+                payload.second.assign(bytes, bytes + ILGetSize(second));
+            }
+            return _projectedDelivery->Enqueue(payload);
+        }
         PIDLIST_ABSOLUTE CloneProjectedAbsoluteChild(const SyntheticChild& child)
         {
             auto* relative = CloneSyntheticChild(child);
@@ -5338,8 +5408,7 @@ namespace
                 if (!absolute) return E_OUTOFMEMORY;
                 if (!_recursiveSizeStore->RecordObservedChild(_bridgeObservedKey.c_str(), child)) return CO_E_OBJNOTCONNECTED;
                 const LONG event = known ? SHCNE_UPDATEITEM : (child.attributes & FILE_ATTRIBUTE_DIRECTORY) ? SHCNE_MKDIR : SHCNE_CREATE;
-                SHChangeNotify(event, ProjectedNotifyFlagsForProbe(), absolute.get(), nullptr);
-                return S_OK;
+                return DeliverProjectedNotificationForProbe(event, absolute.get());
             }
             catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
         }
@@ -5389,9 +5458,9 @@ namespace
                 if (!oldAbsolute || !newAbsolute) return E_OUTOFMEMORY;
                 if (!_recursiveSizeStore->RecordObservedChild(_bridgeObservedKey.c_str(), newChild)) return CO_E_OBJNOTCONNECTED;
                 *oldTicket = previousVersion;
-                SHChangeNotify((oldAttributes & FILE_ATTRIBUTE_DIRECTORY) ? SHCNE_RENAMEFOLDER : SHCNE_RENAMEITEM,
-                    ProjectedNotifyFlagsForProbe(), oldAbsolute.get(), newAbsolute.get());
-                return S_OK;
+                return DeliverProjectedNotificationForProbe(
+                    (oldAttributes & FILE_ATTRIBUTE_DIRECTORY) ? SHCNE_RENAMEFOLDER : SHCNE_RENAMEITEM,
+                    oldAbsolute.get(), newAbsolute.get());
             }
             catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
         }
@@ -5424,12 +5493,10 @@ namespace
                 if (FAILED(StringCchCopyW(child.name, ARRAYSIZE(child.name), leaf))) return E_INVALIDARG;
                 auto* relative = CloneSyntheticChild(child);
                 if (!relative) return E_OUTOFMEMORY;
-                auto* absolute = ILCombine(_root, relative);
+                ProjectedPidl absolute(ILCombine(_root, relative));
                 CoTaskMemFree(relative);
                 if (!absolute) return E_OUTOFMEMORY;
-                SHChangeNotify(directory ? SHCNE_RMDIR : SHCNE_DELETE, ProjectedNotifyFlagsForProbe(), absolute, nullptr);
-                CoTaskMemFree(absolute);
-                return S_OK;
+                return DeliverProjectedNotificationForProbe(directory ? SHCNE_RMDIR : SHCNE_DELETE, absolute.get());
             }
             catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
         }
@@ -5513,6 +5580,7 @@ namespace
                 self->_sizeDisplayList = nullptr;
 #endif
 #if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+                self->RetireProjectedDeliveryForProbe();
                 if (!self->_bridgeObservedPath.empty())
                 {
                     self->_recursiveSizeStore->ReleaseObservedRoot(self->_bridgeObservedKey.c_str());
@@ -6830,6 +6898,9 @@ namespace
         }
         ~SyntheticSortFolder()
         {
+#if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+            RetireProjectedDeliveryForProbe();
+#endif
             ReleaseViewHold();
 #if defined(EXPLORERDIRS_PROVIDER_VIEW_NOTIFICATIONS)
             if (_viewNotificationRoot) CoTaskMemFree(_viewNotificationRoot);
@@ -6863,6 +6934,10 @@ namespace
         mutable std::mutex _asyncSizeScanMutex;
 #if defined(EXPLORERDIRS_PROVIDER_VIEW_NOTIFICATIONS)
         HWND _notificationWindow = nullptr;
+#if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
+        std::shared_ptr<ProjectedDeliveryExperiment::Queue> _projectedDelivery;
+        bool _projectedDeliveryRetired = false;
+#endif
         ULONG _backingNotificationRegistration = 0;
 #if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
         std::wstring _bridgeObservedPath;
