@@ -1,3 +1,13 @@
+## 2026-11-06 Worker delivery timing and owner fanout
+
+Source review confirms each owner must record metadata before arrival publication (RecordObservedChild), and removal tickets are keyed by physical path plus sort-context identity. AcknowledgeRemoval only retires the matching owner's version. Therefore suppressing three owners' entire Notify calls is not a valid deduplication: it would also suppress their local preparation/tickets. Metadata preparation must remain independent even if transport is eventually shared.
+
+Paired buffered traces were analyzed by (PID, context, sequence), matching enter/flush-enter to returned/flush-returned; no unmatched calls. src/.state/analyze-delivery-wall-time.py and projected-delivery-wall-time-summary.log retain the calculation. Idle processes: 436/440 delivery calls, 1,560/1,546 view callbacks, summed worker-call wall times 42,362/44,956ms, p95 375/469ms, max 5,406/5,860ms. Immediate processes: 436/440 deliveries, 1,592/1,530 callbacks, sums 46,545/43,657ms, p95 515/375ms, max 9,954/6,125ms. Median was 0ms in all four. Slowest calls were synchronous flush boundaries. These sums overlap across workers and are neither CPU time nor end-to-end latency.
+
+The native queue computes flush when its pending queue is momentarily empty, including the first popped payload before additional UI dispatches enqueue. Thus the chunk4 control can still block early in a logical batch; increasing the batch number alone does not remove this boundary. A future experiment should separate local per-owner preparation from atomic batch submission/transport flush scheduling, preserving pending status, tail delivery, retirement and exact confirmation. No arbitrary delay, timeout relaxation, notification dropping, or product activation is justified yet. View-callback multiplicity alone does not prove every duplicate causes work because Shell merges notifications.
+
+This is a narrowed diagnosis from the existing actual App traces, not a new successful fix or benchmark. No product change; no publication.
+
 ## 2026-11-06 Idle-versus-immediate paired timing control
 
 Added opt-in EXPLORERDIRS_PROBE_IDLE_BASELINE=1 to the full-process harness only. After four views/grouping/monitor readiness, observe eight seconds with no fixture mutations; retain liveness/visible-pane checks and report native enumeration counts plus sparse 250ms empty-row samples. It does not delay the product or change the existing mutation assertions. This sampling does not prove visual smoothness.
