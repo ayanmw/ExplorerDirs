@@ -90,7 +90,7 @@ internal static class AppSessionProcessProbe
         {
             var projectedLog = Path.Combine(app, "projected-monitor-experiment.log");
             var projectedLogStart = File.Exists(projectedLog) ? File.ReadAllLines(projectedLog).Length : 0;
-            void VerifyProjectedMonitors()
+            void VerifyProjectedMonitors(bool requireSettled = false)
             {
                 if (!projectedExperiment) return;
                 var lines = File.Exists(projectedLog) ? File.ReadAllLines(projectedLog).Skip(projectedLogStart).ToArray() : [];
@@ -101,6 +101,19 @@ internal static class AppSessionProcessProbe
                     var activePath = expected.Panes[pane][expected.ActiveTabIndices![pane]].Path;
                     if (!lines.Any(line => line.Contains($" started path={activePath};", StringComparison.Ordinal)))
                         throw new InvalidOperationException($"Projected App monitor was not started for pane {pane + 1}.");
+                    if (requireSettled)
+                    {
+                        var lastDispatch = lines.LastOrDefault(line => line.Contains($" dispatch path={activePath};", StringComparison.Ordinal));
+                        var lastSettled = lines.LastOrDefault(line => line.Contains($" settled path={activePath};", StringComparison.Ordinal));
+                        if (lastDispatch is null || lastSettled is null ||
+                            lastDispatch.Split(";events=")[1] != lastSettled.Split(";events=")[1].Split(';')[0])
+                            throw new InvalidOperationException($"Projected App pane {pane + 1} still has unconfirmed work.");
+                    }
+                }
+                foreach (var line in lines.Where(line => line.Contains(" settled path=", StringComparison.Ordinal)))
+                {
+                    var counts = line.Split(";enumerations=")[1].Split("->");
+                    if (counts[0] != counts[1]) throw new InvalidOperationException("Projected App re-enumerated after watcher work: " + line);
                 }
                 Console.WriteLine($"app-projected-monitors: pass={pass + 1}; four-active-paths=True; no-errors=True");
             }
@@ -139,7 +152,22 @@ internal static class AppSessionProcessProbe
                 }, TimeSpan.FromSeconds(60), "Full app views/grouping did not become ready.");
                 VerifyProjectedMonitors();
                 VerifyExternalDirectoryChanges(window, child, expected, pass, settleExternalChanges, fillerCount, adapterOverride is null ? null : Path.Combine(app, "ExplorerDirs.ShellNamespace.dll.size-trace.log"));
-                VerifyProjectedMonitors();
+                if (projectedExperiment)
+                {
+                    string? lastProjectedFailure = null;
+                    try
+                    {
+                        Wait(() =>
+                        {
+                            try { VerifyProjectedMonitors(requireSettled: true); return true; }
+                            catch (InvalidOperationException error) { lastProjectedFailure = error.Message; return false; }
+                        }, TimeSpan.FromSeconds(5), "Projected monitors did not settle without re-enumeration/errors.");
+                    }
+                    catch (TimeoutException error)
+                    {
+                        throw new InvalidOperationException(lastProjectedFailure ?? error.Message, error);
+                    }
+                }
                 if (pass == 0)
                 {
                     if (!GetWindowRect(window, out var bounds)) throw new Win32Exception(Marshal.GetLastWin32Error());

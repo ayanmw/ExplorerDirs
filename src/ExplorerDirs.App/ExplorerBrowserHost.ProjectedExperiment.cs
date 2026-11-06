@@ -58,6 +58,11 @@ internal sealed partial class ExplorerBrowserHost
         watcher.Error += (_, e) => Interlocked.Exchange(ref watcherError, e.GetException());
         var timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(20) };
         var progress = System.Diagnostics.Stopwatch.StartNew();
+        uint? enumerationBaseline = null;
+        uint lastEnumerations = 0;
+        var dispatched = 0;
+        var lastLoggedDispatch = 0;
+        var lastLoggedSettled = 0;
         bool Current() => ReferenceEquals(_projectedQueue, queue) &&
             _directoryChangeVersion == monitorVersion && _viewReadiness.NavigationVersion == navigationVersion &&
             _viewReadiness.IsCurrent(navigationVersion) && _viewWindow == viewWindow &&
@@ -77,6 +82,13 @@ internal sealed partial class ExplorerBrowserHost
                     work =>
                     {
                         progress.Restart();
+                        if (enumerationBaseline is null)
+                        {
+                            Marshal.ThrowExceptionForHR(GetMethod<ProjectedEnumerationCount>(bridge, 5)(bridge, out var initial));
+                            if (!Current()) return new ProjectedDispatchResult(0, Reconciled: true);
+                            enumerationBaseline = initial;
+                        }
+                        dispatched++;
                         ulong ticket = 0;
                         var result = work.Kind switch
                         {
@@ -109,6 +121,23 @@ internal sealed partial class ExplorerBrowserHost
                             string.Equals(work.Name, work.NewName, StringComparison.OrdinalIgnoreCase)) return;
                         if (result != 0) throw new InvalidOperationException($"Projected confirmation: 0x{result:X8}");
                     });
+                if (Current() && enumerationBaseline is { } baseline)
+                {
+                    Marshal.ThrowExceptionForHR(GetMethod<ProjectedEnumerationCount>(bridge, 5)(bridge, out var enumerations));
+                    if (!Current()) return;
+                    if (lastLoggedDispatch != dispatched)
+                    {
+                        LogProjectedExperiment($"dispatch path={path};events={dispatched}");
+                        lastLoggedDispatch = dispatched;
+                    }
+                    if (dispatch.PendingCount == 0 && queue.Snapshot.Queued == 0 &&
+                        (lastLoggedSettled != dispatched || lastEnumerations != enumerations))
+                    {
+                        LogProjectedExperiment($"settled path={path};events={dispatched};enumerations={baseline}->{enumerations}");
+                        lastLoggedSettled = dispatched;
+                        lastEnumerations = enumerations;
+                    }
+                }
             }
             catch (Exception error)
             {
@@ -205,6 +234,7 @@ internal sealed partial class ExplorerBrowserHost
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProjectedGetFolder(nint self, ref Guid id, out nint folder);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProjectedPause(nint self);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProjectedEnumerationCount(nint self, out uint count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProjectedArrival(nint self, [MarshalAs(UnmanagedType.LPWStr)] string name);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProjectedRemoval(nint self, [MarshalAs(UnmanagedType.LPWStr)] string name, out ulong ticket);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProjectedRename(nint self, [MarshalAs(UnmanagedType.LPWStr)] string oldName, [MarshalAs(UnmanagedType.LPWStr)] string newName, out ulong ticket);
