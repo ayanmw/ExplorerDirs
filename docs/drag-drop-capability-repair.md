@@ -26,3 +26,9 @@
 真实鼠标拖放仍需集中验收：四窗格间和系统 Explorer 双向 Ctrl 复制、Ctrl+Shift/Alt 快捷方式、普通移动、文件夹落点、自动更新及源/目标焦点。不能用本次直接 COM 行为测试替代 OLE 目标注册、命中和实际修饰键派发。
 
 本批只修复已复现的合同缺口；未覆盖当前用户正在使用的 temp.86，也未把尚未验证的完整拖放体验标记为修复完成。
+
+## 实际产品 OLE 注册对照（2026-11-06）
+
+新增仅检查窗口属性的 `--product-drop-registration-private-desktop <HostProbe.dll> <adapter.dll>`。加载真实 ExplorerDirs.App.dll/HwndHost，分别建立物理目录和投影目录；不手工 RegisterDragDrop、不调用 DoDragDrop、不执行 Shell 文件操作。两种视图均在 SysListView32 上观察到 OleDropTargetInterface。正常适配器和已发布 temp.86 旧适配器两轮均通过前台/输入/隔离守卫，日志分别为 src/.state/product-drop-registration.log 和 product-drop-registration-old-adapter.log。
+
+这排除了当前对照中“投影视图完全未注册 OLE 落点”的假设；不证明该属性的所有 Windows 版本实现，也不证明真实拖动源、落点命中和修饰键派发。旧版同样有注册，因此不能将能力属性修复描述成注册修复。继续保留用户实测拖放的最终验收门槛。

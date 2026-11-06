@@ -18,6 +18,8 @@ internal static class Program
             return SyntheticShellSortProbe.RunProductDropAttributes(dropAdapter);
         if (args is ["--product-navigation-selection-private-desktop", var navigationSelectionAdapter])
             return PrivateDesktopShellProbe.RunNavigationSelection(navigationSelectionAdapter);
+        if (args is ["--product-drop-registration-private-desktop", var registrationHost, var registrationAdapter])
+            return PrivateDesktopShellProbe.RunDropRegistrationHost(registrationHost, registrationAdapter);
         // Shell file-operation workers may open progress UI on the shared desktop even when
         // their caller uses a private desktop. Keep this outside unattended background suites.
         if (args is ["--product-drop-private-desktop", var transferAdapter, "--AllowInteractiveDesktopControl"])
