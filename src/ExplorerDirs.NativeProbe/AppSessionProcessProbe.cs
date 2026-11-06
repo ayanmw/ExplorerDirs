@@ -209,6 +209,9 @@ internal static class AppSessionProcessProbe
         var grouped = VisibleFileViews(window).Where(list => Message(list, 0x10AF) == 1).ToArray();
         if (grouped.Length != 1) throw new InvalidOperationException("Expected exactly one grouped pane before external changes.");
         var transientEmptySamples = 0;
+        var zeroPaneSamplesWithDisableFlag = 0;
+        var zeroPaneSamplesWithVisibilityChange = 0;
+        var zeroPaneSamplesWithoutDisableEvidence = 0;
         void AwaitRows(int count, string stage)
         {
             count += fillerCount;
@@ -220,12 +223,34 @@ internal static class AppSessionProcessProbe
                 {
                     EnsureRunning(child);
                     var lists = VisibleFileViews(window);
-                    var counts = lists.Select(list => Message(list, 0x1004)).ToArray();
+                    var sampleStartedAt = Environment.TickCount64;
+                    var samples = lists.Select(list =>
+                    {
+                        var visibleBefore = IsWindowVisible(list);
+                        var disabledBefore = GetPropW(list, "SysSetRedraw") != 0;
+                        var rows = Message(list, 0x1004);
+                        return (Rows: rows, VisibleBefore: visibleBefore, DisabledBefore: disabledBefore,
+                            VisibleAfter: IsWindowVisible(list), DisabledAfter: GetPropW(list, "SysSetRedraw") != 0);
+                    }).ToArray();
+                    var counts = samples.Select(sample => sample.Rows).ToArray();
                     if (counts.Any(rows => rows == 0)) transientEmptySamples++;
-                    var state = $"counts={string.Join('|', counts)}; grouped={string.Join('|', grouped.Select(list => Message(list, 0x10AF)))}";
+                    foreach (var sample in samples.Where(sample => sample.Rows == 0))
+                    {
+                        if (sample.DisabledBefore && sample.DisabledAfter) zeroPaneSamplesWithDisableFlag++;
+                        else if (!sample.VisibleBefore || !sample.VisibleAfter) zeroPaneSamplesWithVisibilityChange++;
+                        else zeroPaneSamplesWithoutDisableEvidence++;
+                    }
+                    // SysSetRedraw==0 also means the property is absent: do not label
+                    // that as proven redraw-enabled or equate any zero count with a painted blank.
+                    var rendering = string.Join('|', samples.Select(sample =>
+                        $"v{(sample.VisibleBefore ? 1 : 0)}>{(sample.VisibleAfter ? 1 : 0)}/d{(sample.DisabledBefore ? 1 : 0)}>{(sample.DisabledAfter ? 1 : 0)}"));
+                    var state = $"counts={string.Join('|', counts)}; grouped={string.Join('|', grouped.Select(list => Message(list, 0x10AF)))}; render-flags={rendering}";
                     if (state != lastState)
                     {
-                        Console.WriteLine($"app-external-change-state: stage={stage}; {state}");
+                        // Bracket these cross-process reads so zero-row observations can
+                        // be correlated with native structure/redraw logs without treating
+                        // the final read's timestamp as the time every pane was sampled.
+                        Console.WriteLine($"app-external-change-state: stage={stage}; {state}; sample-ticks={sampleStartedAt}..{Environment.TickCount64}");
                         lastState = state;
                     }
                     return lists.Count == 4 && counts.All(rows => rows == count) &&
@@ -256,7 +281,7 @@ internal static class AppSessionProcessProbe
                 throw;
             }
             Mark("settled-" + stage);
-            Console.WriteLine($"app-external-change: pass={pass + 1}; stage={stage}; rows-per-pane={count}; ms={elapsed.ElapsedMilliseconds}; transient-empty-samples={transientEmptySamples}; grouped-pane-preserved=True");
+            Console.WriteLine($"app-external-change: pass={pass + 1}; stage={stage}; rows-per-pane={count}; ms={elapsed.ElapsedMilliseconds}; transient-empty-samples={transientEmptySamples}; zero-pane-disable-flag={zeroPaneSamplesWithDisableFlag}; zero-pane-hidden={zeroPaneSamplesWithVisibilityChange}; zero-pane-no-disable-evidence={zeroPaneSamplesWithoutDisableEvidence}; grouped-pane-preserved=True");
         }
         void AwaitFileRow(string name, ulong bytes, string stage, string? forbiddenName = null)
         {
@@ -440,6 +465,7 @@ internal static class AppSessionProcessProbe
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassNameW(nint window, StringBuilder value, int capacity);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowTextW(nint window, StringBuilder value, int capacity);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint GetPropW(nint window, string name);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool GetWindowRect(nint window, out Rect rect);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool SetWindowPos(nint window, nint after, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool PostMessageW(nint window, uint message, nint wParam, nint lParam);
