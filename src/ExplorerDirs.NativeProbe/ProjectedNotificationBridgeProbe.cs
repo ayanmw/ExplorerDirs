@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Diagnostics;
+using ExplorerDirs.NativeProbe;
 
 public static partial class SyntheticShellSortProbe
 {
@@ -58,6 +59,7 @@ public static partial class SyntheticShellSortProbe
             var acknowledge = At<AcknowledgeProjectedRemoval>(bridge, 7);
             uint retainedFacts = (uint)(fillerCount + 4);
             var retiredTickets = new Dictionary<string, ulong>(StringComparer.OrdinalIgnoreCase);
+            var ledger = new ProjectedChangeLedger();
             foreach (var (name, directory, expected) in new[] { ("folder-empty", true, 3), ("file-2048.bin", false, 2) })
             {
                 var path = Path.Combine(fixture, name);
@@ -65,11 +67,16 @@ public static partial class SyntheticShellSortProbe
                 PumpBaseline();
                 if (!Names().Contains(name)) throw new InvalidOperationException("Baseline already removed the row; bridge was not isolated.");
                 Console.WriteLine($"projected-notification-baseline: item={name}; stale-row-retained=True; physical-subscription-paused=True");
+                var deletion = ledger.Record(ProjectedChangeKind.Deleted, name)!;
+                if (!ledger.TryTake(out var dispatched) || !ReferenceEquals(dispatched, deletion) || !ledger.IsCurrent(deletion))
+                    throw new InvalidOperationException("Deletion dispatch lost ordered visit work.");
                 RequireApplied(remove(bridge, name, out var removalTicket));
                 Check(metadataCounts(bridge, out roots, out facts));
                 if (facts != retainedFacts) throw new InvalidOperationException("Unconfirmed notification discarded its item type.");
                 PumpUntil(() => Names().Length == expected + fillerCount && !Names().Contains(name));
+                if (!ledger.IsCurrent(deletion)) throw new InvalidOperationException("Deletion confirmation belongs to retired work.");
                 RequireApplied(acknowledge(bridge, name, removalTicket));
+                ledger.Release(deletion);
                 retiredTickets[name] = removalTicket;
                 retainedFacts--;
                 AssertRetainedSelection();
@@ -163,10 +170,14 @@ public static partial class SyntheticShellSortProbe
             Console.WriteLine("projected-notification-bridge: PASS file/folder rows removed; unrelated selection/focus retained; versioned child types; stale confirmations/unknown/recreated/invalid leaf rejected; no Refresh invoked; no EnumObjects; filler-count=" + fillerCount);
             Marshal.AddRef(bridge);
             var retainedBridge = bridge;
+            var pendingWork = ledger.Record(ProjectedChangeKind.Changed, "folder-12288")!;
             return () =>
             {
                 try
                 {
+                    ledger.Invalidate();
+                    if (ledger.IsCurrent(pendingWork) || ledger.TryTake(out _) || ledger.Snapshot != (0, 0, true))
+                        throw new InvalidOperationException("Destroyed view retained pending managed notification work.");
                     Check(metadataCounts(retainedBridge, out var closedRoots, out var closedFacts));
                     if (closedRoots != 0 || closedFacts != 0 || IsWindow(list))
                         throw new InvalidOperationException("Closed view retained child metadata or a native list window.");
