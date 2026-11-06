@@ -112,6 +112,7 @@ namespace
             strcmp(stage, "physical-view-subscription") && strcmp(stage, "physical-view-unsubscribe") &&
             strcmp(stage, "physical-subscription-root") && strcmp(stage, "physical-root-reinitialized") &&
             strcmp(stage, "physical-delivery") && strcmp(stage, "physical-delivery-lock-failed") &&
+            strcmp(stage, "physical-dispatch-message") && strcmp(stage, "physical-dispatch-hook") &&
             strcmp(stage, "same-name-metadata-compare") &&
             strcmp(stage, "view-enumeration") && strcmp(stage, "view-enumerator") &&
             strcmp(stage, "enum-next-external") && strcmp(stage, "size-publish-external") &&
@@ -4919,6 +4920,37 @@ namespace
             static const UINT message = RegisterWindowMessageW(L"ExplorerDirs.BackingFolderChange.v1");
             return message;
         }
+#if defined(EXPLORERDIRS_NOTIFICATION_TRACE_EXPERIMENT)
+        static HHOOK& NotificationDispatchHook() { static thread_local HHOOK hook = nullptr; return hook; }
+        static ULONG& NotificationDispatchHookUsers() { static thread_local ULONG users = 0; return users; }
+        static LRESULT CALLBACK NotificationDispatchMessage(int code, WPARAM mode, LPARAM parameter)
+        {
+            if (code >= 0 && parameter)
+            {
+                const auto* message = reinterpret_cast<const CWPSTRUCT*>(parameter);
+                if (message->message == BackingNotificationMessage())
+                    ED_SIZE_TRACE("physical-dispatch-message", message->hwnd, nullptr,
+                        message->message, static_cast<DWORD>(mode), static_cast<ULONGLONG>(message->lParam));
+            }
+            return CallNextHookEx(NotificationDispatchHook(), code, mode, parameter);
+        }
+        static void AttachNotificationDispatchHook()
+        {
+            if (NotificationDispatchHookUsers()++ == 0)
+            {
+                NotificationDispatchHook() = SetWindowsHookExW(WH_CALLWNDPROC, NotificationDispatchMessage, nullptr, GetCurrentThreadId());
+                ED_SIZE_TRACE("physical-dispatch-hook", nullptr, nullptr, NotificationDispatchHook() ? 1 : 0, NotificationDispatchHook() ? 0 : GetLastError(), 0);
+            }
+        }
+        static void DetachNotificationDispatchHook()
+        {
+            if (NotificationDispatchHookUsers() && --NotificationDispatchHookUsers() == 0)
+            {
+                if (NotificationDispatchHook()) UnhookWindowsHookEx(NotificationDispatchHook());
+                NotificationDispatchHook() = nullptr;
+            }
+        }
+#endif
         HRESULT AttachBackingNotifications(HWND window)
         {
             if (!window || !_backingRoot || !_root) return E_INVALIDARG;
@@ -4956,6 +4988,9 @@ namespace
                 Release();
                 return E_FAIL;
             }
+#if defined(EXPLORERDIRS_NOTIFICATION_TRACE_EXPERIMENT)
+            AttachNotificationDispatchHook();
+#endif
             return S_OK;
         }
         PIDLIST_ABSOLUTE ProviderNotificationIdentity(PCIDLIST_ABSOLUTE physical, LONG event, bool* staleUpdate = nullptr) const
@@ -5041,6 +5076,9 @@ namespace
                 self->_backingNotificationRegistration = 0;
                 ED_SIZE_TRACE("physical-view-unsubscribe", self, nullptr, registration, 0, 0);
                 if (registration) SHChangeNotifyDeregister(registration);
+#if defined(EXPLORERDIRS_NOTIFICATION_TRACE_EXPERIMENT)
+                if (registration) DetachNotificationDispatchHook();
+#endif
                 RemoveWindowSubclass(window, BackingNotificationProc, subclassId);
                 self->ReleaseViewHold();
                 const auto result = DefSubclassProc(window, message, wParam, lParam);
@@ -5788,7 +5826,7 @@ namespace
                 &g_syntheticAsyncRecursiveSizeItemNotificationForProbe, 0, 0) && itemParsingName && *itemParsingName && itemPidl;
             PIDLIST_ABSOLUTE pendingItemPidl = itemNotificationMode ? ILCloneFull(itemPidl) : nullptr;
             bool enqueueTask = false;
-            bool itemNotificationQueued = false;
+            bool itemNotificationDispatchd = false;
             {
                 std::lock_guard<std::mutex> lock(self->_asyncViewUpdateMutex);
                 if (itemNotificationMode && pendingItemPidl)
@@ -5797,12 +5835,12 @@ namespace
                     try
                     {
                         const auto insertion = self->_asyncPendingItemNotifications.emplace(itemParsingName, pendingItemPidl);
-                        itemNotificationQueued = true;
+                        itemNotificationDispatchd = true;
                         if (insertion.second) pendingItemPidl = nullptr;
                     }
                     catch (const std::bad_alloc&) {}
                 }
-                if (!itemNotificationMode || !itemNotificationQueued)
+                if (!itemNotificationMode || !itemNotificationDispatchd)
                 {
                     self->_asyncPendingDirectoryNotification = true;
                     for (const auto& pending : self->_asyncPendingItemNotifications) CoTaskMemFree(pending.second);
