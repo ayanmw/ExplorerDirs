@@ -1,3 +1,5 @@
+2026-11-06 导航选区反馈复核：当前源码已有9ae5ad0d导航补选；无窗口 --navigation-focus-requests 与普通DLL的 --product-navigation-selection-private-desktop 本轮退出0。原生首项/恢复焦点项/既有多选/退休检查通过，四个列表销毁、前台和输入均未变化。这仅证明请求状态和原生补选函数，尚未证明完整App进入/返回目录链路；不得关闭用户反馈。下一步补完整导航入口与异步列举时序验证，不强制覆盖历史选区，不因焦点修复撤销用户点击空白的取消选择。未发布。
+
 2026-11-06 延迟对照：名称排序32项两进程无零行但仍慢；新增派发/读取/ack计时后整项退出0且隔离守卫通过。每owner约102事件派发6.5-10.2ms、读取96.7-118.4ms、ack<1ms，端到端仍秒级；下一步测通知等待和UI调度间隔，不能外推Size视觉或性能已完成。仅实验诊断，普通输出恢复，未发布。见[调查](automatic-update-empty-view-investigation.md)。
 
 2026-11-06 热回调追踪改缓冲批量写：再现旧创建确认超时及另一轮context3根枚举5→6；后者无对应托管Refresh请求/已记录UPDATEDIR，不能限定context4。记录未截断，功能仍失败；普通输出恢复，未发布。下一步抓原生枚举调用栈，见[调查](automatic-update-empty-view-investigation.md)。
