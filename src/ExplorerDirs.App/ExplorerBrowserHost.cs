@@ -12,7 +12,7 @@ namespace ExplorerDirs.App;
 
 // Hosts the Windows Shell folder view. Its hit testing, view modes, sorting,
 // grouping, file operations and context menu all belong to the Shell view.
-internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplorerBrowserEvents,
+internal sealed partial class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplorerBrowserEvents,
     IColumnValueCaptureSource
 {
     private static readonly Guid BrowserClassId = new("71F96385-DDD6-48D3-A0C1-AE06E8B055FB");
@@ -4543,6 +4543,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         DirectoryChangeInitialCount = null;
         DirectoryChangeStartSampleCount = 0;
         if (_location.IsSearchActive || !IsSupportedDirectoryChangePath(path)) return;
+#if EXPLORERDIRS_PROJECTED_NOTIFY_EXPERIMENT
+        if (TryStartProjectedMonitorExperiment(path, navigationVersion)) return;
+#endif
         var version = _directoryChangeVersion;
         var queue = new ShellDirectoryChangeQueue();
         var request = new ShellDirectoryMonitorRequest(version, navigationVersion, path, queue);
@@ -5519,6 +5522,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private void StopDirectoryChangeMonitor()
     {
+#if EXPLORERDIRS_PROJECTED_NOTIFY_EXPERIMENT
+        StopProjectedMonitorExperiment();
+#endif
         Interlocked.Exchange(ref _directoryChangeStarting, 0);
         CancelNaturalUpdateSelectionVerification();
         CancelDeferredRefreshSelectionRestore(restartDirectoryMonitor: false);

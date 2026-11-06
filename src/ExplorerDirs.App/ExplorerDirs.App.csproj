@@ -13,6 +13,13 @@
     <_NativeCompilerFlags Condition="'$(Configuration)' != 'Debug'">/O2 /DNDEBUG /MD</_NativeCompilerFlags>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(ProjectedNotificationExperiment)' == 'true'">
+    <DefineConstants>$(DefineConstants);EXPLORERDIRS_PROJECTED_NOTIFY_EXPERIMENT</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(ProjectedNotificationExperiment)' == 'true'">
+    <Compile Include="..\ExplorerDirs.NativeProbe\ProjectedChangeLedger.cs" Link="Experiments\ProjectedChangeLedger.cs" />
+    <Compile Include="..\ExplorerDirs.NativeProbe\ProjectedChangeDispatch.cs" Link="Experiments\ProjectedChangeDispatch.cs" />
+  </ItemGroup>
   <Target Name="GenerateExplorerDirsBuildIdentity" BeforeTargets="GetAssemblyAttributes">
     <PropertyGroup>
       <_ExplorerDirsRepositoryRoot>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..'))</_ExplorerDirsRepositoryRoot>

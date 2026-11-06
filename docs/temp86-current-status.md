@@ -1,3 +1,5 @@
+2026-11-06 App宿主实验接线已编译：ProjectedNotificationExperiment专用构建链接队列与调度器，STA定时分批，导航/关闭失效并保护回调期间COM引用；普通程序集排除实验入口，普通native哈希未变。尚未运行完整App这条路径，下一步隔离四窗格验证，未发布。见[队列实验](projected-change-ledger-prototype.md)。
+
 2026-11-06 批次调度退休保护：NativeProbe调度器在每次外部回调后核对访问，嵌套派发拒绝，过期/异常清空并永久失效。无窗口红绿合同覆盖四处退休、8条上限及异常；同代码原生回归退出0、枚举恒1且隔离守卫通过。仅实验，App调度接线仍待做，未发布。见[队列实验](projected-change-ledger-prototype.md)。
 
 2026-11-06 通知批次确认：隔离原型最多8条在途，后续循环确认并退休ticket，不在单项派发中等待。32项增删与选区/枚举/清理和隔离守卫通过；本轮新增约3.5秒、删除1.9秒，仍需提速，不能视作稳定基准。只改NativeProbe，App异步接线、并发重协调及多视图门槛仍待做，未发布。见[队列实验](projected-change-ledger-prototype.md)。
