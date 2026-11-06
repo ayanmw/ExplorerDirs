@@ -3447,7 +3447,13 @@ internal sealed partial class ExplorerBrowserHost : HwndHost, ExplorerBrowserHos
 
     private void RefreshWithPresentation(bool traceAsUserRefresh, bool forceFullEnumeration = false)
     {
-        ShellDirectoryRefreshRecovery.TryInvoke(() => Refresh(afterRefresh: null, traceAsUserRefresh, forceFullEnumeration), error =>
+        ShellDirectoryRefreshRecovery.TryInvoke(() => Refresh(afterRefresh:
+#if EXPLORERDIRS_PROJECTED_NOTIFY_EXPERIMENT
+            PrepareProjectedManualRefresh(traceAsUserRefresh),
+#else
+            null,
+#endif
+            traceAsUserRefresh, forceFullEnumeration), error =>
         {
             LastShellRefreshStatus = $"refresh-exception={error.GetType().Name},hr=0x{error.HResult:X8}";
             MenuError?.Invoke(this, $"Shell 文件视图刷新失败（0x{error.HResult:X8}）。请稍后重试。");
@@ -5524,6 +5530,7 @@ internal sealed partial class ExplorerBrowserHost : HwndHost, ExplorerBrowserHos
     {
 #if EXPLORERDIRS_PROJECTED_NOTIFY_EXPERIMENT
         StopProjectedMonitorExperiment();
+        _projectedNeedsRecovery = false;
 #endif
         Interlocked.Exchange(ref _directoryChangeStarting, 0);
         CancelNaturalUpdateSelectionVerification();

@@ -14,6 +14,7 @@ internal sealed partial class ExplorerBrowserHost
     private FileSystemWatcher? _projectedWatcher;
     private DispatcherTimer? _projectedTimer;
     private nint _projectedBridge;
+    private bool _projectedNeedsRecovery;
     private static readonly Guid ProjectedBridgeExperimentId = new("412ED4D4-9750-4525-8C90-345CBDB5FE95");
 
     private bool TryStartProjectedMonitorExperiment(string path, long navigationVersion)
@@ -146,6 +147,7 @@ internal sealed partial class ExplorerBrowserHost
                 if (Current())
                 {
                     LastShellRefreshStatus = $"projected-experiment-stopped={error.GetType().Name},hr=0x{error.HResult:X8}";
+                    _projectedNeedsRecovery = true;
                     LogProjectedExperiment($"error path={path};owner={viewWindow:X};status={LastShellRefreshStatus};message={error.Message}");
                     StopProjectedMonitorExperiment();
                 }
@@ -166,6 +168,7 @@ internal sealed partial class ExplorerBrowserHost
             watcher.EnableRaisingEvents = true;
             timer.Start();
             LastShellRefreshStatus = "projected-experiment-monitor-started";
+            _projectedNeedsRecovery = false;
             LogProjectedExperiment($"started path={path};owner={viewWindow:X};navigation={navigationVersion}");
             return true;
         }
@@ -189,6 +192,26 @@ internal sealed partial class ExplorerBrowserHost
         var bridge = _projectedBridge;
         _projectedBridge = 0;
         if (bridge != 0) Marshal.Release(bridge);
+    }
+
+    private Action? PrepareProjectedManualRefresh(bool manual)
+    {
+        if (!manual || (_projectedQueue is null && !_projectedNeedsRecovery) ||
+            _completedDiskDirectory is not { } path || _browser is null) return null;
+        var browser = _browser;
+        var navigation = _viewReadiness.NavigationVersion;
+        StopDirectoryChangeMonitor();
+        _projectedNeedsRecovery = true;
+        var monitorVersion = _directoryChangeVersion;
+        return () =>
+        {
+            // Refresh completion is asynchronous. A later refresh, navigation or
+            // disposal owns its monitor and must not be replaced by this callback.
+            if (!ReferenceEquals(browser, _browser) || _directoryChangeVersion != monitorVersion ||
+                !_viewReadiness.IsCurrent(navigation) ||
+                !string.Equals(_completedDiskDirectory, path, StringComparison.OrdinalIgnoreCase)) return;
+            StartDirectoryChangeMonitor(path, navigation);
+        };
     }
 
     private static void LogProjectedExperiment(string message)

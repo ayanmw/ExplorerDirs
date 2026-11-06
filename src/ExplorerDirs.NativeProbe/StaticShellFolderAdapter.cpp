@@ -1678,13 +1678,16 @@ namespace
             const auto found = _observedRoots.find(root);
             return found == _observedRoots.end() ? 0 : found->second.version;
         }
-        bool RecordObservedChildren(PCWSTR root, const std::vector<SyntheticChild>& children, ULONGLONG expectedVersion)
+        bool RecordObservedChildren(PCWSTR root, const std::vector<SyntheticChild>& children, ULONGLONG expectedVersion, bool complete = false)
         {
             std::lock_guard<std::mutex> lock(_mutex);
             const auto found = _observedRoots.find(root);
             if (!expectedVersion || found == _observedRoots.end() || found->second.version != expectedVersion) return false;
             // Retire competing snapshots before allocations can fail partway through.
             found->second.version = ++_observedSequence;
+            // A successful folders+files enumeration is authoritative for its
+            // current view. Partial enumerations must only merge positive facts.
+            if (complete) found->second.children.clear();
             for (const auto& child : children)
                 found->second.children[child.name] = { child.attributes, ++_observedSequence };
             return true;
@@ -3996,7 +3999,8 @@ namespace
 #endif
             if (FAILED(result)) return result;
 #if defined(EXPLORERDIRS_PROJECTED_NOTIFY_BRIDGE_EXPERIMENT)
-            try { if (_recursiveSizeStore) _recursiveSizeStore->RecordObservedChildren(observedKey.c_str(), children, observedEnumeration); }
+            try { if (_recursiveSizeStore) _recursiveSizeStore->RecordObservedChildren(observedKey.c_str(), children, observedEnumeration,
+                (flags & (SHCONTF_FOLDERS | SHCONTF_NONFOLDERS)) == (SHCONTF_FOLDERS | SHCONTF_NONFOLDERS)); }
             catch (const std::bad_alloc&) { } // Missing facts fail closed in the notification capability.
 #endif
             if (_recursiveSizeStore &&
@@ -7289,6 +7293,20 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunProjectedMetadataGenerationSm
         store->ReleaseObservedRoot(peerRoot);
         store->ObservedCounts(&roots, &facts);
         if (roots || facts) return E_FAIL;
+        *stage = 7;
+        store->RetainObservedRoot(root);
+        if (!store->RecordObservedChild(root, child)) return E_FAIL;
+        const auto staleComplete = store->BeginObservedEnumeration(root);
+        if (!store->RecordObservedChild(root, child)) return E_FAIL;
+        if (store->RecordObservedChildren(root, {}, staleComplete, true)) return E_FAIL;
+        if (!store->TryGetObservedAttributes(root, child.name, &attributes)) return E_FAIL;
+        if (!store->RecordObservedChildren(root, {}, store->BeginObservedEnumeration(root))) return E_FAIL;
+        if (!store->TryGetObservedAttributes(root, child.name, &attributes)) return E_FAIL;
+        if (!store->RecordObservedChildren(root, {}, store->BeginObservedEnumeration(root), true)) return E_FAIL;
+        if (store->TryGetObservedAttributes(root, child.name, &attributes)) return E_FAIL;
+        store->ObservedCounts(&roots, &facts);
+        if (roots != 1 || facts) return E_FAIL;
+        store->ReleaseObservedRoot(root);
         *stage = 0;
         return S_OK;
     }

@@ -31,6 +31,8 @@
 
 ## Product boundary
 
+- In the projected monitor experiment, manual-refresh recovery belongs to the captured browser/navigation/monitor version; only matching successful completion can restart it. Successful complete folders+files enumeration may replace notification facts after the pre-I/O generation check; partial enumeration merges positives only. Test file-to-folder replacement after paused deletion/F5 so stale type facts cannot silently block later updates.
+
 - Projected event capacity includes queued and in-flight work. Capacity overflow must explicitly retire the visit and clear its records, never evict arbitrary events and continue with an incomplete history. Preserve the overflow reason through late completion/close; test recovery on a new real visit separately from synthetic queue injection. No automatic full-view refresh fallback is authorized by overflow.
 
 - Projected notification facts/tickets for the same physical directory must be scoped to the existing tab sort context; transient enumeration objects use that same key and view destruction releases it. Keep the shared size cache separate. A rename destination receiving a later event does not invalidate the old source's native ticket by itself: native generation validation remains authoritative for acknowledgement, and stale native acknowledgements must preserve newer facts. Verify same-directory panes by independent native view owners, not path-only log matches.

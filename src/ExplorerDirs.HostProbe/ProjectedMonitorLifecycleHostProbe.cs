@@ -89,6 +89,22 @@ internal static class ProjectedMonitorLifecycleHostProbe
             Wait(() => Queue() is null && (nint)hostType.GetField("_projectedBridge", Instance)!.GetValue(host)! == 0, "overflow retires monitor");
             Require(((string)hostType.GetProperty("LastShellRefreshStatus", Instance)!.GetValue(host)!).Contains("InternalBufferOverflowException", StringComparison.Ordinal), "Overflow was not reported.");
             Require(Snapshot(overflowQueue) == (0, 0, true), "Overflow retained queued facts.");
+            File.WriteAllBytes(Path.Combine(first, "missed-while-paused.bin"), [11]);
+            File.Delete(Path.Combine(first, "live-return.bin"));
+            hostType.GetMethod("RefreshFromUser", Instance)!.Invoke(host, null);
+            Wait(() => Names().Contains("missed-while-paused.bin") && !Names().Contains("live-return.bin") && Queue() is { } refreshed && !ReferenceEquals(refreshed, overflowQueue), "F5 reconciles rows and restarts monitor after overflow");
+            Directory.CreateDirectory(Path.Combine(first, "live-return.bin"));
+            Wait(() => Names().Contains("live-return.bin"), "new folder at removed file path after F5");
+            File.WriteAllBytes(Path.Combine(first, "live-after-f5.bin"), [12]);
+            Wait(() => Names().Contains("live-after-f5.bin"), "real watcher updates after F5 recovery");
+            var prepareRefresh = hostType.GetMethod("PrepareProjectedManualRefresh", Instance)!;
+            var staleCompletion = (Action)prepareRefresh.Invoke(host, [true])!;
+            var newerCompletion = (Action)prepareRefresh.Invoke(host, [true])!;
+            newerCompletion();
+            var latestQueue = Queue();
+            Require(latestQueue is not null, "Newer refresh completion did not restore monitor.");
+            staleCompletion();
+            Require(ReferenceEquals(latestQueue, Queue()), "Older refresh callback replaced the newer same-path monitor.");
             hostType.GetMethod("Navigate", Instance)!.Invoke(host, [Identity(second)]);
             Wait(() => Names().Contains("second.bin") && Queue() is not null, "navigate after overflow");
             hostType.GetMethod("Navigate", Instance)!.Invoke(host, [Identity(first)]);
@@ -108,7 +124,7 @@ internal static class ProjectedMonitorLifecycleHostProbe
             Marshal.ThrowExceptionForHR(count(finalCapability, out var roots, out var facts));
             Require(roots == 0 && facts == 0, $"Closed native metadata retained roots/facts {roots}/{facts}.");
             File.WriteAllBytes(Path.Combine(first, "after-close.bin"), [7]);
-            Console.WriteLine("projected-monitor-lifecycle: PASS real queued watcher events retired on A-B-A navigation and close; overflow injection pauses and clears; re-navigation restores real watcher updates; retired capabilities never revived; roots/facts=0; no input.");
+            Console.WriteLine("projected-monitor-lifecycle: PASS A-B-A navigation/close; overflow pauses; real F5 restores missed rows and watcher; file-to-folder after F5; stale refresh callback rejected; re-navigation updates; retired capabilities never revived; roots/facts=0; no input.");
             return 0;
         }
         finally
