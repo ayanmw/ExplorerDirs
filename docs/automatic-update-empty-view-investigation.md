@@ -1,5 +1,19 @@
 # 自动变化期间短暂零行：刷新来源调查
 
+## 2026-11-06 旧创建确认被后续删除取代，剩余根枚举仍失败
+
+先跑RefreshOriginTrace的projected-size-guard-refresh-origin.log（owned6cd208a477574d51a4f102b05de9ccee），两进程完整同根/32文件/同名大小及隔离通过，枚举5→5、无零行。日志仍有冷启动分组恢复的manual=False/full=True请求，但发生在首批watcher dispatch前且native返回S_FALSE，不能据此归因之前的后续枚举。
+
+新增LastUnconfirmed诊断和原生枚举目录/context/flags记录，且直接记录size-publish字段时不再分配临时wstring载荷。projected-enumeration-same-root32.log（owned2f98ca0febd446afb34ddcae64a43d94）同样两进程通过，新增8008/7557ms、删除2810/2187ms。关闭视图结构追踪后projected-enumeration-no-view-trace.log（owned73a5b85c1c324a44be8e6d57bbca487f）失败，具体为旧Created external-file.txt.burst-0、pending64。列表已经完成新增和删除，但此monitor仍等旧创建行重新出现。不能通过延长超时解决；带追踪通过也不证明无竞态。
+
+实验确认规则修正：Ledger查询仅返回同owner、尚未完成的旧work后、仍为最新的Deleted；Changed或其他owner不构成证据。Created正常行确认失败时，仅后台交付已无待办、物理属性明确FILE/PATH_NOT_FOUND、实际原生行不存在、访问与后续删除在读取前后仍有效，才确认旧创建；不丢弃后续删除，后续仍正常派发/原生ticket确认。未知访问错误继续等待。此规则未处理全部rename/recreate交错，不扩大为所有过期work直接完成。
+
+projected-superseded-created-red.log在尚未实现successor查询时按预期失败，完成后ledger及dispatch无窗口合同通过（包括诊断项清理）。新增实际App宿主受控测试：此前创建已由真实Shell交付，手动保留相应创建记录，再实际删除/发送原生删除并等待真实行消失；实际确认方法拒绝退休访问、拒绝磁盘重建但仍无行的状态，确认不存在，保留并完成后续删除。projected-superseded-created-host-final.log整项及隔离通过，同时原A-B-A/F5/容量/同名类型和关闭检查通过。该子项为受控ingress与直接确认方法调用，不等于自然FSW时序已全面验收。
+
+完整App projected-superseded-created-same-root32.log（owned7bcba5be20d04528bc244ae4a7d0607d）未记录旧创建超时，但仍整体退出1：第二进程枚举5→6，tick518266296实际枚举context4的当前shared-root目录，非子目录枚举。无superseded-creation日志，说明此自然时序没有命中新分支，不能拿该轮证明自动分支已覆盖；已由上述受控实际宿主补验证。剩余枚举触发源仍待定位，不启用实验为产品默认。
+
+最终普通HostProbe/App构建零警告零错误，排除实验/结构追踪入口，普通DLL哈希仍B61059F45CC281131820D22FB831BCF01D1530B70BC6539ACBC2A8C9313399FF。本批为实验协调与诊断，未重新宣称全套39项完成（上一普通修正批次已通过）；未发布。下一步定位context4的根枚举来源并测试更多快速交错。
+
 ## 2026-11-06 确认并拦截删除后的过期大小通知
 
 先验证根身份假设：临时仅实验区分context ID、忽略其可变低2位；无窗口旧规则/新规则/同context排序位/对称性/路径合同红绿通过，但完整App projected-context-identity-same-root32.log仍在第二进程出现一个旧目录残留。该无效身份改动、开关及临时探针均已移除，普通根CompareIDs规则未改，避免保留没有修复价值的语义变化。

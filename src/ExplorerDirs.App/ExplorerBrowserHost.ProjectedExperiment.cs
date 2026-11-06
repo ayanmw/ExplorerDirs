@@ -120,7 +120,7 @@ internal sealed partial class ExplorerBrowserHost
                 if (queue.Overflowed) throw new InternalBufferOverflowException("Projected event capacity exceeded; navigate again to reconcile.");
                 if (Volatile.Read(ref watcherError) is { } error) throw error;
                 if (dispatch.PendingCount > 0 && progress.Elapsed > TimeSpan.FromSeconds(10))
-                    throw new TimeoutException("Projected experiment confirmation timed out.");
+                    throw new TimeoutException($"Projected experiment confirmation timed out; pending={dispatch.PendingCount}; last-unconfirmed={dispatch.LastUnconfirmed}.");
                 dispatch.Advance(Current,
                     work => Measure(ref nativeTicks, () =>
                     {
@@ -168,7 +168,7 @@ internal sealed partial class ExplorerBrowserHost
                     {
                         var ready = work.Kind switch
                         {
-                            ProjectedChangeKind.Created => ProjectedRowExists(viewWindow, work.Name, Current),
+                            ProjectedChangeKind.Created => ProjectedRowExists(viewWindow, work.Name, Current) || ConfirmProjectedSupersededCreation(queue, work, viewWindow, path, Current),
                             ProjectedChangeKind.Deleted => !ProjectedRowExists(viewWindow, work.Name, Current),
                             ProjectedChangeKind.Renamed => !ProjectedRowExists(viewWindow, work.Name, Current) && ProjectedRowExists(viewWindow, work.NewName!, Current),
                             _ => true
@@ -250,6 +250,22 @@ internal sealed partial class ExplorerBrowserHost
             throw;
         }
         finally { Marshal.Release(bridge); }
+    }
+
+    private bool ConfirmProjectedSupersededCreation(ProjectedChangeLedger queue,
+        ProjectedChangeLedger.Work work, nint viewWindow, string path, Func<bool> current)
+    {
+        // Another same-root view can apply the later removal before this monitor
+        // observes its earlier arrival. The actual deletion remains queued.
+        if (_projectedDeliveryPending != 0 || !current() || !queue.TryGetLaterDeletion(work, out var deletion))
+            return false;
+        if (GetProjectedFileAttributes(Path.Combine(path, work.Name)) != uint.MaxValue) return false;
+        var error = Marshal.GetLastWin32Error();
+        if (error is not (2 or 3) || !current() || !queue.IsCurrent(deletion) ||
+            ProjectedRowExists(viewWindow, work.Name, current) || !current() || !queue.IsCurrent(deletion))
+            return false;
+        LogProjectedExperiment($"superseded-creation path={path};owner={viewWindow:X};name={work.Name};sequence={work.Sequence};delete-sequence={deletion.Sequence}");
+        return true;
     }
 
     private void StopProjectedMonitorExperiment()
@@ -344,5 +360,7 @@ internal sealed partial class ExplorerBrowserHost
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProjectedRemoval(nint self, [MarshalAs(UnmanagedType.LPWStr)] string name, out ulong ticket);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProjectedRename(nint self, [MarshalAs(UnmanagedType.LPWStr)] string oldName, [MarshalAs(UnmanagedType.LPWStr)] string newName, out ulong ticket);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProjectedAcknowledge(nint self, [MarshalAs(UnmanagedType.LPWStr)] string name, ulong ticket);
+    [DllImport("kernel32.dll", EntryPoint = "GetFileAttributesW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetProjectedFileAttributes(string path);
 }
 #endif

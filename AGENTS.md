@@ -35,6 +35,8 @@
 
 - Queued size-completion UPDATEITEM must not republish a confirmed missing physical item after its deletion. Recheck immediately before publication; drop only FILE_NOT_FOUND/PATH_NOT_FOUND, preserve unknown/access-error behavior, and release the queued PIDL. Keep this existence check distinct from file-identity/generation and atomic-delivery guarantees. Trace the size publisher separately from projected watcher delivery when diagnosing stale rows.
 
+- A pending projected creation may be confirmed as superseded only after transport settles and the same live visit retains a later current deletion, with both physical FILE/PATH_NOT_FOUND and actual native-row absence verified. Recheck visit/successor after native reads, preserve the deletion for ordinary dispatch/ticket retirement, and do not generalize timestamp freshness or Changed events into permission to discard work. Distinguish controlled-ingress native checks from natural watcher coverage.
+
 ## Product boundary
 
 - A projected queue is settled only after queued and in-flight work completes and the visit remains valid. On a stale Created/Changed path-not-found result, reconcile native observed removal or verified native-row absence; retain the original queue work for retirement while using the actual removal outcome for confirmation. Do not stop the whole monitor merely because an older property event outlived its file, or silently discard unknown rows without checking them.

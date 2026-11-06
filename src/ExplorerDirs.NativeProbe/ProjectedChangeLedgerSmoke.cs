@@ -68,6 +68,17 @@ internal static class ProjectedChangeLedgerSmoke
         reusable.TryTake(out _); reusable.Release(completed); reusable.Release(completed);
         Require(reusable.IsSettled, "Confirmed release did not settle the visit.");
         Require(reusable.Record(ProjectedChangeKind.Created, "two") is not null && !reusable.Overflowed, "Release did not restore bounded capacity.");
+        var superseded = new ProjectedChangeLedger();
+        var arrival = superseded.Record(ProjectedChangeKind.Created, "short-lived")!;
+        superseded.TryTake(out _);
+        Require(!superseded.TryGetLaterDeletion(arrival, out _), "Unconfirmed creation had no actual successor.");
+        superseded.Record(ProjectedChangeKind.Changed, "short-lived");
+        Require(!superseded.TryGetLaterDeletion(arrival, out _), "A property change was mistaken for deletion.");
+        var deletion = superseded.Record(ProjectedChangeKind.Deleted, "short-lived")!;
+        Require(superseded.TryGetLaterDeletion(arrival, out var successor) && ReferenceEquals(successor, deletion), "Later deletion did not remain queryable for an in-flight creation.");
+        Require(!new ProjectedChangeLedger().TryGetLaterDeletion(arrival, out _), "Another visit supplied a successor.");
+        superseded.Release(arrival);
+        Require(superseded.IsCurrent(deletion) && !superseded.TryGetLaterDeletion(arrival, out _), "Completion lost the successor or revived old work.");
         Console.WriteLine("Projected change ledger: PASS recreation, rename chain, retired visits, 4096 concurrent records; bounded queued/in-flight capacity; overflow retirement; idempotent release; no window or file mutation.");
         return 0;
     }

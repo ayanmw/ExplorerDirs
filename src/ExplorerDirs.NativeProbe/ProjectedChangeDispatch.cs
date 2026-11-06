@@ -10,6 +10,7 @@ internal sealed class ProjectedChangeDispatch(ProjectedChangeLedger queue, int m
     private readonly List<(ProjectedChangeLedger.Work Work, ProjectedChangeLedger.Work Observation, ulong Ticket)> _pending = new();
     private bool _advancing;
     internal int PendingCount => _pending.Count;
+    internal ProjectedChangeLedger.Work? LastUnconfirmed { get; private set; }
 
     internal void Advance(Func<bool> current, Func<ProjectedChangeLedger.Work, ProjectedDispatchResult> dispatch,
         Func<ProjectedChangeLedger.Work, bool> ready, Action<ProjectedChangeLedger.Work, ulong> acknowledge)
@@ -23,12 +24,15 @@ internal sealed class ProjectedChangeDispatch(ProjectedChangeLedger queue, int m
                 if (!queue.Snapshot.Invalidated && current() && !queue.Snapshot.Invalidated) return true;
                 queue.Invalidate();
                 _pending.Clear();
+                LastUnconfirmed = null;
                 return false;
             }
             if (!Active()) return;
+            LastUnconfirmed = null;
             foreach (var (_, observation, _) in _pending)
             {
                 var confirmed = ready(observation);
+                if (!confirmed) LastUnconfirmed = observation;
                 if (!Active() || !confirmed) return;
             }
             foreach (var (work, observation, ticket) in _pending)
@@ -62,6 +66,7 @@ internal sealed class ProjectedChangeDispatch(ProjectedChangeLedger queue, int m
             // Retire it rather than retrying those tickets after an external failure.
             queue.Invalidate();
             _pending.Clear();
+            LastUnconfirmed = null;
             throw;
         }
         finally { _advancing = false; }

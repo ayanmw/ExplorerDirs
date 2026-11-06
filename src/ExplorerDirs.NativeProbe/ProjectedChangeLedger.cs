@@ -57,6 +57,20 @@ internal sealed class ProjectedChangeLedger(int capacity = 8192)
                 (work.Kind != ProjectedChangeKind.Renamed || Matches(work.NewName!, work));
     }
 
+    internal bool TryGetLaterDeletion(Work work, [NotNullWhen(true)] out Work? deletion)
+    {
+        lock (_gate)
+        {
+            deletion = null;
+            if (_invalidated || !ReferenceEquals(work.Owner, this) || !_outstanding.Contains(work) ||
+                !_latest.TryGetValue(work.Name, out var latest) || latest.Sequence <= work.Sequence ||
+                latest.Kind != ProjectedChangeKind.Deleted)
+                return false;
+            deletion = latest;
+            return true;
+        }
+    }
+
     internal void Release(Work work)
     {
         lock (_gate)

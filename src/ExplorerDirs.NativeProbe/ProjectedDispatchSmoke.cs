@@ -47,8 +47,10 @@ internal static class ProjectedDispatchSmoke
         Require(dispatched == 8 && dispatcher.PendingCount == 8 && normal.Snapshot.Queued == 9);
         dispatcher.Advance(() => true, _ => { dispatched++; return new ProjectedDispatchResult(0); }, _ => false, (_, _) => throw new InvalidOperationException());
         Require(dispatched == 8);
+        Require(dispatcher.LastUnconfirmed?.Name == "item-0");
         for (var i = 0; i < 4; i++) dispatcher.Advance(() => true, _ => { dispatched++; return new ProjectedDispatchResult(0); }, _ => true, (_, _) => throw new InvalidOperationException());
         Require(dispatched == 17 && dispatcher.PendingCount == 0 && normal.Snapshot == (0, 0, false));
+        Require(dispatcher.LastUnconfirmed is null);
         var replaced = new ProjectedChangeLedger();
         for (var i = 0; i < 17; i++) replaced.Record(ProjectedChangeKind.Deleted, $"recreated-{i}");
         var replacementPump = new ProjectedChangeDispatch(replaced, 8);

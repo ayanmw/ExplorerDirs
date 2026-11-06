@@ -98,6 +98,44 @@ internal static class ProjectedMonitorLifecycleHostProbe
             Wait(() => !Names().Contains("live-return.bin") && ReferenceEquals(Queue(), activeQueue) &&
                 (bool)hostType.GetMethod("IsProjectedUpdateSettled", Instance)!.Invoke(host, null)!, "obsolete property change reconciles deletion without stopping monitor");
             Console.WriteLine("projected-stale-property: PASS queued change reconciles disappeared item without stopping its visit.");
+            var ephemeralName = "ephemeral-confirm.bin";
+            var ephemeralPath = Path.Combine(first, ephemeralName);
+            File.WriteAllBytes(ephemeralPath, [21]);
+            Wait(() => Names().Contains(ephemeralName) &&
+                (bool)hostType.GetMethod("IsProjectedUpdateSettled", Instance)!.Invoke(host, null)!, "ephemeral creation delivered");
+            var timer = (DispatcherTimer)hostType.GetField("_projectedTimer", Instance)!.GetValue(host)!;
+            var watcher = (FileSystemWatcher)hostType.GetField("_projectedWatcher", Instance)!.GetValue(host)!;
+            timer.Stop(); watcher.EnableRaisingEvents = false;
+            var heldQueue = Queue()!;
+            var heldRecord = heldQueue.GetType().GetMethod("Record", Instance)!;
+            var changeKind = assembly.GetType("ExplorerDirs.NativeProbe.ProjectedChangeKind", true)!;
+            // Model a previously delivered creation awaiting its UI observation.
+            // Ingress is controlled here; delivery and row absence are real Shell operations.
+            heldRecord.Invoke(heldQueue, [Enum.Parse(changeKind, "Created"), ephemeralName, null]);
+            var heldArguments = new object?[] { null };
+            Require((bool)heldQueue.GetType().GetMethod("TryTake", Instance)!.Invoke(heldQueue, heldArguments)!, "Could not hold delivered creation.");
+            File.Delete(ephemeralPath);
+            heldRecord.Invoke(heldQueue, [Enum.Parse(changeKind, "Deleted"), ephemeralName, null]);
+            var capability = (nint)hostType.GetField("_projectedBridge", Instance)!.GetValue(host)!;
+            Marshal.ThrowExceptionForHR(At<Removal>(capability, 4)(capability, ephemeralName, out _));
+            Wait(() =>
+            {
+                Marshal.ThrowExceptionForHR(At<DeliveryStatus>(capability, 12)(capability, out var pending));
+                return pending == 0 && !Names().Contains(ephemeralName);
+            }, "actual removal before old creation observation");
+            var confirm = hostType.GetMethod("ConfirmProjectedSupersededCreation", Instance)!;
+            var viewWindow = (nint)hostType.GetField("_viewWindow", Instance)!.GetValue(host)!;
+            bool Confirm(bool current) => (bool)confirm.Invoke(host,
+                [heldQueue, heldArguments[0], viewWindow, first, (Func<bool>)(() => current)])!;
+            Require(!Confirm(false) && Confirm(true), "Superseded creation did not require a live visit and actual absence.");
+            File.WriteAllBytes(ephemeralPath, [22]);
+            Require(!Confirm(true), "A physical recreation with no visible row was mistaken for confirmed absence.");
+            File.Delete(ephemeralPath);
+            Require(Confirm(true), "Deleted recreation did not restore the verified absence condition.");
+            heldQueue.GetType().GetMethod("Release", Instance)!.Invoke(heldQueue, [heldArguments[0]]);
+            watcher.EnableRaisingEvents = true; timer.Start();
+            Wait(() => (bool)hostType.GetMethod("IsProjectedUpdateSettled", Instance)!.Invoke(host, null)!, "retained later deletion completes");
+            Console.WriteLine("projected-superseded-creation: PASS actual native absence; live-visit/disk-recreation guards; later deletion retained (controlled ingress).");
             File.WriteAllBytes(Path.Combine(first, "live-return.bin"), [15]);
             Wait(() => Names().Contains("live-return.bin"), "monitor continues after obsolete property change");
             var overflowQueue = Queue()!;
@@ -177,4 +215,6 @@ internal static class ProjectedMonitorLifecycleHostProbe
         Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(pointer), slot * nint.Size));
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int Arrival(nint self, [MarshalAs(UnmanagedType.LPWStr)] string name);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int Counts(nint self, out uint roots, out uint facts);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int Removal(nint self, [MarshalAs(UnmanagedType.LPWStr)] string name, out ulong ticket);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DeliveryStatus(nint self, out uint pending);
 }
