@@ -53,17 +53,19 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunProjectedDeliveryQueueSmoke(D
         HANDLE release = CreateEventW(nullptr, TRUE, FALSE, nullptr);
         std::mutex mutex;
         std::vector<Payload> delivered;
+        std::vector<bool> flushes;
         ~Gate() { if (entered) CloseHandle(entered); if (release) CloseHandle(release); }
     };
-    auto makeQueue = [](size_t capacity, const std::shared_ptr<Gate>& gate)
+    auto makeQueue = [](size_t capacity, const std::shared_ptr<Gate>& gate, size_t batch = 1)
     {
-        return Queue::Create(capacity, [gate](const Payload& payload)
+        return Queue::Create(capacity, [gate](const Payload& payload, bool flush)
         {
             SetEvent(gate->entered);
             if (WaitForSingleObject(gate->release, 2000) != WAIT_OBJECT_0) throw E_FAIL;
             std::lock_guard<std::mutex> lock(gate->mutex);
             gate->delivered.push_back(payload);
-        });
+            gate->flushes.push_back(flush);
+        }, batch);
     };
     auto waitStarted = [](const std::shared_ptr<Gate>& gate)
     { return gate->entered && gate->release && WaitForSingleObject(gate->entered, 2000) == WAIT_OBJECT_0; };
@@ -105,7 +107,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunProjectedDeliveryQueueSmoke(D
         if (!finish(queue, gate) || !bounded || gate->delivered.size() != 1) return E_FAIL;
 
         *stage = 5;
-        queue = Queue::Create(2, [](const Payload&) { throw E_FAIL; });
+        queue = Queue::Create(2, [](const Payload&, bool) { throw E_FAIL; });
         if (queue->Enqueue(first) != S_OK || !queue->WaitIdleForProbe(3000)) return E_FAIL;
         state = queue->Read();
         if (!state.retired || state.running || state.inFlight || state.queued || state.failure != E_FAIL ||
@@ -122,6 +124,13 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunProjectedDeliveryQueueSmoke(D
         if (!lifetime.expired()) return E_FAIL;
         { std::lock_guard<std::mutex> lock(gate->mutex); if (gate->delivered.size() != 1) return E_FAIL; }
         *stage = 7;
+        gate = std::make_shared<Gate>(); queue = makeQueue(16, gate, 4);
+        if (queue->Enqueue(first) != S_OK || !waitStarted(gate)) return E_FAIL;
+        for (LONG event = 2; event <= 10; ++event)
+            if (queue->Enqueue(Payload{ event, {}, {} }) != S_OK) { queue->Retire(); finish(queue, gate); return E_FAIL; }
+        if (!finish(queue, gate) || gate->delivered.size() != 10 ||
+            gate->flushes != std::vector<bool>{ true, false, false, false, true, false, false, false, true, true }) return E_FAIL;
+        *stage = 8;
         return S_OK;
     }
     catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
@@ -4080,6 +4089,7 @@ namespace
             context = _sizeSortContext ? _sizeSortContext->id : 0;
 #endif
             TraceProjectedDeliveryFieldsForProbe("enumerate", 0, context, static_cast<LONG>(flags), _backingPath.c_str());
+            TraceProjectedEnumerationStackForProbe(context);
             FlushProjectedDeliveryTraceForProbe();
 #endif
             ED_SIZE_TRACE("view-enumeration", this, nullptr, flags, 0, 0);
@@ -5362,19 +5372,21 @@ namespace
             {
                 try
                 {
+                    wchar_t chunk[2]{};
+                    const size_t flushBatch = GetEnvironmentVariableW(L"EXPLORERDIRS_PROJECTED_CHUNKED_FLUSH_CONTROL", chunk, ARRAYSIZE(chunk)) == 1 && chunk[0] == L'1' ? 4 : 1;
                     _projectedDelivery = ProjectedDeliveryExperiment::Queue::Create(8192,
-                        [](const ProjectedDeliveryExperiment::Payload& payload)
+                        [](const ProjectedDeliveryExperiment::Payload& payload, bool flush)
                         {
                             // Only immutable absolute PIDL bytes cross threads, never this,
                             // an IShellFolder/IShellView pointer or a window handle.
                             const auto initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
                             if (FAILED(initialized)) throw initialized;
-                            TraceProjectedDeliveryForProbe("enter", payload);
-                            SHChangeNotify(payload.event, SHCNF_IDLIST | SHCNF_FLUSH,
+                            TraceProjectedDeliveryForProbe(flush ? "flush-enter" : "enter", payload);
+                            SHChangeNotify(payload.event, SHCNF_IDLIST | (flush ? SHCNF_FLUSH : SHCNF_FLUSHNOWAIT),
                                 payload.first.data(), payload.second.empty() ? nullptr : payload.second.data());
-                            TraceProjectedDeliveryForProbe("returned", payload);
+                            TraceProjectedDeliveryForProbe(flush ? "flush-returned" : "returned", payload);
                             CoUninitialize();
-                        });
+                        }, flushBatch);
                 }
                 catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
             }
@@ -5439,8 +5451,8 @@ namespace
             char name[1040]{};
             WideCharToMultiByte(CP_UTF8, 0, itemName, -1, name, ARRAYSIZE(name), nullptr, nullptr);
             char line[1280]{};
-            const auto bytes = sprintf_s(line, "%llu %s;pid=%lu;seq=%llu;context=%lu;event=0x%08lX;name=%s\n",
-                GetTickCount64(), stage, GetCurrentProcessId(), sequence, context, static_cast<ULONG>(event), name);
+            const auto bytes = sprintf_s(line, "%llu %s;pid=%lu;tid=%lu;seq=%llu;context=%lu;event=0x%08lX;name=%s\n",
+                GetTickCount64(), stage, GetCurrentProcessId(), GetCurrentThreadId(), sequence, context, static_cast<ULONG>(event), name);
             if (bytes <= 0) return;
             // In particular, SFVM_FSNOTIFY must not perform one file open/write
             // per callback: that materially perturbs the race being measured.
@@ -5490,6 +5502,26 @@ namespace
                 CloseHandle(file);
             }
             catch (const std::bad_alloc&) { }
+        }
+        static void TraceProjectedEnumerationStackForProbe(DWORD context)
+        {
+            if (!GetEnvironmentVariableW(L"EXPLORERDIRS_PROJECTED_DELIVERY_TRACE", nullptr, 0)) return;
+            static std::atomic<ULONG> captures{ 0 };
+            if (++captures > 12) return;
+            void* frames[20]{};
+            const auto count = CaptureStackBackTrace(0, ARRAYSIZE(frames), frames, nullptr);
+            for (USHORT index = 0; index < count; ++index)
+            {
+                HMODULE module = nullptr;
+                wchar_t path[MAX_PATH]{}, label[340]{};
+                // Borrow the mapped module handle only for its name/offset; never FreeLibrary it.
+                if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                    reinterpret_cast<LPCWSTR>(frames[index]), &module) && GetModuleFileNameW(module, path, ARRAYSIZE(path)))
+                    StringCchPrintfW(label, ARRAYSIZE(label), L"%s+0x%llX", PathFindFileNameW(path),
+                        static_cast<ULONGLONG>(reinterpret_cast<UINT_PTR>(frames[index]) - reinterpret_cast<UINT_PTR>(module)));
+                else StringCchPrintfW(label, ARRAYSIZE(label), L"dynamic-or-unmapped:%p", frames[index]);
+                TraceProjectedDeliveryFieldsForProbe("enum-frame", index, context, 0, label);
+            }
         }
         PIDLIST_ABSOLUTE CloneProjectedAbsoluteChild(const SyntheticChild& child)
         {

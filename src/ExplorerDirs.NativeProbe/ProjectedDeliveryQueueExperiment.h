@@ -20,11 +20,11 @@ namespace ProjectedDeliveryExperiment
     class Queue : public std::enable_shared_from_this<Queue>
     {
     public:
-        using Deliver = std::function<void(const Payload&)>;
+        using Deliver = std::function<void(const Payload&, bool)>;
         struct Snapshot { size_t queued; bool inFlight; bool running; bool retired; HRESULT failure; };
 
-        static std::shared_ptr<Queue> Create(size_t capacity, Deliver deliver)
-        { return std::shared_ptr<Queue>(new Queue(capacity, std::move(deliver))); }
+        static std::shared_ptr<Queue> Create(size_t capacity, Deliver deliver, size_t flushBatchSize = 1)
+        { return std::shared_ptr<Queue>(new Queue(capacity, std::move(deliver), flushBatchSize)); }
 
         HRESULT Enqueue(const Payload& payload)
         {
@@ -82,7 +82,8 @@ namespace ProjectedDeliveryExperiment
 
     private:
         struct Context { std::shared_ptr<Queue> queue; HMODULE module; };
-        Queue(size_t capacity, Deliver deliver) : _capacity(capacity), _deliver(std::move(deliver)) { }
+        Queue(size_t capacity, Deliver deliver, size_t flushBatchSize)
+            : _capacity(capacity), _flushBatchSize(flushBatchSize), _deliver(std::move(deliver)) { }
 
         void RetireLocked(HRESULT failure)
         {
@@ -99,9 +100,11 @@ namespace ProjectedDeliveryExperiment
             // OS releases the code-module reference only after this callback returns.
             FreeLibraryWhenCallbackReturns(instance, context->module);
             auto queue = context->queue;
+            size_t sinceFlush = 0;
             for (;;)
             {
                 Payload payload;
+                bool flush = false;
                 {
                     std::lock_guard<std::mutex> lock(queue->_mutex);
                     if (queue->_retired || queue->_pending.empty())
@@ -113,9 +116,11 @@ namespace ProjectedDeliveryExperiment
                     payload = std::move(queue->_pending.front());
                     queue->_pending.pop_front();
                     queue->_inFlight = true;
+                    flush = ++sinceFlush >= queue->_flushBatchSize || queue->_pending.empty();
+                    if (flush) sinceFlush = 0;
                 }
                 HRESULT failure = S_OK;
-                try { queue->_deliver(payload); }
+                try { queue->_deliver(payload, flush); }
                 catch (...) { failure = E_FAIL; }
                 {
                     std::lock_guard<std::mutex> lock(queue->_mutex);
@@ -127,6 +132,7 @@ namespace ProjectedDeliveryExperiment
         }
 
         const size_t _capacity;
+        const size_t _flushBatchSize;
         const Deliver _deliver;
         std::mutex _mutex;
         std::condition_variable _idle;

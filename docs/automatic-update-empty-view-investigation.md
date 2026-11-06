@@ -1,3 +1,13 @@
+## 2026-11-06 Native enumeration stacks and bounded flush control
+
+Experiment only: trace now includes PID/TID and up to 12 enumeration stacks (20 module/RVA frames each). App session output records its UI thread. The opt-in EXPLORERDIRS_PROJECTED_CHUNKED_FLUSH_CONTROL=1 uses flush boundaries every four queued deliveries and always flushes the tail; default remains one. Pure queue stage 7 first failed with unconditional flush, then passed after boundary implementation; all existing queue lifetime/capacity/retirement checks remain.
+
+Evidence: src/.state/projected-enumeration-stack-same-root32.log and projected-enumeration-stack-timeline.log recorded a creation confirmation timeout with latest Changed, no successor deletion, and transport pending zero; actual creation visibility took about 10.6 seconds. This does not justify widening superseded-creation confirmation or relaxing its timeout.
+
+src/.state/projected-chunk4-same-root32.log and projected-chunk4-timeline.log: two same-root processes (32 created files, no 1,025-row filler) completed creation in 7,657/4,757ms and deletion in 1,629/1,930ms, but the full run failed on extra enumeration 5->6. Extra context-1 enumeration was on TID 42552, not UI TID 45568, with windows.storage.dll RVAs 0x27B35C/0x22DA37/0x22D90D and SHCORE.dll+0x43A8C, matching cold-enumeration stack shape. No corresponding managed refresh request was recorded. Stack symbols remain unresolved; this does not identify the initiating Shell task or prove batching fixes latency.
+
+Queue smoke re-run passed. Ordinary HostProbe rebuild passed with zero warnings/errors; App and HostProbe output exclude the experiment entrypoints. Ordinary native SHA256 remains B61059F45CC281131820D22FB831BCF01D1530B70BC6539ACBC2A8C9313399FF. The experiment stays disabled and unpublished. Next: resolve native frames and verify complete App navigation focus separately from selection helper tests.
+
 # 自动变化期间短暂零行：刷新来源调查
 
 ## 2026-11-06 缓冲热回调日志后再次捕获间歇失败

@@ -144,8 +144,9 @@ internal static class AppSessionProcessProbe
                 }, TimeSpan.FromSeconds(30), "Full app did not create its four visible file views.");
                 // FindMainWindow enumerates only this explicit Desktop. A foreign thread's
                 // GetThreadDesktop handle is not borrowed into this process for inspection.
-                GetWindowThreadProcessId(window, out var pid);
+                var uiThread = GetWindowThreadProcessId(window, out var pid);
                 if (pid != child.ProcessId) throw new InvalidOperationException("Owned app window PID changed.");
+                Console.WriteLine($"app-session-ui-thread: pass={pass + 1};pid={pid};tid={uiThread}");
                 string? lastReadiness = null;
                 Wait(() =>
                 {
