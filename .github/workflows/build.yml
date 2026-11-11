@@ -27,6 +27,7 @@ jobs:
           Write-Host "Culture=$((Get-Culture).Name) SystemLocale=$((Get-WinSystemLocale).Name) ConsoleEncoding=$([Console]::OutputEncoding.WebName)"
           dotnet --info
       - name: Build
+        id: app-build
         run: dotnet build .\src\ExplorerDirs.App\ExplorerDirs.App.csproj --configuration Release
       - name: Build host probe
         run: dotnet build .\src\ExplorerDirs.HostProbe\ExplorerDirs.HostProbe.csproj --configuration Release
@@ -45,6 +46,8 @@ jobs:
           path: settings-smoke.log
           if-no-files-found: ignore
       - name: Publish isolation smoke
+        if: ${{ !cancelled() && steps.app-build.outcome == 'success' }}
         run: pwsh -NoProfile -File .\scripts\publish-smoke.ps1
       - name: Folder verb isolation smoke
+        if: ${{ !cancelled() && steps.app-build.outcome == 'success' }}
         run: pwsh -NoProfile -File .\scripts\folder-verb-smoke.ps1

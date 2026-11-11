@@ -734,159 +734,197 @@ if (args.Length == 1 && args[0] == "--windows-explorer-process-identity-smoke")
     return;
 }
 
-ExplorerDirs.SettingsSmoke.EnvironmentChangeMessageSmoke.Run();
-ExplorerDirs.SettingsSmoke.WindowsExplorerProcessIdentitySmoke.Run();
-ExplorerDirs.SettingsSmoke.ShellTabDropSmoke.Run();
-ExplorerDirs.SettingsSmoke.ShellFolderFilterLayoutSmoke.Run();
-ExplorerDirs.SettingsSmoke.ViewStyleWheelRoutingSmoke.Run();
-ExplorerDirs.SettingsSmoke.WindowTitlePreferenceSmoke.Run(
-    Path.Combine(AppContext.BaseDirectory, "window-title-preference-smoke"));
-ExplorerDirs.SettingsSmoke.FullRowSelectionRoutingSmoke.Run();
-ExplorerDirs.SettingsSmoke.SoftRefreshRoutingSmoke.Run();
-ExplorerDirs.SettingsSmoke.ShellRenameWindowGateSmoke.Run();
-HiddenItemsPreferenceSmoke.Run();
-ExplorerDirs.SettingsSmoke.FolderHeaderFlagsSmoke.Run();
-ExplorerDirs.SettingsSmoke.QuickLinkStoreSmoke.Run();
-ExplorerDirs.SettingsSmoke.FolderCreationObservationSmoke.Run();
-ExplorerDirs.SettingsSmoke.ProgramStarterStoreSmoke.Run(
-    Path.Combine(AppContext.BaseDirectory, "program-starter-store-smoke"));
-ExplorerDirs.SettingsSmoke.ProgramStarterArgumentsSmoke.Run();
-ExplorerDirs.SettingsSmoke.QdrProgramImporterSmoke.Run();
-ExplorerDirs.SettingsSmoke.ProgramStarterLauncherSmoke.Run();
-ExplorerDirs.SettingsSmoke.ProgramStarterShortcutSmoke.Run();
-ExplorerDirs.SettingsSmoke.ProgramStarterCommandStateSmoke.Run();
-ExplorerDirs.SettingsSmoke.ProgramStarterEntryCommitSmoke.Run();
-var root = Path.Combine(Path.GetTempPath(), $"ExplorerDirs.SettingsSmoke.{Guid.NewGuid():N}");
+var root = Path.Combine(AppContext.BaseDirectory, $"ExplorerDirs.SettingsSmoke.{Guid.NewGuid():N}");
 Directory.CreateDirectory(root);
-ExplorerDirs.SettingsSmoke.TabStripVisibilitySmoke.Run(root);
-ExplorerDirs.SettingsSmoke.StatusBarVisibilitySmoke.Run(root);
-ExplorerDirs.SettingsSmoke.ViewPresetStoreSmoke.Run(root);
-if (args.Length == 1 && args[0] == "--view-preset-store-smoke")
-{
-    ExplorerDirs.SettingsSmoke.ViewPresetStoreSmoke.Run(root);
-    Console.WriteLine("Named view preset store smoke: PASS");
-    return;
-}
-if (args.Length == 1 && args[0] == "--shell-location-qdr-smoke")
-{
-    ExplorerDirs.SettingsSmoke.ShellLocationIdentitySmoke.Run();
-    QdrImportSmoke.Run(root);
-    Console.WriteLine("Shell location and Q-Dir import smoke: PASS");
-    return;
-}
-ExplorerDirs.SettingsSmoke.ShellSelectionRestoreGateSmoke.Run();
-ExplorerDirs.SettingsSmoke.ShellSelectionBatchRestoreSmoke.Run();
-ExplorerDirs.SettingsSmoke.ShellFilteredSelectionNavigationSmoke.Run();
-ExplorerDirs.SettingsSmoke.ShellColumnValueMenuValuesSmoke.Run();
-ExplorerDirs.SettingsSmoke.ShellFocusRestoreGateSmoke.Run();
-ShellDirectoryRefreshRecoverySmoke.Run();
-ExplorerDirs.SettingsSmoke.ShellLocationIdentitySmoke.Run();
-ExplorerDirs.SettingsSmoke.ShellTabNavigationHistorySmoke.Run();
-ExplorerDirs.SettingsSmoke.ShellSelectionSizeRefreshGateSmoke.Run();
-PaneTreeSessionSmoke.Run(root);
-FocusTraversalSmoke.Run();
-var ini = Path.Combine(root, "ExplorerDirs.ini");
-var legacy = Path.Combine(root, "session.json");
-var store = new SessionStore(ini, legacy);
-var sortKey = new PropertyKeyState(Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 10);
-var groupKey = new PropertyKeyState(Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 12);
-var mutableSorts = new List<SortColumnState> { new(sortKey, 1) };
-var cachedView = new ViewState(4, 16, mutableSorts, groupKey, true).Copy();
-mutableSorts.Clear();
-var first = new TabSettings(@"C:\项目=测试", new ViewState(4, 16,
-    [new SortColumnState(sortKey, -1)], groupKey, false));
-var second = new TabSettings(@"C:\项目=测试", ViewState.Default(6));
-var state = new SessionState(2, 3, [[first, second], [], [], []]);
-var shellSessionState = state with
-{
-    Panes = [[new TabSettings("shell:RecycleBinFolder", ViewState.Default())], [], [], []],
-    ActiveTabIndices = [0, 0, 0, 0]
-};
-var shellSessionText = SessionStore.Render(shellSessionState);
-var shellSessionRoundTrip = SessionStore.Parse(shellSessionText);
-Check(shellSessionRoundTrip?.Panes[0][0].Path == "shell:RecycleBinFolder" &&
-      shellSessionText.Contains("FormatVersion=15", StringComparison.Ordinal),
-    "supported Shell parsing identities round-trip in the existing session format");
-
+var suite = new SmokeSuite(Console.Out);
 try
 {
-    ShellItemCountsSmoke.Run();
-    ShellDirectoryChangeBatchSmoke.Run();
-    ExplorerDirs.SettingsSmoke.ShellRefreshRequestSmoke.Run();
-    ExplorerDirs.SettingsSmoke.ShellRefreshCompletionSmoke.Run();
-    ExplorerDirs.SettingsSmoke.ShellSelectionRecoverySuppressionSmoke.Run();
-    ShellChangedItemNotificationBatchSmoke.Run();
-    ShellDirectoryChangeQueueSmoke.Run();
-    ShellDirectoryChangeMonitorOptionsSmoke.Run();
-    ShellDirectoryWatcherRecoverySmoke.Run();
-    ExplorerDirs.SettingsSmoke.DirectoryWatcherStartupSmoke.RunAsync().GetAwaiter().GetResult();
-    DirectoryMonitorStartupSmoke.Run();
-    ShellCreatedItemNotificationSmoke.Run();
-    ShellNewFolderRefreshGateSmoke.Run();
-    ShellNewFolderEditGateSmoke.Run();
-    ExplorerDirs.SettingsSmoke.CreatedFileSelectionRequestSmoke.Run();
-    ExplorerPaneVisibilitySmoke.Run();
-    ShellTreeMiddleClickSmoke.Run();
-    ShellTreeLocationRouteSmoke.Run();
-    ShellMiddleClickTargetSmoke.Run();
-    PreviewPaneSessionSmoke.Run(root);
-    ShellCreateNotificationBatchSmoke.Run();
-    ShellDeleteNotificationBatchSmoke.Run();
-    ShellViewReadinessSmoke.Run();
-    ShellHistorySmoke.Run();
-    AddressPathHistorySmoke.Run();
-    ClassicAddressBarPathSmoke.Run();
-    Console.WriteLine("Classic address bar path smoke: PASS");
-    AddressPathMenuSmoke.Run();
-    QDirNewFolderShortcutSmoke.Run();
-    Console.WriteLine("Q-Dir new folder shortcut smoke: PASS");
-    SelectedPathsClipboardSmoke.Run();
-    Console.WriteLine("Selected paths clipboard smoke: PASS");
-    DiskSpaceSmoke.Run(root).GetAwaiter().GetResult();
-    ShellFileCommandsSmoke.Run();
-    ShellCommandRefreshGateSmoke.Run();
-    ShellRenameKeyRoutingSmoke.Run();
-    NativeShellCommandSmoke.Run();
-    NativeColumnSmoke.Run();
-    QdrLayoutSmoke.Run();
-    QdrImportSmoke.Run(root);
-    QdrExportSmoke.Run(root);
-    QdrProportionsSmoke.Run();
-    DefaultViewSmoke.Run(root);
+    if (args.Length == 1 && args[0] == "--view-preset-store-smoke")
+    {
+        suite.Run("ViewPresetStoreSmoke.Run", () => ExplorerDirs.SettingsSmoke.ViewPresetStoreSmoke.Run(root));
+        return;
+    }
+    if (args.Length == 1 && args[0] == "--shell-location-qdr-smoke")
+    {
+        suite.Run("ShellLocationIdentitySmoke.Run", () => ExplorerDirs.SettingsSmoke.ShellLocationIdentitySmoke.Run());
+        suite.Run("QdrImportSmoke.Run", () => QdrImportSmoke.Run(root));
+        return;
+    }
+    // Keep independent cases outside the shared settings scenario so one
+    // failure cannot hide the remaining cases. Run serially for native state.
+    suite.Run("SmokeSuiteSmoke.Run", SmokeSuiteSmoke.Run);
+    suite.Run("EnvironmentChangeMessageSmoke.Run", () => ExplorerDirs.SettingsSmoke.EnvironmentChangeMessageSmoke.Run());
+    suite.Run("WindowsExplorerProcessIdentitySmoke.Run", () => ExplorerDirs.SettingsSmoke.WindowsExplorerProcessIdentitySmoke.Run());
+    suite.Run("ShellTabDropSmoke.Run", () => ExplorerDirs.SettingsSmoke.ShellTabDropSmoke.Run());
+    suite.Run("ShellFolderFilterLayoutSmoke.Run", () => ExplorerDirs.SettingsSmoke.ShellFolderFilterLayoutSmoke.Run());
+    suite.Run("ViewStyleWheelRoutingSmoke.Run", () => ExplorerDirs.SettingsSmoke.ViewStyleWheelRoutingSmoke.Run());
+    suite.Run("WindowTitlePreferenceSmoke.Run", () => ExplorerDirs.SettingsSmoke.WindowTitlePreferenceSmoke.Run(
+        Path.Combine(AppContext.BaseDirectory, "window-title-preference-smoke")));
+    suite.Run("FullRowSelectionRoutingSmoke.Run", () => ExplorerDirs.SettingsSmoke.FullRowSelectionRoutingSmoke.Run());
+    suite.Run("SoftRefreshRoutingSmoke.Run", () => ExplorerDirs.SettingsSmoke.SoftRefreshRoutingSmoke.Run());
+    suite.Run("ShellRenameWindowGateSmoke.Run", () => ExplorerDirs.SettingsSmoke.ShellRenameWindowGateSmoke.Run());
+    suite.Run("HiddenItemsPreferenceSmoke.Run", () => HiddenItemsPreferenceSmoke.Run());
+    suite.Run("FolderHeaderFlagsSmoke.Run", () => ExplorerDirs.SettingsSmoke.FolderHeaderFlagsSmoke.Run());
+    suite.Run("QuickLinkStoreSmoke.Run", () => ExplorerDirs.SettingsSmoke.QuickLinkStoreSmoke.Run());
+    suite.Run("FolderCreationObservationSmoke.Run", () => ExplorerDirs.SettingsSmoke.FolderCreationObservationSmoke.Run());
+    suite.Run("ProgramStarterStoreSmoke.Run", () => ExplorerDirs.SettingsSmoke.ProgramStarterStoreSmoke.Run(
+        Path.Combine(AppContext.BaseDirectory, "program-starter-store-smoke")));
+    suite.Run("ProgramStarterArgumentsSmoke.Run", () => ExplorerDirs.SettingsSmoke.ProgramStarterArgumentsSmoke.Run());
+    suite.Run("QdrProgramImporterSmoke.Run", () => ExplorerDirs.SettingsSmoke.QdrProgramImporterSmoke.Run());
+    suite.Run("ProgramStarterLauncherSmoke.Run", () => ExplorerDirs.SettingsSmoke.ProgramStarterLauncherSmoke.Run());
+    suite.Run("ProgramStarterShortcutSmoke.Run", () => ExplorerDirs.SettingsSmoke.ProgramStarterShortcutSmoke.Run());
+    suite.Run("ProgramStarterCommandStateSmoke.Run", () => ExplorerDirs.SettingsSmoke.ProgramStarterCommandStateSmoke.Run());
+    suite.Run("ProgramStarterEntryCommitSmoke.Run", () => ExplorerDirs.SettingsSmoke.ProgramStarterEntryCommitSmoke.Run());
+    suite.Run("TabStripVisibilitySmoke.Run", () => ExplorerDirs.SettingsSmoke.TabStripVisibilitySmoke.Run(NewFixture("TabStripVisibility")));
+    suite.Run("StatusBarVisibilitySmoke.Run", () => ExplorerDirs.SettingsSmoke.StatusBarVisibilitySmoke.Run(NewFixture("StatusBarVisibility")));
+    suite.Run("ViewPresetStoreSmoke.Run", () => ExplorerDirs.SettingsSmoke.ViewPresetStoreSmoke.Run(NewFixture("ViewPresetStore")));
+    suite.Run("ShellSelectionRestoreGateSmoke.Run", () => ExplorerDirs.SettingsSmoke.ShellSelectionRestoreGateSmoke.Run());
+    suite.Run("ShellSelectionBatchRestoreSmoke.Run", () => ExplorerDirs.SettingsSmoke.ShellSelectionBatchRestoreSmoke.Run());
+    suite.Run("ShellFilteredSelectionNavigationSmoke.Run", () => ExplorerDirs.SettingsSmoke.ShellFilteredSelectionNavigationSmoke.Run());
+    suite.Run("ShellColumnValueMenuValuesSmoke.Run", () => ExplorerDirs.SettingsSmoke.ShellColumnValueMenuValuesSmoke.Run());
+    suite.Run("ShellFocusRestoreGateSmoke.Run", () => ExplorerDirs.SettingsSmoke.ShellFocusRestoreGateSmoke.Run());
+    suite.Run("ShellDirectoryRefreshRecoverySmoke.Run", () => ShellDirectoryRefreshRecoverySmoke.Run());
+    suite.Run("ShellLocationIdentitySmoke.Run", () => ExplorerDirs.SettingsSmoke.ShellLocationIdentitySmoke.Run());
+    suite.Run("ShellTabNavigationHistorySmoke.Run", () => ExplorerDirs.SettingsSmoke.ShellTabNavigationHistorySmoke.Run());
+    suite.Run("ShellSelectionSizeRefreshGateSmoke.Run", () => ExplorerDirs.SettingsSmoke.ShellSelectionSizeRefreshGateSmoke.Run());
+    suite.Run("PaneTreeSessionSmoke.Run", () => PaneTreeSessionSmoke.Run(NewFixture("PaneTreeSession")));
+    suite.Run("FocusTraversalSmoke.Run", () => FocusTraversalSmoke.Run());
+    suite.Run("ShellItemCountsSmoke.Run", () => ShellItemCountsSmoke.Run());
+    suite.Run("ShellDirectoryChangeBatchSmoke.Run", () => ShellDirectoryChangeBatchSmoke.Run());
+    suite.Run("ShellRefreshRequestSmoke.Run", () => ExplorerDirs.SettingsSmoke.ShellRefreshRequestSmoke.Run());
+    suite.Run("ShellRefreshCompletionSmoke.Run", () => ExplorerDirs.SettingsSmoke.ShellRefreshCompletionSmoke.Run());
+    suite.Run("ShellSelectionRecoverySuppressionSmoke.Run", () => ExplorerDirs.SettingsSmoke.ShellSelectionRecoverySuppressionSmoke.Run());
+    suite.Run("ShellChangedItemNotificationBatchSmoke.Run", () => ShellChangedItemNotificationBatchSmoke.Run());
+    suite.Run("ShellDirectoryChangeQueueSmoke.Run", () => ShellDirectoryChangeQueueSmoke.Run());
+    suite.Run("ShellDirectoryChangeMonitorOptionsSmoke.Run", () => ShellDirectoryChangeMonitorOptionsSmoke.Run());
+    suite.Run("ShellDirectoryWatcherRecoverySmoke.Run", () => ShellDirectoryWatcherRecoverySmoke.Run());
+    suite.Run("DirectoryWatcherStartupSmoke.RunAsync", () => ExplorerDirs.SettingsSmoke.DirectoryWatcherStartupSmoke.RunAsync().GetAwaiter().GetResult());
+    suite.Run("DirectoryMonitorStartupSmoke.Run", () => DirectoryMonitorStartupSmoke.Run());
+    suite.Run("ShellCreatedItemNotificationSmoke.Run", () => ShellCreatedItemNotificationSmoke.Run());
+    suite.Run("ShellNewFolderRefreshGateSmoke.Run", () => ShellNewFolderRefreshGateSmoke.Run());
+    suite.Run("ShellNewFolderEditGateSmoke.Run", () => ShellNewFolderEditGateSmoke.Run());
+    suite.Run("CreatedFileSelectionRequestSmoke.Run", () => ExplorerDirs.SettingsSmoke.CreatedFileSelectionRequestSmoke.Run());
+    suite.Run("ExplorerPaneVisibilitySmoke.Run", () => ExplorerPaneVisibilitySmoke.Run());
+    suite.Run("ShellTreeMiddleClickSmoke.Run", () => ShellTreeMiddleClickSmoke.Run());
+    suite.Run("ShellTreeLocationRouteSmoke.Run", () => ShellTreeLocationRouteSmoke.Run());
+    suite.Run("ShellMiddleClickTargetSmoke.Run", () => ShellMiddleClickTargetSmoke.Run());
+    suite.Run("PreviewPaneSessionSmoke.Run", () => PreviewPaneSessionSmoke.Run(NewFixture("PreviewPaneSession")));
+    suite.Run("ShellCreateNotificationBatchSmoke.Run", () => ShellCreateNotificationBatchSmoke.Run());
+    suite.Run("ShellDeleteNotificationBatchSmoke.Run", () => ShellDeleteNotificationBatchSmoke.Run());
+    suite.Run("ShellViewReadinessSmoke.Run", () => ShellViewReadinessSmoke.Run());
+    suite.Run("ShellHistorySmoke.Run", () => ShellHistorySmoke.Run());
+    suite.Run("AddressPathHistorySmoke.Run", () => AddressPathHistorySmoke.Run());
+    suite.Run("ClassicAddressBarPathSmoke.Run", () => ClassicAddressBarPathSmoke.Run());
+    suite.Run("AddressPathMenuSmoke.Run", () => AddressPathMenuSmoke.Run());
+    suite.Run("QDirNewFolderShortcutSmoke.Run", () => QDirNewFolderShortcutSmoke.Run());
+    suite.Run("SelectedPathsClipboardSmoke.Run", () => SelectedPathsClipboardSmoke.Run());
+    suite.Run("DiskSpaceSmoke.Run", () => DiskSpaceSmoke.Run(NewFixture("DiskSpace")).GetAwaiter().GetResult());
+    suite.Run("ShellFileCommandsSmoke.Run", () => ShellFileCommandsSmoke.Run());
+    suite.Run("ShellCommandRefreshGateSmoke.Run", () => ShellCommandRefreshGateSmoke.Run());
+    suite.Run("ShellRenameKeyRoutingSmoke.Run", () => ShellRenameKeyRoutingSmoke.Run());
+    suite.Run("NativeShellCommandSmoke.Run", () => NativeShellCommandSmoke.Run());
+    suite.Run("NativeColumnSmoke.Run", () => NativeColumnSmoke.Run());
+    suite.Run("QdrLayoutSmoke.Run", () => QdrLayoutSmoke.Run());
+    suite.Run("QdrImportSmoke.Run", () => QdrImportSmoke.Run(NewFixture("QdrImport")));
+    suite.Run("QdrExportSmoke.Run", () => QdrExportSmoke.Run(NewFixture("QdrExport")));
+    suite.Run("QdrProportionsSmoke.Run", () => QdrProportionsSmoke.Run());
+    suite.Run("DefaultViewSmoke.Run", () => DefaultViewSmoke.Run(NewFixture("DefaultView")));
+    suite.Run("WorkspaceCatalogSmoke.Run", () => WorkspaceCatalogSmoke.Run(NewFixture("WorkspaceCatalog")));
+    suite.Run("WindowSessionRegistrySmoke.Run", () => ExplorerDirs.SettingsSmoke.WindowSessionRegistrySmoke.Run(NewFixture("WindowSessionRegistry")));
+    suite.Run("DesktopWorkspaceShortcutSmoke.Run", () => ExplorerDirs.SettingsSmoke.DesktopWorkspaceShortcutSmoke.Run(NewFixture("DesktopWorkspaceShortcut")));
+    suite.Run("QdrViewSmoke.Run", () => QdrViewSmoke.Run());
+    suite.Run("ViewStyleWheelSmoke.Run", () => ViewStyleWheelSmoke.Run());
+    suite.Run("ShellQuickFilterSmoke.Run", () => ShellQuickFilterSmoke.Run());
+    suite.Run("ShellColumnValueFilterReaderSmoke.Run", () => ShellColumnValueFilterReaderSmoke.Run());
+    suite.Run("ShellColumnHeaderArrowHitTestSmoke.Run", () => ExplorerDirs.SettingsSmoke.ShellColumnHeaderArrowHitTestSmoke.Run());
+    suite.Run("QuickFilterEnumerationGateSmoke.Run", () => QuickFilterEnumerationGateSmoke.Run());
+    suite.Run("FileViewExportSmoke.Run", () => FileViewExportSmoke.Run());
+    suite.Run("FileViewPrintSmoke.Run", () => FileViewPrintSmoke.Run());
+    suite.Run("PhotoPrintSelectionSmoke.Run", () => ExplorerDirs.SettingsSmoke.PhotoPrintSelectionSmoke.Run());
+    suite.Run("PhotoPrintLayoutSmoke.Run", () => ExplorerDirs.SettingsSmoke.PhotoPrintLayoutSmoke.Run());
+    suite.Run("PhotoPrintImageLoaderSmoke.Run", () => ExplorerDirs.SettingsSmoke.PhotoPrintImageLoaderSmoke.Run());
+    suite.Run("PhotoPrintPreviewGateSmoke.Run", () => ExplorerDirs.SettingsSmoke.PhotoPrintPreviewGateSmoke.Run());
+    suite.Run("PhotoPrintWindowMarkupSmoke.Run", () => ExplorerDirs.SettingsSmoke.PhotoPrintWindowMarkupSmoke.Run());
+    suite.Run("PaneThemeMarkupSmoke.Run", () => PaneThemeMarkupSmoke.Run());
+    suite.Run("ThemePreferenceSmoke.CheckSemanticBrushRoles", () => ExplorerDirs.SettingsSmoke.ThemePreferenceSmoke.CheckSemanticBrushRoles());
+    suite.Run("ViewStyleIconSmoke.Run", () => ExplorerDirs.SettingsSmoke.ViewStyleIconSmoke.Run());
+    suite.Run("ExplorerChromeIconSmoke.Run", () => ExplorerDirs.SettingsSmoke.ExplorerChromeIconSmoke.Run());
+    suite.Run("NativeShellTreeIconFallbackSmoke.Run", () => ExplorerDirs.SettingsSmoke.NativeShellTreeIconFallbackSmoke.Run());
+    suite.Run("ShellIconProviderSmoke.Run", () => ExplorerDirs.SettingsSmoke.ShellIconProviderSmoke.Run());
+    suite.Run("QuickFilterSessionSmoke.Run", () => QuickFilterSessionSmoke.Run(NewFixture("QuickFilterSession")));
+    suite.Run("QuickFilterFavoritesSmoke.Run", () => QuickFilterFavoritesSmoke.Run(NewFixture("QuickFilterFavorites")));
+    suite.Run("QuickFilterHistoryStoreSmoke.Run", () => QuickFilterHistoryStoreSmoke.Run(NewFixture("QuickFilterHistoryStore")));
+    suite.Run("TabHoverActivationSmoke.Run", () => TabHoverActivationSmoke.Run(NewFixture("TabHoverActivation")));
+    suite.Run("NewTabLocationSmoke.Run", () => ExplorerDirs.SettingsSmoke.NewTabLocationSmoke.Run());
+    suite.Run("WindowPlacementSmoke.Run", () => ExplorerDirs.SettingsSmoke.WindowPlacementSmoke.Run(NewFixture("WindowPlacement")));
+    suite.Run("CrossPaneTabTransferSmoke.Run", () => ExplorerDirs.SettingsSmoke.CrossPaneTabTransferSmoke.Run());
+    suite.Run("QDirBlankTabDoubleClickSmoke.Run", () => QDirBlankTabDoubleClickSmoke.Run());
+    suite.Run("ViewCaptureGenerationSmoke.Run", () => ExplorerDirs.SettingsSmoke.ViewCaptureGenerationSmoke.Run());
+    suite.Run("WindowBackgroundOperationSmoke.RunAsync", () => ExplorerDirs.SettingsSmoke.WindowBackgroundOperationSmoke.RunAsync().GetAwaiter().GetResult());
+    suite.Run("ViewStateRestoreSmoke.Run", () => ExplorerDirs.SettingsSmoke.ViewStateRestoreSmoke.Run());
+    suite.Run("FilterAttachmentSmoke.Run", () => ExplorerDirs.SettingsSmoke.FilterAttachmentSmoke.Run());
+    suite.Run("ShellMenuTargetTrackerSmoke.Run", () => ShellMenuTargetTrackerSmoke.Run());
+    suite.Run("RestartShortcutSmoke.Run", () => ExplorerDirs.SettingsSmoke.RestartShortcutSmoke.Run());
+    suite.Run("ShellStatusCountRefreshGateSmoke.Run", () => ShellStatusCountRefreshGateSmoke.Run());
+    suite.Run("FullScreenPresentationSmoke.Run", () => ExplorerDirs.SettingsSmoke.FullScreenPresentationSmoke.Run());
+    suite.Run("FileViewShortcutDispatchSmoke.Run", () => FileViewShortcutDispatchSmoke.Run());
+    suite.Run("ShellAutoColumnWidthRoutingSmoke.Run", () => ExplorerDirs.SettingsSmoke.ShellAutoColumnWidthRoutingSmoke.Run());
+    suite.Run("ThemePreferenceSmoke.Run", () => ExplorerDirs.SettingsSmoke.ThemePreferenceSmoke.Run(NewFixture("ThemePreference")));
+    suite.Run("NetworkDriveDialogsSmoke.Run", () => ExplorerDirs.SettingsSmoke.NetworkDriveDialogsSmoke.Run());
+    suite.Run("SizeDisplaySmoke.Run", () => ExplorerDirs.SettingsSmoke.SizeDisplaySmoke.Run(NewFixture("SizeDisplay")));
+    suite.Run("Session and portable settings assertions", RunSettingsAssertions);
+    suite.Run("Favorites profile assertions", RunFavoritesAssertions);
+}
+finally
+{
+    suite.Run("Fixture cleanup", () =>
+    {
+        // Only remove this run's unique fixture child of the test output directory.
+        if (Path.GetDirectoryName(Path.GetFullPath(root)) == Path.TrimEndingDirectorySeparator(Path.GetFullPath(AppContext.BaseDirectory)) &&
+            Directory.Exists(root))
+            Directory.Delete(root, recursive: true);
+    });
+    Environment.ExitCode = suite.Complete();
+}
+return;
+
+string NewFixture(string name)
+{
+    var fixture = Path.Combine(root, name);
+    Directory.CreateDirectory(fixture);
+    return fixture;
+}
+
+void RunSettingsAssertions()
+{
+    var ini = Path.Combine(root, "ExplorerDirs.ini");
+    var legacy = Path.Combine(root, "session.json");
+    var store = new SessionStore(ini, legacy);
+    var sortKey = new PropertyKeyState(Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 10);
+    var groupKey = new PropertyKeyState(Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 12);
+    var mutableSorts = new List<SortColumnState> { new(sortKey, 1) };
+    var cachedView = new ViewState(4, 16, mutableSorts, groupKey, true).Copy();
+    mutableSorts.Clear();
+    var first = new TabSettings(@"C:\项目=测试", new ViewState(4, 16,
+        [new SortColumnState(sortKey, -1)], groupKey, false));
+    var second = new TabSettings(@"C:\项目=测试", ViewState.Default(6));
+    var state = new SessionState(2, 3, [[first, second], [], [], []]);
+    var shellSessionState = state with
+    {
+        Panes = [[new TabSettings("shell:RecycleBinFolder", ViewState.Default())], [], [], []],
+        ActiveTabIndices = [0, 0, 0, 0]
+    };
+    var shellSessionText = SessionStore.Render(shellSessionState);
+    var shellSessionRoundTrip = SessionStore.Parse(shellSessionText);
+    Check(shellSessionRoundTrip?.Panes[0][0].Path == "shell:RecycleBinFolder" &&
+          shellSessionText.Contains("FormatVersion=15", StringComparison.Ordinal),
+        "supported Shell parsing identities round-trip in the existing session format");
+
     if (args.Length == 2 && args[0] == "--verify-older-profile-guard")
         DefaultViewSmoke.VerifyOlderReader(args[1], root);
     if (args.Length == 2 && args[0] == "--verify-older-proportions-guard")
         DefaultViewSmoke.VerifyOlderReader(args[1], root, proportionsOnly: true);
-    WorkspaceCatalogSmoke.Run(root);
-    ExplorerDirs.SettingsSmoke.WindowSessionRegistrySmoke.Run(root);
-    ExplorerDirs.SettingsSmoke.DesktopWorkspaceShortcutSmoke.Run(root);
-    QdrViewSmoke.Run();
-    ViewStyleWheelSmoke.Run();
-    ShellQuickFilterSmoke.Run();
-    ShellColumnValueFilterReaderSmoke.Run();
-    ExplorerDirs.SettingsSmoke.ShellColumnHeaderArrowHitTestSmoke.Run();
-    QuickFilterEnumerationGateSmoke.Run();
-    FileViewExportSmoke.Run();
-    FileViewPrintSmoke.Run();
-    ExplorerDirs.SettingsSmoke.PhotoPrintSelectionSmoke.Run();
-    ExplorerDirs.SettingsSmoke.PhotoPrintLayoutSmoke.Run();
-    ExplorerDirs.SettingsSmoke.PhotoPrintImageLoaderSmoke.Run();
-    ExplorerDirs.SettingsSmoke.PhotoPrintPreviewGateSmoke.Run();
-    ExplorerDirs.SettingsSmoke.PhotoPrintWindowMarkupSmoke.Run();
-    PaneThemeMarkupSmoke.Run();
-    ExplorerDirs.SettingsSmoke.ThemePreferenceSmoke.CheckSemanticBrushRoles();
-    ExplorerDirs.SettingsSmoke.ViewStyleIconSmoke.Run();
-    ExplorerDirs.SettingsSmoke.ExplorerChromeIconSmoke.Run();
-    ExplorerDirs.SettingsSmoke.NativeShellTreeIconFallbackSmoke.Run();
-    ExplorerDirs.SettingsSmoke.ShellIconProviderSmoke.Run();
-    QuickFilterSessionSmoke.Run(root);
-    QuickFilterFavoritesSmoke.Run(root);
-    QuickFilterHistoryStoreSmoke.Run(root);
-    TabHoverActivationSmoke.Run(root);
-    ExplorerDirs.SettingsSmoke.NewTabLocationSmoke.Run();
-    ExplorerDirs.SettingsSmoke.WindowPlacementSmoke.Run(root);
-    ExplorerDirs.SettingsSmoke.CrossPaneTabTransferSmoke.Run();
-    QDirBlankTabDoubleClickSmoke.Run();
+
     if (args.Length == 2 && args[0] == "--inspect-qdr")
     {
         var inspectedQdr = QdrImporter.Load(args[1]);
@@ -946,10 +984,7 @@ try
         "column COM structures match Windows SDK layout");
     Check(cachedView.SortColumns.Count == 1 && cachedView.SortColumns[0].Key == sortKey,
           "cached view state keeps independent sort columns after its source changes");
-    ExplorerDirs.SettingsSmoke.ViewCaptureGenerationSmoke.Run();
-    ExplorerDirs.SettingsSmoke.WindowBackgroundOperationSmoke.RunAsync().GetAwaiter().GetResult();
-    ExplorerDirs.SettingsSmoke.ViewStateRestoreSmoke.Run();
-    ExplorerDirs.SettingsSmoke.FilterAttachmentSmoke.Run();
+
     var shellView = new FakeShellViewStateSource
     {
         Mode = 3,
@@ -1334,10 +1369,7 @@ try
           !ShellItemKind.IsFileSystemFolder(0x60400000) &&
           !ShellItemKind.IsFileSystemFolder(0x20000000),
           "only ordinary filesystem folders get the new-tab directory command");
-    ShellMenuTargetTrackerSmoke.Run();
-    ExplorerDirs.SettingsSmoke.RestartShortcutSmoke.Run();
-    ShellStatusCountRefreshGateSmoke.Run();
-    ExplorerDirs.SettingsSmoke.FullScreenPresentationSmoke.Run();
+
     Check(KeyboardShortcuts.Resolve(0x08, 0) == ExplorerShortcut.Parent, "Backspace goes to parent");
     Check(KeyboardShortcuts.Resolve(0x26, 1) == ExplorerShortcut.Parent, "Alt+Up goes to parent");
     Check(KeyboardShortcuts.Resolve(0x25, 1) == ExplorerShortcut.Back, "Alt+Left goes back");
@@ -1445,7 +1477,7 @@ try
     Check(KeyboardShortcuts.Resolve(0x0d, 4) == ExplorerShortcut.OpenSelectionInNewTab &&
           KeyboardShortcuts.Resolve(0x0d, 0) == ExplorerShortcut.None,
           "Shift+Enter opens the selected folder in a new tab without changing plain Enter");
-    FileViewShortcutDispatchSmoke.Run();
+
     Check(KeyboardShortcuts.Resolve(0x41, 6) == ExplorerShortcut.InvertSelection,
           "Ctrl+Shift+A routes to the active Shell view's invert-selection command");
     Check(KeyboardShortcuts.Resolve(0x72, 1) == ExplorerShortcut.SearchSelectedFolder &&
@@ -1498,7 +1530,7 @@ try
           KeyboardShortcuts.Resolve(0x6b, 4) != ExplorerShortcut.AutoFitColumns &&
           KeyboardShortcuts.Resolve(0x64, 2) != ExplorerShortcut.AutoFitColumns,
           "auto-fit columns requires Ctrl+VK_ADD and does not claim other numpad keys");
-    ExplorerDirs.SettingsSmoke.ShellAutoColumnWidthRoutingSmoke.Run();
+
     var searchFocusStops = new[] { 16, 15, 13, 12 };
     Check(FocusTraversal.Move(0, 7, searchFocusStops, false) == (0, 8) &&
           FocusTraversal.Move(0, 8, searchFocusStops, false) == (0, 9) &&
@@ -2466,10 +2498,7 @@ try
     Check(!uiStore.Load() && uiStore.LoadWarning is null,
           "recovered appearance settings can be saved cleanly");
 
-    ExplorerDirs.SettingsSmoke.ThemePreferenceSmoke.Run(root);
-    ExplorerDirs.SettingsSmoke.NetworkDriveDialogsSmoke.Run();
     ExplorerDirs.SettingsSmoke.ThemePreferenceSmoke.CheckResolution();
-    ExplorerDirs.SettingsSmoke.SizeDisplaySmoke.Run(root);
 
     var treeIni = Path.Combine(root, "NavigationTree.ini");
     var treeStore = new PortableBooleanPreference(treeIni, "NavigationTree", "Visible", "目录树");
@@ -2528,6 +2557,12 @@ try
     Check(Directory.GetFiles(root, "PinnedTabs.ini.invalid-*.bak").Length == 1,
           "invalid pinned tab file is backed up before recovery");
 
+    Console.WriteLine("Session settings smoke: PASS");
+}
+
+void RunFavoritesAssertions()
+{
+    const string hugeVersion = "999999999999999999999999999999999999";
     var favoritesIni = Path.Combine(root, "Favorites.ini");
     var favoritesStore = new FavoritesStore(favoritesIni);
     Check(favoritesStore.Load().Count == 0, "missing favorites profile starts empty");
@@ -2575,7 +2610,7 @@ try
     var savedFavorites = favoritesStore.Load();
     Check(savedFavorites.Count == 2 && favoritesStore.LoadWarning is null,
           "recovered favorites can be saved");
-    var futureFavorites = favoriteContent.Replace("FormatVersion=1", "FormatVersion=3", StringComparison.Ordinal);
+    var futureFavorites = favoriteContent.Replace("FormatVersion=1", "FormatVersion=4", StringComparison.Ordinal);
     File.WriteAllText(favoritesIni, futureFavorites);
     Check(favoritesStore.Load().Count == 0 && favoritesStore.LoadWarning is not null,
           "newer favorites format is not interpreted");
@@ -2594,15 +2629,7 @@ try
     try { favoritesStore.Save([@"C:\new"]); throw new Exception("oversized future favorites was overwritten"); }
     catch (IOException) { }
     Check(File.ReadAllText(favoritesIni) == hugeFavorites, "oversized future favorites file stays untouched");
-    Console.WriteLine("Settings smoke: PASS");
-}
-finally
-{
-    // The only recursive cleanup target is this fixed child of the test output directory.
-    var resolved = Path.GetFullPath(root);
-    var expectedParent = Path.GetFullPath(AppContext.BaseDirectory);
-    if (Path.GetDirectoryName(resolved) == Path.TrimEndingDirectorySeparator(expectedParent))
-        Directory.Delete(resolved, true);
+    Console.WriteLine("Favorites profile smoke: PASS");
 }
 
 static void Check(bool condition, string name)
