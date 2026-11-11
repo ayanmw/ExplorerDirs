@@ -9,6 +9,12 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 
+if (args is ["--qdr-program-encoding-smoke"])
+{
+    ExplorerDirs.SettingsSmoke.QdrProgramImporterSmoke.RunEncoding();
+    return;
+}
+
 if (args is ["--mixed-size-sort-session-smoke"])
 {
     ExplorerDirs.SettingsSmoke.MixedSizeSortSessionSmoke.Run();

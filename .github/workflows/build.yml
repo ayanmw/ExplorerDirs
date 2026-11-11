@@ -15,6 +15,17 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
+      - name: Source and runtime diagnostics
+        shell: pwsh
+        run: |
+          Write-Host "Event=$env:GITHUB_EVENT_NAME Ref=$env:GITHUB_REF SHA=$env:GITHUB_SHA"
+          Write-Host "Run=$env:GITHUB_RUN_ID Attempt=$env:GITHUB_RUN_ATTEMPT Runner=$env:RUNNER_OS/$env:RUNNER_ARCH Image=$env:ImageOS/$env:ImageVersion"
+          git log -1 --format="Commit=%H%nCommitted=%cI%nSubject=%s"
+          git status --short
+          [xml]$project = Get-Content .\src\ExplorerDirs.App\ExplorerDirs.App.csproj
+          Write-Host "Configured app version=$($project.Project.PropertyGroup.Version | Where-Object { $_ })"
+          Write-Host "Culture=$((Get-Culture).Name) SystemLocale=$((Get-WinSystemLocale).Name) ConsoleEncoding=$([Console]::OutputEncoding.WebName)"
+          dotnet --info
       - name: Build
         run: dotnet build .\src\ExplorerDirs.App\ExplorerDirs.App.csproj --configuration Release
       - name: Build host probe
@@ -22,7 +33,17 @@ jobs:
       - name: Build native probe
         run: dotnet build .\src\ExplorerDirs.NativeProbe\ExplorerDirs.NativeProbe.csproj --configuration Release
       - name: Settings and logic smoke
-        run: dotnet run --project .\src\ExplorerDirs.SettingsSmoke\ExplorerDirs.SettingsSmoke.csproj --configuration Release
+        shell: pwsh
+        run: |
+          dotnet run --project .\src\ExplorerDirs.SettingsSmoke\ExplorerDirs.SettingsSmoke.csproj --configuration Release 2>&1 | Tee-Object -FilePath settings-smoke.log
+          exit $LASTEXITCODE
+      - name: Preserve settings smoke log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: settings-smoke-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: settings-smoke.log
+          if-no-files-found: ignore
       - name: Publish isolation smoke
         run: pwsh -NoProfile -File .\scripts\publish-smoke.ps1
       - name: Folder verb isolation smoke

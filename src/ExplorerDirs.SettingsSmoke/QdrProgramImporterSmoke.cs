@@ -103,6 +103,17 @@ internal static class QdrProgramImporterSmoke
               previewLine.Contains("%curdir%", StringComparison.Ordinal),
             "Q-Dir import preview shows the working-directory field alongside name, path, and arguments");
 
+        RunEncoding();
+        Console.WriteLine("Q-Dir Program importer smoke: PASS");
+
+        static string Property(object value, string name) =>
+            (string?)value.GetType().GetProperty(name)!.GetValue(value) ?? "";
+    }
+
+    internal static void RunEncoding()
+    {
+        var importerType = typeof(QdrProgramImporter);
+        var parse = importerType.GetMethod("Parse", BindingFlags.Static | BindingFlags.Public)!;
         var readConfiguration = importerType.GetMethod("ReadConfiguration", BindingFlags.Static | BindingFlags.Public)
             ?? throw new Exception("QdrProgramImporter.ReadConfiguration must preserve legacy Windows INI text.");
         var encodingRoot = Path.Combine(Path.GetTempPath(), "explorer-dirs-qdr-encoding-" + Guid.NewGuid().ToString("N"));
@@ -113,14 +124,24 @@ internal static class QdrProgramImporterSmoke
             var legacyPath = Path.Combine(encodingRoot, "Q-Dir.ini");
             var legacyEncoding = Encoding.GetEncoding(GetActiveCodePage(), EncoderFallback.ExceptionFallback,
                 DecoderFallback.ExceptionFallback);
-            File.WriteAllBytes(legacyPath, legacyEncoding.GetBytes("[Program]\r\n中文工具=C:\\工具\\viewer.exe=%curdir%\r\n"));
+            // The runner's ACP may not represent Chinese. Keep strict encoding and
+            // choose a representable non-ASCII fixture instead of replacing characters.
+            var legacyName = new[] { "中文工具", "Café", "Тест", "ツール", "도구", "כלי", "أداة", "เครื่องมือ" }
+                .FirstOrDefault(name =>
+                {
+                    try { _ = legacyEncoding.GetByteCount(name); return true; }
+                    catch (EncoderFallbackException) { return false; }
+                }) ?? "Tool";
+            var legacyExecutable = $@"C:\{legacyName}\viewer.exe";
+            Console.WriteLine($"INFO Q-Dir encoding: ACP={legacyEncoding.CodePage}, encoding={legacyEncoding.WebName}, fixture={legacyName}");
+            File.WriteAllBytes(legacyPath, legacyEncoding.GetBytes($"[Program]\r\n{legacyName}={legacyExecutable}=%curdir%\r\n"));
             var decoded = (string)readConfiguration.Invoke(null, [legacyPath])!;
             var legacyPreview = parse.Invoke(null, [decoded])!;
             var legacyEntries = ((IEnumerable)legacyPreview.GetType().GetProperty("Entries")!.GetValue(legacyPreview)!)
                 .Cast<object>().ToArray();
-            Check(legacyEntries.Length == 1 && Property(legacyEntries[0], "Name") == "中文工具" &&
-                  Property(legacyEntries[0], "ExecutablePath") == @"C:\工具\viewer.exe",
-                "legacy Windows-ACP Q-Dir INI preserves Unicode names and executable paths");
+            Check(legacyEntries.Length == 1 && Property(legacyEntries[0], "Name") == legacyName &&
+                  Property(legacyEntries[0], "ExecutablePath") == legacyExecutable,
+                "legacy Windows-ACP Q-Dir INI preserves representable names and executable paths");
 
             var utf8Path = Path.Combine(encodingRoot, "utf8.ini");
             File.WriteAllText(utf8Path, "[Program]\r\n中文工具=C:\\工具\\viewer.exe=%curdir%\r\n", new UTF8Encoding(true));
@@ -136,7 +157,7 @@ internal static class QdrProgramImporterSmoke
         {
             Directory.Delete(encodingRoot, recursive: true);
         }
-        Console.WriteLine("Q-Dir Program importer smoke: PASS");
+        Console.WriteLine("Q-Dir Program encoding smoke: PASS");
 
         static string Property(object value, string name) =>
             (string?)value.GetType().GetProperty(name)!.GetValue(value) ?? "";
