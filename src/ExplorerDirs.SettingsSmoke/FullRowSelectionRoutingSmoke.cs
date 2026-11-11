@@ -45,7 +45,9 @@ internal static class FullRowSelectionRoutingSmoke
         Check(pane.Contains("_fullRowSelection,", StringComparison.Ordinal) &&
               host.Contains("if (_fullRowSelection is { } fullRowSelection)", StringComparison.Ordinal),
             "new tabs apply the explicit preference when their Shell view is created");
-        Check(host.Contains("ShellGroupingPolicy.ForNativeRestore(_viewState.Copy(), _disableGrouping)", StringComparison.Ordinal) &&
+        // Native restore applies grouping policy after adapting the saved presentation
+        // for the folder-size provider; the tab's cached grouping stays independent.
+        Check(host.Contains("ShellGroupingPolicy.ForNativeRestore(presentation, _disableGrouping)", StringComparison.Ordinal) &&
               host.Contains("ShellGroupingPolicy.PreserveCachedGrouping(captured, _viewState, _disableGrouping)", StringComparison.Ordinal),
             "native suppression preserves each tab's cached grouping for later restoration");
 
