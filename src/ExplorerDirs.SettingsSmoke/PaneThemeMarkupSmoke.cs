@@ -91,12 +91,14 @@ internal static class PaneThemeMarkupSmoke
         Check(accentSetter is not null && selectedAccentSetter is not null &&
               (string?)selectedAccentSetter.Attribute("Property") == "BorderBrush" &&
               (string?)selectedAccentSetter.Attribute("Value") == "{DynamicResource ExplorerDirs.AccentBrush}",
-            "selected tab underline follows the dynamic system accent resource");
+            "selected tab top accent follows the dynamic system accent resource");
         Check((string?)accentSetter!.Attribute("Property") == "BorderBrush" &&
-              style.Descendants(presentation + "Setter").Any(setter =>
+              style.Elements(presentation + "Setter").Any(setter =>
                   (string?)setter.Attribute("Property") == "BorderThickness" &&
-                  (string?)setter.Attribute("Value") == "0,0,0,2"),
-            "tab indicator uses only a two-DIP bottom border without replacing the Shell view");
+                  (string?)setter.Attribute("Value") == "0,3,0,0") &&
+              !style.Element(presentation + "Style.Triggers")!.Descendants(presentation + "Setter").Any(setter =>
+                  (string?)setter.Attribute("Property") == "BorderThickness"),
+            "tab indicator reserves a three-DIP top border with unchanged thickness across selection states");
 
         var mainWindow = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "MainWindow.xaml"));
         var paneMarkup = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PaneControl.xaml"));
